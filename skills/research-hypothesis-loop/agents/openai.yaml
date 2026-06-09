@@ -1,0 +1,12 @@
+interface:
+  display_name: "Research Hypothesis Loop"
+  short_description: "Iterative arXiv-backed AI research planning"
+  default_prompt: "Use $research-hypothesis-loop to investigate related arXiv papers, summarize findings, and refine a research hypothesis."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "arxiv_mcp_server"
+      description: "Search, inspect, download, and read arXiv papers."
+policy:
+  allow_implicit_invocation: true
+
