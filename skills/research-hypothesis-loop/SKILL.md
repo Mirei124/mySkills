@@ -1,36 +1,38 @@
 ---
 name: research-hypothesis-loop
-description: Use this skill for general AI research workflows that need arXiv literature search, local PDF paper reading, structured research-memory updates, contribution and finding synthesis, hypothesis generation, feedback-driven phenomenon tracking, proposal sanity checks, and concise next-step experiment suggestions. Use it when the user asks to investigate papers, compare research ideas, maintain evolving research conclusions, assess whether a current research plan is reasonable, or update conclusions from new observations.
+description: Use this skill for multi-step, arXiv-only AI research loops that investigate literature, maintain research state, compare hypotheses, incorporate experiment feedback, sanity-check proposals, or read current project code as temporary method context for research planning. Trigger it for arXiv investigations, evolving conclusions, evidence-linked hypothesis generation, interpretation of observations, falsifiability review, and code-grounded understanding of the current method or research-level ablation planning. Do not invoke it for pure code debugging, implementation, or a one-paper summary; it reads code without designing or modifying it.
+compatibility: Requires the arxiv_mcp_server MCP. Code grounding requires read-only project filesystem access. Explicit local text PDFs require pdfinfo and pdftotext; scanned PDFs and OCR are unsupported.
 ---
 
 # Research Hypothesis Loop
 
-## Core Behavior
+## Purpose
 
-Use this skill as an iterative research-memory assistant for general AI research. Match the user's language.
+Connect arXiv evidence, user observations, competing hypotheses, conclusions, and discriminating experiments across sessions. Match the user's language. Use `research/research_memo.md` as the default project source of truth; a user-provided path overrides it.
 
-The structured memo is memory support, not the main answer. Use the existing record to reason about updates, then answer with the current progress, changed findings/conclusions, and a concise next-step suggestion. Do not paste the full memo unless the user asks for the record.
+## Route the Task
 
-Default answer shape:
+Classify the request before acting:
 
-- Updated progress
-- Changed findings and conclusions
-- Relation to previous record
-- Priority next experiment
+- **Literature investigation**: search arXiv, synthesize evidence, identify gaps, and update the memo.
+- **Observation or experiment update**: record the observation, revise affected hypotheses and conclusions, append an evolution event, and select the next discriminating experiment.
+- **Hypothesis generation**: produce 2-4 competing explanations, including at least one conservative or null explanation, with distinct predictions.
+- **Proposal sanity check**: evaluate evidence, assumptions, alternatives, confounds, feasibility, falsifiability, and what result would change the conclusion.
+- **Current-method grounding**: inspect relevant code read-only, cite `file:line` for method facts, and hand a research-level ablation brief to the code agent.
+- **State query or temporary explanation**: read the memo when relevant, but do not write it.
+- **Explicit local PDF request**: process a text PDF as described in the workflow; a PDF alone is not an implicit trigger.
+
+## Research State
+
+For state-changing tasks, read or initialize the memo, preserve stable IDs and history, and write the update before answering. Code-derived method details remain session-only and never enter the memo. Do not write for a pure explanation, state query, one-paper summary, or code work. Do not show the full memo unless requested.
 
 ## Progressive Disclosure
 
-Read references only when needed:
+- Read `references/research_workflow.md` for arXiv search, evidence handling, code grounding, hypothesis updates, proposal review, and response shapes.
+- Read `references/research_memo_template.md` whenever creating, loading, updating, or merging the persistent memo.
 
-- `references/research_workflow.md`: read when starting a new literature search, processing local PDFs, checking a research plan, or deciding how to run the update loop.
-- `references/research_memo_template.md`: read when creating or updating a structured living memo, when the conversation is long, or when the user asks to preserve/merge research state.
+## Defaults
 
-## Non-Negotiable Defaults
-
-- External literature search is arXiv-only. Use `mcp__arxiv_mcp_server` tools.
-- Default arXiv search window is the last six months; set `date_from` unless the user asks for classic, historical, or all-time coverage.
-- Default search depth is quick scanning: about 5-8 papers per round.
-- User-provided local PDFs are allowed; read them with local filesystem tools and use whatever text can be extracted.
-- Track literature findings, user observations, inferred conclusions, and evolution events with stable IDs when preserving state.
-- On every new user observation or experiment result, update findings/conclusions first, explain what changed relative to prior IDs, then give only a broad next experiment direction.
-
+- External discovery is arXiv-only; use the recent quick mode unless the user requests another scope.
+- Keep paper claims, user observations, and assistant inferences distinct.
+- Prefer one minimal discriminating experiment over a broad experimental plan.

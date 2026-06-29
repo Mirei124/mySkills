@@ -1,0 +1,82 @@
+[
+  {
+    "query": "帮我调查最近半年 arXiv 上关于 audio-visual token pruning 的工作，把结果整理进项目研究记录，并根据文献形成几个可以被下一轮实验区分的解释。",
+    "should_trigger": true
+  },
+  {
+    "query": "research/research_memo.md 里有我们之前对动态 token 预算的判断。昨天的新结果与 CONC-002 相反，请更新观察、竞争假设和下一项判别实验。",
+    "should_trigger": true
+  },
+  {
+    "query": "We are choosing between attention entropy and embedding similarity for multimodal token allocation. Do a deep recent-arXiv investigation, compare the evidence, and sanity-check which proposal is falsifiable.",
+    "should_trigger": true
+  },
+  {
+    "query": "这个现象已经连续三轮出现：只增加视频 token 会提升 AVQA，增加音频 token 没效果。结合已有研究状态给出竞争解释，不要只讲一个故事。",
+    "should_trigger": true
+  },
+  {
+    "query": "请基于最近六个月 arXiv 论文评估我的方案：用跨模态注意力熵决定剪枝预算。重点检查假设、confound、最小实验和什么结果会让我放弃这个方案。",
+    "should_trigger": true
+  },
+  {
+    "query": "Continue our project research loop. A new ablation weakens HYP-001 but may support the data-artifact explanation; preserve the history and revise the current conclusion.",
+    "should_trigger": true
+  },
+  {
+    "query": "我需要一份系统但限定 arXiv 的近期调研，主题是长视频模型中的动态 token 压缩。找出冲突证据并把结论留给之后的实验反馈继续维护。",
+    "should_trigger": true
+  },
+  {
+    "query": "Our latest negative result invalidates the mechanism we recorded last week. Update the persistent research memo, keep the rejected hypothesis, and design the smallest experiment that separates the remaining alternatives.",
+    "should_trigger": true
+  },
+  {
+    "query": "先读一下项目里的模型和训练入口，整理当前 token pruning 实际怎么做，再结合 memo 中的假设给一个研究层面的最小 ablation，具体实现交给 code agent。",
+    "should_trigger": true
+  },
+  {
+    "query": "把 arXiv:2605.01234 的新证据合并到我们已有的研究结论中，说明它增强或削弱了哪些假设，并更新优先实验。",
+    "should_trigger": true
+  },
+  {
+    "query": "概括一下 arXiv:2604.12345 这篇论文的摘要和主要贡献，两三段就行，不需要扩展检索。",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我读 /data/papers/model.pdf，按章节总结作者做了什么，不需要联系其他论文或维护研究记录。",
+    "should_trigger": false
+  },
+  {
+    "query": "我的 PyTorch 训练跑到 backward 时 CUDA out of memory，帮我检查 train.py 里的 gradient accumulation 有没有写错。",
+    "should_trigger": false
+  },
+  {
+    "query": "用直观例子解释 transformer 的 self-attention，假设读者只学过线性代数。",
+    "should_trigger": false
+  },
+  {
+    "query": "把这段 related work 改得更像论文写作，保留现有引用，不要查新资料。",
+    "should_trigger": false
+  },
+  {
+    "query": "根据 results.csv 画一张不同 token ratio 对准确率影响的折线图，并标注误差条。",
+    "should_trigger": false
+  },
+  {
+    "query": "实现一个按 attention score 选择 top-k token 的 PyTorch 函数，并给它补单元测试。",
+    "should_trigger": false
+  },
+  {
+    "query": "把这篇英文论文的 introduction 翻译成中文，术语 multimodal alignment 保留英文。",
+    "should_trigger": false
+  },
+  {
+    "query": "给 arXiv:2509.00001 生成一条 BibTeX，并确认作者名字的顺序。",
+    "should_trigger": false
+  },
+  {
+    "query": "解释一下为什么这个实验应该报告置信区间，以及 bootstrap 置信区间怎么计算。",
+    "should_trigger": false
+  }
+]

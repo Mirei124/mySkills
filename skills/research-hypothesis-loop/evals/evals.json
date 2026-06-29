@@ -1,0 +1,103 @@
+{
+  "skill_name": "research-hypothesis-loop",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在研究多模态大模型中的音频-视频模态失衡。请快速调查最近六个月的 arXiv 工作，说明已有方法、主要分歧和还没解决的问题，并把研究状态保存到项目中，方便后续实验结果继续更新。",
+      "expected_output": "A quick arXiv-only investigation with a compact synthesis, paragraph-level arXiv sources, and a new project research memo.",
+      "files": [],
+      "expectations": [
+        "External literature discovery uses arXiv only and applies a six-month date window.",
+        "The quick search records 5-8 screened papers and 1-3 full-text papers in research/research_memo.md.",
+        "Literature claims are separated from assistant inference and each literature paragraph ends with arXiv sources.",
+        "The memo contains SEARCH and LIT blocks with stable IDs and an evidence scope for every literature finding.",
+        "The response does not claim absolute novelty or paste the complete memo."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我们准备决定是否把 token pruning 扩展到长视频多模态模型。做一次 deep arXiv 调研，系统比较最近六个月中基于 attention、相似度和动态预算的方法，重点找相互冲突的证据，最后说明哪个关键问题值得先验证。",
+      "expected_output": "A deep, recent arXiv review using complementary queries, explicit conflicting evidence, and a state update.",
+      "files": [],
+      "expectations": [
+        "The deep search uses 2-4 complementary arXiv queries and records 12-20 unique screened papers.",
+        "The memo records 3-6 full-text papers and distinguishes abstract from full-text evidence internally.",
+        "The synthesis identifies agreements, conflicts, limitations, and the decision-relevant evidence gap.",
+        "The final recommendation is a minimal discriminating experiment rather than a full implementation plan.",
+        "All externally discovered sources are arXiv papers."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "项目已有 research/research_memo.md，其初始内容由输入文件提供。新实验发现：把音频 token 保留率从 25% 提到 50% 后 AVQA 准确率没有变化，但把视频 token 保留率从 25% 提到 50% 后提高了 3.2 分。请更新研究状态，比较竞争解释，并给出下一项最能区分这些解释的实验。",
+      "expected_output": "An in-place state evolution that records the observation, updates competing hypotheses and conclusions, and selects one discriminating experiment.",
+      "files": [
+        "evals/files/existing_research_memo.md"
+      ],
+      "expectations": [
+        "The update adds a new OBS block while preserving every pre-existing ID.",
+        "The memo maintains 2-4 competing HYP blocks including at least one conservative, null, or artifact explanation.",
+        "Each active hypothesis has supporting or opposing evidence and a distinct prediction.",
+        "A single-seed result does not give any hypothesis a terminal rejected or contradicted status; the null remains active and status/confidence stay calibrated to replication and uncertainty.",
+        "An append-only EVT block records affected IDs, before and after state, evidence IDs, and rationale.",
+        "The previous NEXT block is retained as completed or superseded as appropriate, and exactly one new NEXT block is current with comparison, controls, separating signals, and a conclusion-changing result."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "我们的语言模型在随机删掉 20% 低注意力视觉 token 后反而更准，但只在小数据集上出现。请形成一组可竞争、可证伪的解释，不要直接认定这是去噪，并把它纳入项目研究 memo。",
+      "expected_output": "A bias-resistant hypothesis set linked to observations, with distinct predictions and a minimal discriminator.",
+      "files": [],
+      "expectations": [
+        "The response proposes 2-4 competing hypotheses rather than a single preferred story.",
+        "At least one hypothesis is a conservative, null, measurement, data, or implementation explanation.",
+        "Every hypothesis has a prediction that differs from at least one alternative.",
+        "The initialized memo stores OBS, HYP, CONC, EVT-001 with Before state set to none, and one current NEXT block.",
+        "The next experiment defines comparison, controls, separating signals, and a conclusion-changing result without inventing unsupported numeric thresholds."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "请 sanity-check 这个研究方案：用跨模态注意力熵来分配音频和视频 token 预算，目标是证明动态预算优于固定比例。基于最近六个月 arXiv 证据，检查关键假设、替代解释、混淆因素、可证伪性和最小验证实验。",
+      "expected_output": "A falsifiability-focused proposal review bounded to recent arXiv evidence.",
+      "files": [],
+      "expectations": [
+        "The review covers evidence, assumptions, competing explanations, confounds, feasibility, falsifiable predictions, and the result that would change the conclusion.",
+        "Novelty is bounded to what was or was not found in the performed arXiv search.",
+        "The response distinguishes literature claims, user proposal claims, and assistant inference.",
+        "The smallest decision-changing experiment is prioritized over a broad ablation schedule.",
+        "The proposal review and resulting hypotheses or conclusions are written to the project memo."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "读取现有研究 memo，简洁告诉我当前最可信和最弱的假设、尚未解决的关键不确定性以及目前排在第一位的实验。不要修改任何状态。",
+      "expected_output": "A concise read-only status report derived from the existing memo.",
+      "files": [
+        "evals/files/existing_research_memo.md"
+      ],
+      "expectations": [
+        "The response reports the active hypothesis states, current conclusion, open uncertainty, and current priority experiment.",
+        "The response references stable memo IDs so the summary can be checked against the record.",
+        "The memo content is not modified and no evolution event is added.",
+        "The complete XML-like memo is not pasted into the response."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "读取输入的当前方法代码，整理实际实现的方法行为，并结合现有研究结论提出一个简单 ablation brief 交给 code agent。不要设计或修改代码，也不要把代码路径、符号、配置值或方法细节写入 research memo。",
+      "expected_output": "A read-only, code-grounded method summary with file citations and a research-level ablation brief, while code details remain absent from persistent state.",
+      "files": [
+        "evals/files/sample_method.py",
+        "evals/files/existing_research_memo.md"
+      ],
+      "expectations": [
+        "The response cites sample_method.py with line numbers and accurately distinguishes implemented behavior from inference.",
+        "Code is treated as temporary current-method context rather than literature, observation, or empirical support.",
+        "The ablation brief contains one changed factor, a control, an expected separating signal, and a conclusion-changing result.",
+        "The response delegates implementation to the code agent without proposing file edits, code architecture, or implementation steps.",
+        "The input code is unchanged, and the memo contains no code path, symbol, configuration value, commit, or implementation detail."
+      ]
+    }
+  ]
+}
