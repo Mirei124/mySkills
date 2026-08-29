@@ -52,6 +52,9 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await page.screenshot({ path: "test-results/selected-node.png", fullPage: true });
   await expect(page.getByRole("complementary")).toContainText("Canvas evidence");
   await expect(page.getByRole("complementary")).toContainText("Metadata");
+  await expect(page.getByRole("complementary")).toContainText("Created");
+  await expect(page.getByRole("complementary")).toContainText("Updated");
+  await expect(page.getByRole("complementary").locator("time")).toHaveCount(2);
   await expect(page.getByRole("complementary")).toContainText("Markdown content");
   await expect(page.getByRole("complementary")).toContainText("[[know/other]]");
   const previousNode = page.getByRole("button", { name: "Previous node" });

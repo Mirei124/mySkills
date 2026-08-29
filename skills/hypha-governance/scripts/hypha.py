@@ -769,6 +769,19 @@ def read_events(home: Path) -> list[dict]:
     return events
 
 
+def node_observation_times(events: list[dict]) -> dict[tuple[str, str], dict[str, str]]:
+    """Derive first/last observation times without making audit data current truth."""
+    times: dict[tuple[str, str], dict[str, str]] = {}
+    for event in events:
+        kind, ident, stamp = event.get("kind"), event.get("id"), event.get("recorded_at")
+        if kind not in {"intent", "know"} or not ident or not isinstance(stamp, str):
+            continue
+        item = times.setdefault((str(kind), str(ident)), {"created_at": stamp, "updated_at": stamp})
+        item["created_at"] = min(item["created_at"], stamp)
+        item["updated_at"] = max(item["updated_at"], stamp)
+    return times
+
+
 def append_session_marker(home: Path, action: str) -> None:
     event = {
         "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -1008,6 +1021,8 @@ def bootstrap(args):
 def view(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
+    events = read_events(home)
+    observation_times = node_observation_times(events)
     relations = graph(tasks, knowledge)
     edges = []
     for task_id, task in tasks.items():
@@ -1030,6 +1045,7 @@ def view(args):
         "tasks": {
             key: {
                 "title": node["title"], "status": node.get("status"), "progress": node.get("progress"),
+                **observation_times.get(("intent", key), {}),
                 "path": str(node["_path"].relative_to(home)), "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
                 "metadata": {field: node.get(field) for field in ("parent", "depends_on", "affects", "when") if field in node},
             } for key, node in tasks.items()
@@ -1037,6 +1053,7 @@ def view(args):
         "knowledge": {
             key: {
                 "title": node["title"], "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
+                **observation_times.get(("know", key), {}),
                 "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
                 "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors") if field in node},
             } for key, node in knowledge.items()
@@ -1044,7 +1061,7 @@ def view(args):
         "edges": edges,
         "redlinks": sorted(relations["redlinks"]),
         "diagnostics": {"redlinks": sorted(relations["redlinks"]), "warnings": []},
-        "events": read_events(home),
+        "events": events,
     }
     template_path = Path(__file__).parents[1] / "templates" / "view.html"
     try:

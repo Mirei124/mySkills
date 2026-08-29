@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
 import "./inspector.css";
 
-export type InspectorNode = { id: string; title: string; type: "task" | "knowledge"; status?: string; claim_kind?: string; progress?: number; path?: string; summary?: string; markdown?: string; metadata?: Record<string, unknown> };
+export type InspectorNode = { id: string; title: string; type: "task" | "knowledge"; status?: string; claim_kind?: string; progress?: number; created_at?: string; updated_at?: string; path?: string; summary?: string; markdown?: string; metadata?: Record<string, unknown> };
 export type InspectorEdge = { from: string; to: string; kind: string };
+
+function NodeTime({ value }: { value?: string }): ReactNode {
+  if (!value) return <>—</>;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return <>{value}</>;
+  return <time dateTime={value} title={value}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(parsed)}</time>;
+}
 
 function RelationList({ title, ids, nodes, onSelectNode }: { title: string; ids: string[]; nodes: InspectorNode[]; onSelectNode: (id: string) => void }) {
   const unique = [...new Set(ids)];
@@ -33,7 +40,7 @@ export function Inspector({ node, nodes, edges, onFocus, onSelectNode, canGoBack
       <RelationList title="Linked knowledge" ids={wiki} nodes={nodes} onSelectNode={onSelectNode} />
       {(metadata.when || metadata.triggers) && <section className="routing-card"><h3>Routing context</h3>{Boolean(metadata.when) && <p><span>When</span>{String(metadata.when)}</p>}{Boolean(metadata.triggers) && <p><span>Triggers</span>{Array.isArray(metadata.triggers) ? metadata.triggers.join(" · ") : String(metadata.triggers)}</p>}</section>}
     </>}
-    <section className="metadata-section"><h3>Metadata</h3><dl><dt>Path</dt><dd>{node.path || "—"}</dd>{extraMetadata.map(([key, value]) => <><dt key={`${key}-term`}>{key.replaceAll("_", " ")}</dt><dd key={key}>{Array.isArray(value) ? value.join(", ") : String(value)}</dd></>)}</dl></section>
+    <section className="metadata-section"><h3>Metadata</h3><dl><dt>Created</dt><dd><NodeTime value={node.created_at} /></dd><dt>Updated</dt><dd><NodeTime value={node.updated_at} /></dd><dt>Path</dt><dd>{node.path || "—"}</dd>{extraMetadata.map(([key, value]) => <><dt key={`${key}-term`}>{key.replaceAll("_", " ")}</dt><dd key={key}>{Array.isArray(value) ? value.join(", ") : String(value)}</dd></>)}</dl></section>
     <div className="inspector-actions"><button onClick={onFocus}>Focus neighborhood</button><button onClick={() => navigator.clipboard?.writeText(node.id)}>Copy ID</button></div>
     <section className="markdown-section"><h3>Markdown content</h3><pre className="markdown">{node.markdown || "(No content)"}</pre></section>
   </>;

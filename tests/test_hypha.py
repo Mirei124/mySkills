@@ -129,6 +129,21 @@ class HyphaCliTest(unittest.TestCase):
         fields = {json.loads(line)["field"] for line in event_file.read_text(encoding="utf-8").splitlines()}
         self.assertIn("body_hash", fields)
 
+    def test_node_observation_times_use_first_and_last_node_events(self):
+        module = runpy.run_path(str(CLI[1]))
+        events = [
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T02:00:00Z"},
+            {"kind": "session", "id": "workspace", "recorded_at": "2026-08-29T02:30:00Z"},
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T01:00:00Z"},
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T03:00:00Z"},
+        ]
+        self.assertEqual(module["node_observation_times"](events), {
+            ("intent", "0001"): {
+                "created_at": "2026-08-29T01:00:00Z",
+                "updated_at": "2026-08-29T03:00:00Z",
+            },
+        })
+
     def test_close_view_and_unmanaged_warning(self):
         self.cli("init")
         self.cli("add", "deliverable")
@@ -151,6 +166,8 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"markdown":', html)
         self.assertIn('"metadata":', html)
         self.assertIn('"generatedAt":', html)
+        self.assertIn('"created_at":', html)
+        self.assertIn('"updated_at":', html)
         task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("progress: 100", "progress: 99"), encoding="utf-8")
         self.assertIn("未托管正式写入", self.cli("lint").stdout)
