@@ -585,6 +585,7 @@ def apply(args):
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
         write_node(target, node, atomic=True); sync(home, by="apply")
+        mark_draft_applied(home, draft)
     print(f"已发布 {target.relative_to(home)}")
 
 
@@ -635,12 +636,33 @@ def previous_session_unclosed(home: Path) -> bool:
     return not (latest.get("kind") == "session" and latest.get("to") == "close")
 
 
+def applied_draft_hashes(home: Path) -> dict[str, str]:
+    """Read the local publication ledger; invalid ledgers never hide a draft."""
+    path = home / ".drafts" / ".applied.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return {str(key): str(item) for key, item in value.items()} if isinstance(value, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def mark_draft_applied(home: Path, draft: Path) -> None:
+    path = home / ".drafts" / ".applied.json"
+    hashes = applied_draft_hashes(home)
+    hashes[str(draft.relative_to(home))] = hashlib.sha256(draft.read_bytes()).hexdigest()
+    atomic_write(path, json.dumps(hashes, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
 def pending_drafts(home: Path) -> list[tuple[Path, str, str, str]]:
     """List recoverable drafts without treating malformed work as formal state."""
     found = []
+    published = applied_draft_hashes(home)
     for path in sorted((home / ".drafts").glob("*.md")):
         try:
             node = read_node(path)
+            current_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            if node.get("kind") in {"know", "task-update"} and published.get(str(path.relative_to(home))) == current_hash:
+                continue
             found.append((path, str(node.get("kind", "missing")), str(node.get("id", "")), node["title"]))
         except (OSError, ValueError) as exc:
             found.append((path, "invalid", "", str(exc)))
@@ -823,14 +845,14 @@ def view(args):
         "tasks": {
             key: {
                 "title": node["title"], "status": node.get("status"), "progress": node.get("progress"),
-                "path": str(node["_path"].relative_to(home)), "summary": node.get("body", "")[:280],
+                "path": str(node["_path"].relative_to(home)), "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
                 "metadata": {field: node.get(field) for field in ("parent", "depends_on", "affects", "when") if field in node},
             } for key, node in tasks.items()
         },
         "knowledge": {
             key: {
                 "title": node["title"], "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
-                "summary": node.get("body", "")[:280],
+                "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
                 "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors") if field in node},
             } for key, node in knowledge.items()
         },

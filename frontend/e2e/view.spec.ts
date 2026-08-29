@@ -22,11 +22,12 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await page.getByRole("button", { name: "任务 DAG" }).click();
   await page.getByRole("button", { name: "知识关系" }).click();
   await page.getByRole("button", { name: "全部关系" }).click();
-  await page.getByRole("button", { name: "高对比" }).click();
   await page.locator("#search").fill("Canvas evidence");
   await page.locator(".results").getByRole("button", { name: /Canvas evidence/ }).click();
   await expect(page.getByRole("complementary")).toContainText("Canvas evidence");
   await expect(page.getByRole("complementary")).toContainText("元数据");
+  await expect(page.getByRole("complementary")).toContainText("Markdown 正文");
+  await expect(page.getByRole("complementary")).toContainText("[[know/other]]");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("complementary")).toContainText("节点详情");
   const canvas = page.getByLabel("Hypha 可交互菌丝关系图");

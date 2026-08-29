@@ -55,6 +55,9 @@ class HyphaCliTest(unittest.TestCase):
         draft = self.workspace / ".hypha" / ".drafts" / "oauth.md"
         draft.write_text("---\nkind: know\nclaim_kind: sourced\nwhen: OAuth refresh fails\ntriggers: [oauth, refresh]\nanchors: [src/source.md#refreshing-tokens]\nevidence:\n  - anchor: src/source.md#refreshing-tokens\n    quote: rotate token safely\naffects: [0001]\n---\n# OAuth token rotation\n\nUse the documented rotation procedure.\n", encoding="utf-8")
         self.cli("apply", str(draft))
+        self.assertIn("没有未 apply 草稿", self.cli("drafts").stdout)
+        draft.write_text(draft.read_text(encoding="utf-8") + "\nchanged after publish\n", encoding="utf-8")
+        self.assertIn("oauth.md", self.cli("drafts").stdout)
         self.assertIn("知识前提：know/oauth", self.cli("show", "0001").stdout)
         self.assertIn("know/oauth", self.cli("why", "oauth").stdout)
         self.cli("lint")
@@ -96,6 +99,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"progress": 100', html)
         self.assertIn('"path": "intent/', html)
         self.assertIn('"summary":', html)
+        self.assertIn('"markdown":', html)
         self.assertIn('"metadata":', html)
         self.assertIn('"generatedAt":', html)
         task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
