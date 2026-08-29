@@ -4,4 +4,6 @@ __pycache__/
 design_docs/mycelial-canvas.md
 design_reference
 frontend/dist
+frontend/node_modules
+frontend/playwright-report
 frontend/test-results

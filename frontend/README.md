@@ -1,5 +1,25 @@
-# Hypha 前端
+# Hypha frontend
 
-此目录保存 Hypha Canvas 的开发源码。发布时运行 `python3 frontend/build_template.py`，把 `src/view.html` 复制成 skill 内唯一的运行时模板 `skills/hypha-governance/templates/view.html`。CLI 本身不依赖 Node，因此生成的 `view.html` 仍可离线、单文件打开。
+This directory contains the source for Hypha's offline task and knowledge graph. The development application uses React, TypeScript, Vite, and React Flow. The shipped skill contains only a generated, self-contained HTML file, so the Python CLI has no Node.js runtime dependency.
 
-React/TypeScript/Vite、ESLint、Vitest 与 Playwright 将只在这里作为开发依赖落地；skill 中只交付构建后的 HTML 模板和 Python CLI。
+## Development
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build:template
+pnpm test:e2e
+```
+
+`pnpm build:template` builds `dist/index.html`, validates the `{{HYPHA_DATA}}` placeholder, and copies the result to `skills/hypha-governance/templates/view.html`.
+
+Generated directories (`node_modules`, `dist`, `test-results`, and `playwright-report`) are disposable and ignored by Git. Do not edit generated HTML directly.
+
+## Maintenance documentation
+
+- [Architecture](docs/ARCHITECTURE.md) explains data flow, source ownership, and safe change boundaries.
+- [Visual system](docs/VISUAL_STYLE.md) records the design language, interaction rules, review checklist, and reference image.
+
+Read both documents before making substantial frontend changes. The visual reference is directional rather than a pixel-perfect specification; preserve its hierarchy and atmosphere while keeping the graph driven by real Hypha data.
