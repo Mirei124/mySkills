@@ -287,7 +287,8 @@ def rebuild_index(home: Path):
     tasks, knowledge = scan(home)
     rows = ["# Hypha index", "", "## Tasks", ""]
     rows += [f"- intent/{task_id} | [{n.get('status')}] | {n['title']}" for task_id, n in sorted(tasks.items())]
-    rows += ["", "## Knowledge", ""]
+    rows += ["", "## Knowledge"]
+    if knowledge: rows.append("")
     for key, node in sorted(knowledge.items()):
         triggers = knowledge_triggers(node)
         rows.append(f"- {key} | {node.get('when', '')} | {', '.join(map(str, triggers))}")
@@ -371,6 +372,14 @@ def add(args):
     with locked(home):
         (home / "intent").mkdir(parents=True, exist_ok=True)
         tasks, knowledge = prepare(home)
+        if args.parent and args.root:
+            raise ValueError("不能同时指定父任务和 --root")
+        if tasks and not args.parent and not args.root:
+            raise ValueError("已有任务；请指定父任务 ID，或用 --root 显式创建独立根任务")
+        duplicate = next((task_id for task_id, node in tasks.items()
+                          if node.get("status") != "dropped" and node["title"].casefold() == args.title.casefold()), None)
+        if duplicate:
+            raise ValueError(f"已有同名任务 {duplicate}；请续接该任务，或使用不同标题")
         numeric = [int(x) for x in tasks if x.isdigit()]
         task_id = f"{(max(numeric, default=0) + 1):04d}"
         slug = re.sub(r"[^\w\-]+", "-", args.title.lower()).strip("-") or task_id
@@ -480,6 +489,18 @@ def load_audit_resolutions(home: Path) -> dict[str, str]:
 
 def audit_candidates(tasks: dict, knowledge: dict) -> list[dict]:
     candidates = []
+    relations = graph(tasks, knowledge)
+    if len(tasks) > 1:
+        for task_id, task in sorted(tasks.items()):
+            connected = (
+                task.get("parent")
+                or task.get("depends_on")
+                or relations["children"].get(task_id)
+                or relations["unlocks"].get(task_id)
+                or relations["premises"].get(task_id)
+            )
+            if not connected:
+                candidates.append({"kind": "isolated-task", "task": task_id})
     for task_id, task in sorted(tasks.items()):
         if task.get("status") not in {"todo", "in_progress", "blocked"}:
             continue
@@ -499,7 +520,10 @@ def audit(home: Path, tasks: dict, knowledge: dict) -> None:
     resolutions = load_audit_resolutions(home)
     unresolved = [candidate for candidate in audit_candidates(tasks, knowledge) if candidate_id(candidate) not in resolutions]
     for candidate in unresolved:
-        print(f"- [{candidate_id(candidate)}] {candidate['task']}: 可能缺 affects/正文链接：{candidate['knowledge']}")
+        if candidate["kind"] == "isolated-task":
+            print(f"- [{candidate_id(candidate)}] {candidate['task']}: 孤立任务；请判断是否应设置 parent/needs，或保留为独立根任务")
+        else:
+            print(f"- [{candidate_id(candidate)}] {candidate['task']}: 可能缺 affects/正文链接：{candidate['knowledge']}")
     if not unresolved:
         print("- 没有未判定的关系候选")
     print("路由预演：")
@@ -538,6 +562,20 @@ def needs(args):
         if errors: raise ValueError("\n".join(errors))
         write_node(node["_path"], node, atomic=True); sync(home, by="cli")
     print(f"{args.id} 依赖 {args.dependency}")
+
+
+def set_parent(args):
+    home = root(args)
+    with locked(home):
+        tasks, knowledge = prepare(home)
+        if args.id not in tasks or args.parent not in tasks: raise ValueError("任务不存在")
+        if args.id == args.parent: raise ValueError("任务不能以自身为父任务")
+        tasks[args.id]["parent"] = args.parent
+        errors = validate(home, tasks, knowledge)
+        if errors: raise ValueError("\n".join(errors))
+        write_node(tasks[args.id]["_path"], tasks[args.id], atomic=True)
+        sync(home, by="cli")
+    print(f"{args.id} 的父任务为 {args.parent}")
 
 
 def apply(args):
@@ -921,6 +959,7 @@ def main():
     p = sub.add_parser("add", help="创建一个 todo 任务", description="任务 ID 自动分配；可选地挂到已有父任务下。")
     p.add_argument("title", help="任务标题")
     p.add_argument("parent", nargs="?", help="可选父任务 ID，例如 0001")
+    p.add_argument("--root", action="store_true", help="已有任务时，显式创建一个独立根任务")
     for name in ("start", "done", "drop"):
         actions = {"start": "开始执行任务", "done": "标记任务完成", "drop": "放弃任务"}
         p = sub.add_parser(name, help=actions[name]); p.add_argument("id", help="任务 ID")
@@ -930,6 +969,8 @@ def main():
     p.add_argument("id", help="任务 ID"); p.add_argument("value", help="阻塞原因")
     p = sub.add_parser("needs", help="声明任务依赖，形成 DAG 边")
     p.add_argument("id", help="依赖方任务 ID"); p.add_argument("dependency", help="必须先完成的任务 ID")
+    p = sub.add_parser("parent", help="为已有任务设置父任务，形成层级边")
+    p.add_argument("id", help="子任务 ID"); p.add_argument("parent", help="父任务 ID")
     p = sub.add_parser("apply", help="校验并原子发布一份草稿")
     p.add_argument("draft", help=".hypha/.drafts/ 下的 Markdown 草稿路径")
     p = sub.add_parser("lint", help="检查结构、证据、链接和路由规则")
@@ -962,6 +1003,7 @@ def main():
         elif args.command == "add": add(args)
         elif args.command in {"start", "progress", "block", "done", "drop"}: task_mutate(args)
         elif args.command == "needs": needs(args)
+        elif args.command == "parent": set_parent(args)
         elif args.command == "apply": apply(args)
         elif args.command == "lint": lint(args)
         elif args.command == "resolve": resolve(args)

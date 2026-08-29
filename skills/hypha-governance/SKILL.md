@@ -18,7 +18,9 @@ Hypha 将持久状态显式化，同时把语义判断留给 agent。CLI 负责�
 
 ## 正确记录工作
 
-- 用 `add <title> [parent]` 创建任务；状态、依赖和进度分别通过 `needs`、`progress`、`block`、`done`、`drop` 维护。
+- 先续接 `next` 返回的运行中任务。一次对话中的补充、视觉微调、修复反馈和验收收尾默认更新同一任务，不要按消息轮次创建节点。
+- 只有出现可独立验收、需要单独调度的工作单元时才用 `add <title> <parent>` 创建子任务。已有任务时，新增独立根任务必须显式使用 `add <title> --root`。
+- 创建时漏设层级可用 `parent <id> <parent>` 补关系；执行顺序用 `needs`，状态和进度用 `progress`、`block`、`done`、`drop` 维护。
 - 正文和知识编辑先写入 `<repo>/.hypha/.drafts/`，再以 `apply <draft>` 发布。草稿会被 Git 跟踪以支持跨机器恢复，不能写入秘密。
 - 正常流程不要直接编辑 `.hypha/intent` 或 `.hypha/know`；兼容路径会被审计，但草稿能避免半成品进入路由。
 - 用 `[[know/...]]` 记录开放知识链接；`affects: [0001]` 只能指向存在的任务 ID。

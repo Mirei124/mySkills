@@ -35,7 +35,7 @@ class HyphaCliTest(unittest.TestCase):
     def test_task_flow_relations_and_sync(self):
         self.cli("init")
         self.cli("add", "first task")
-        self.cli("add", "second task")
+        self.cli("add", "second task", "--root")
         self.cli("needs", "0002", "0001")
         self.cli("done", "0001")
         self.assertIn("0002 second task", self.cli("next").stdout)
@@ -45,6 +45,26 @@ class HyphaCliTest(unittest.TestCase):
         events = list((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
         self.assertTrue(events)
         self.assertNotIn(".observed.json", {path.name for path in (self.workspace / ".hypha" / "snapshots").iterdir()})
+
+    def test_add_requires_explicit_root_or_parent_and_can_reparent(self):
+        self.cli("init")
+        self.cli("add", "umbrella")
+        result = self.cli("add", "independent", ok=False)
+        self.assertIn("请指定父任务 ID，或用 --root", result.stderr)
+        duplicate = self.cli("add", "umbrella", "--root", ok=False)
+        self.assertIn("已有同名任务 0001", duplicate.stderr)
+        self.cli("add", "independent", "--root")
+        self.cli("parent", "0002", "0001")
+        self.assertIn("子任务：0002", self.cli("show", "0001").stdout)
+        self.assertIn("parent: 0001", self.cli("show", "0002").stdout)
+
+    def test_audit_reports_isolated_tasks(self):
+        self.cli("init")
+        self.cli("add", "first")
+        self.cli("add", "second", "--root")
+        output = self.cli("lint", "--audit").stdout
+        self.assertIn("0001: 孤立任务", output)
+        self.assertIn("0002: 孤立任务", output)
 
     def test_apply_evidence_and_show(self):
         self.cli("init")
