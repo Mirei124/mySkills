@@ -86,6 +86,45 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("子任务：0002", self.cli("show", "0001").stdout)
         self.assertIn("parent: 0001", self.cli("show", "0002").stdout)
 
+    def test_parent_progress_is_derived_from_non_dropped_leaves(self):
+        self.cli("init")
+        self.cli("add", "parent")
+        self.cli("progress", "0001", "40")
+        self.cli("add", "first leaf", "0001")
+        parent = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        self.assertNotIn("progress:", parent.read_text(encoding="utf-8"))
+        rejected = self.cli("progress", "0001", "90", ok=False)
+        self.assertIn("请更新叶子节点进度", rejected.stderr)
+        self.cli("progress", "0002", "40")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        self.cli("add", "second leaf", "0001")
+        self.cli("progress", "0003", "80")
+        self.assertIn("progress: 60", self.cli("show", "0001").stdout)
+        self.cli("drop", "0003")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        blocked_done = self.cli("done", "0001", ok=False)
+        self.assertIn("聚合进度为 40%", blocked_done.stderr)
+        self.cli("done", "0002")
+        self.cli("done", "0001")
+        self.assertIn("progress: 100", self.cli("show", "0001").stdout)
+        payload = json.loads(self.cli("list", "--json").stdout)
+        root = next(node for node in payload["nodes"] if node["id"] == "0001")
+        self.assertEqual(100, root["progress"])
+
+    def test_progress_average_is_independent_of_intermediate_grouping(self):
+        module = runpy.run_path(str(CLI[1]))
+        tasks = {
+            "0001": {"status": "in_progress"},
+            "0002": {"status": "done", "progress": 100, "parent": "0001"},
+            "0003": {"status": "in_progress", "parent": "0001"},
+            "0004": {"status": "done", "progress": 100, "parent": "0003"},
+            "0005": {"status": "todo", "progress": 0, "parent": "0003"},
+            "0006": {"status": "todo", "progress": 0, "parent": "0003"},
+        }
+        progresses = module["task_progresses"](tasks)
+        self.assertEqual(50, progresses["0001"])
+        self.assertEqual(33, progresses["0003"])
+
     def test_audit_reports_isolated_tasks(self):
         self.cli("init")
         self.cli("add", "first")
@@ -118,6 +157,8 @@ class HyphaCliTest(unittest.TestCase):
         applied = self.cli("bootstrap", "--apply", str(plan_path)).stdout
         self.assertIn("创建 4 个任务", applied)
         self.assertIn("子任务：0002, 0003, 0004", self.cli("show", "0001").stdout)
+        root = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        self.assertNotIn("progress:", root.read_text(encoding="utf-8"))
         child = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
         self.assertIn("bootstrap_confidence: low", child.read_text(encoding="utf-8"))
         rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
@@ -188,7 +229,8 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"schemaVersion": 1', html)
         self.assertIn('"diagnostics": {"redlinks"', html)
         self.assertIn('"kind": "parent"', html)
-        self.assertIn('"progress": 100', html)
+        self.assertIn('"progress": 0', html)
+        self.assertIn('"status": "in_progress"', html)
         self.assertIn('"path": "intent/', html)
         self.assertIn('"summary":', html)
         self.assertIn('"markdown":', html)
@@ -197,7 +239,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"created_at":', html)
         self.assertIn('"updated_at":', html)
         task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
-        task.write_text(task.read_text(encoding="utf-8").replace("progress: 100", "progress: 99"), encoding="utf-8")
+        task.write_text(task.read_text(encoding="utf-8").replace("# deliverable", "# deliverable changed"), encoding="utf-8")
         self.assertIn("未托管正式写入", self.cli("lint").stdout)
 
     def test_open_view_uses_linux_xdg_open_without_waiting(self):

@@ -49,6 +49,8 @@ estimate_minutes: 240
 
 `id`、`status` 必填。状态为 `todo | in_progress | blocked | done | dropped`；blocked 必须有 `blocked_reason`。ID 由 CLI 分配。`parent` 是单主父，`depends_on` 是执行前置；两者必须解析且无环。
 
+`progress` 只存于叶子任务，由 `progress` 或 `done` 更新。非叶任务的进度不落盘，而是递归收集所有未 dropped 后代叶子后做等权平均；中间分组不改变结果。没有显式进度的叶子按 0 计算，done 叶子按 100 计算，被 dropped 的任务整棵子树不参与祖先进度。新增节点或降低叶子进度会重算整条祖先链，并把聚合值低于 100 的 done 祖先重新打开为 in_progress；反方向不会自动级联 done，因为父任务验收与证据仍需确认。非叶任务聚合达到 100 前不能标记 done。
+
 ### 知识
 
 ```markdown

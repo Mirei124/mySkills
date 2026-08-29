@@ -33,3 +33,6 @@
 {"recorded_at":"2026-08-29T16:01:25.598Z","origin":"82B6:3:ab79d8a9c459","scope":"ws","kind":"intent","id":"0007","field":"progress","from":null,"to":35,"by":"bootstrap"}
 {"recorded_at":"2026-08-29T16:01:25.598Z","origin":"82B6:3:ab79d8a9c459","scope":"ws","kind":"intent","id":"0007","field":"status","from":null,"to":"in_progress","by":"bootstrap"}
 {"recorded_at":"2026-08-29T17:18:35Z","origin":"82B6:2125591:3391905b6c3d","scope":"ws","kind":"session","id":"workspace","field":"lifecycle","from":null,"to":"close","by":"cli"}
+{"recorded_at":"2026-08-29T17:30:46.957Z","origin":"82B6:3:38179e4d48f5","scope":"ws","kind":"intent","id":"0001","field":"body_hash","from":"07a641e00a8d898beaad0659545eda0c2d552a9d1d3d79f1387df33ee1515487","to":"2edb075828af04301bbfd1b228df36e8d122bf5ff547197299804b65f060098a","by":"apply"}
+{"recorded_at":"2026-08-29T17:30:46.957Z","origin":"82B6:3:38179e4d48f5","scope":"ws","kind":"intent","id":"0001","field":"progress","from":46,"to":null,"by":"apply"}
+{"recorded_at":"2026-08-29T17:33:58Z","origin":"82B6:2:1088902ab08d","scope":"ws","kind":"session","id":"workspace","field":"lifecycle","from":null,"to":"close","by":"cli"}

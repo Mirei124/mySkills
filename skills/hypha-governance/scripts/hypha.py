@@ -210,6 +210,50 @@ def graph(tasks: dict, knowledge: dict) -> dict:
     return {"backlinks": backlinks, "premises": premises, "children": children, "unlocks": unlocks, "redlinks": redlinks}
 
 
+def task_progresses(tasks: dict) -> dict[str, int | None]:
+    """Return leaf-owned progress; ancestors average all non-dropped descendant leaves."""
+    children = defaultdict(list)
+    for task_id, node in tasks.items():
+        parent = str(node["parent"]) if node.get("parent") is not None else None
+        if parent in tasks: children[parent].append(task_id)
+    for task_ids in children.values(): task_ids.sort()
+    memo: dict[str, tuple[int, int]] = {}
+    visiting = set()
+    def totals(task_id: str) -> tuple[int, int]:
+        if task_id in memo: return memo[task_id]
+        if task_id in visiting: raise ValueError(f"任务 parent 成环：{task_id}")
+        visiting.add(task_id)
+        node = tasks[task_id]
+        if node.get("status") == "dropped":
+            result = (0, 0)
+        elif not children[task_id]:
+            value = 100 if node.get("status") == "done" else int(node.get("progress", 0))
+            result = (max(0, min(100, value)), 1)
+        else:
+            child_totals = [totals(child) for child in children[task_id]]
+            result = (sum(total for total, _ in child_totals), sum(count for _, count in child_totals))
+        visiting.remove(task_id)
+        memo[task_id] = result
+        return result
+    progresses = {}
+    for task_id in sorted(tasks):
+        total, count = totals(task_id)
+        progresses[task_id] = round(total / count) if count else None
+    return progresses
+
+
+def reopen_incomplete_done_tasks(tasks: dict) -> set[str]:
+    """Keep done consistent when structure or authoritative leaf progress changes."""
+    progresses = task_progresses(tasks)
+    changed = set()
+    for task_id, node in tasks.items():
+        if node.get("status") == "done" and progresses[task_id] != 100:
+            node["status"] = "in_progress"
+            node.pop("progress", None)
+            changed.add(task_id)
+    return changed
+
+
 def anchor_text(home: Path, anchor: str) -> str | None:
     file_name, marker, fragment = anchor.partition("#")
     path = home / file_name
@@ -366,6 +410,7 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
     if len(keys) != len(entries) or len(set(keys)) != len(keys) or any(not key for key in keys):
         raise ValueError("bootstrap plan task key 必须唯一且非空")
     ids = {key: f"{index:04d}" for index, key in enumerate(keys, 1)}
+    parent_keys = {entry.get("parent") for entry in entries if entry.get("parent") is not None}
     proposed = {}
     paths = []
     for entry in entries:
@@ -382,10 +427,12 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
         path = home / "intent" / f"{task_id}-{slug[:40]}.md"
         evidence = [str(item) for item in entry.get("evidence", [])]
         body = "\n# " + title + "\n\n## 验收\n\n- Review this bootstrap candidate against the repository's actual goals.\n\n## 证据\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
-        node = {"id": task_id, "status": status, "progress": progress, "bootstrap_confidence": entry.get("confidence", "low"),
+        node = {"id": task_id, "status": status, "bootstrap_confidence": entry.get("confidence", "low"),
                 "bootstrap_paths": [str(item) for item in entry.get("paths", [])], "_body": body, "_path": path, "title": title}
+        if entry["key"] not in parent_keys: node["progress"] = progress
         if parent_key is not None: node["parent"] = ids[parent_key]
         proposed[task_id] = node; paths.append(path)
+    reopen_incomplete_done_tasks(proposed)
     errors = validate(home, proposed, knowledge)
     if errors: raise ValueError("\n".join(errors))
     (home / "intent").mkdir(parents=True, exist_ok=True)
@@ -496,6 +543,8 @@ def add(args):
         tasks, knowledge = prepare(home)
         if args.parent and args.root:
             raise ValueError("不能同时指定父任务和 --root")
+        if args.parent and args.parent not in tasks:
+            raise ValueError(f"父任务不存在：{args.parent}")
         if tasks and not args.parent and not args.root:
             raise ValueError("已有任务；请指定父任务 ID，或用 --root 显式创建独立根任务")
         duplicate = next((task_id for task_id, node in tasks.items()
@@ -509,8 +558,12 @@ def add(args):
         node = {"id": task_id, "status": "todo", "_body": f"\n# {args.title}\n\n## 验收\n\n## 证据\n"}
         if args.parent: node["parent"] = args.parent
         probe = dict(tasks); probe[task_id] = node
+        if args.parent: probe[args.parent].pop("progress", None)
+        reopened = reopen_incomplete_done_tasks(probe)
         errors = validate(home, probe, knowledge)
         if errors: raise ValueError("\n".join(errors))
+        for changed_id in sorted(reopened | ({args.parent} if args.parent else set())):
+            write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         write_node(path, node, atomic=True)
         sync(home, by="cli")
     print(f"已创建 {task_id}: {path.relative_to(home)}")
@@ -521,18 +574,27 @@ def task_mutate(args):
     with locked(home):
         tasks, knowledge = prepare(home); node = tasks.get(args.id)
         if not node: raise ValueError(f"不存在任务 {args.id}")
+        children = graph(tasks, knowledge)["children"].get(args.id, set())
         if args.command == "progress":
+            if children: raise ValueError(f"{args.id} 有子任务；请更新叶子节点进度")
             value = int(args.value)
             if not 0 <= value <= 100: raise ValueError("progress 必须为 0..100")
             node["progress"] = value
+            if value < 100 and node.get("status") == "done": node["status"] = "in_progress"
         elif args.command == "block": node["status"] = "blocked"; node["blocked_reason"] = args.value
         else:
             node["status"] = {"start": "in_progress", "done": "done", "drop": "dropped"}[args.command]
             node.pop("blocked_reason", None)
-            if args.command == "done": node["progress"] = 100
+            if args.command == "done":
+                if children:
+                    progress = task_progresses(tasks)[args.id]
+                    if progress != 100: raise ValueError(f"{args.id} 的叶子节点聚合进度为 {progress if progress is not None else '—'}%；达到 100% 后才能完成")
+                    node.pop("progress", None)
+                else: node["progress"] = 100
+        reopened = reopen_incomplete_done_tasks(tasks)
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
-        write_node(node["_path"], node, atomic=True)
+        for changed_id in sorted(reopened | {args.id}): write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
     print(f"已更新 {args.id}: {node['status']}")
 
@@ -693,9 +755,12 @@ def set_parent(args):
         if args.id not in tasks or args.parent not in tasks: raise ValueError("任务不存在")
         if args.id == args.parent: raise ValueError("任务不能以自身为父任务")
         tasks[args.id]["parent"] = args.parent
+        tasks[args.parent].pop("progress", None)
+        reopened = reopen_incomplete_done_tasks(tasks)
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
-        write_node(tasks[args.id]["_path"], tasks[args.id], atomic=True)
+        for changed_id in sorted(reopened | {args.id, args.parent}):
+            write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
     print(f"{args.id} 的父任务为 {args.parent}")
 
@@ -742,8 +807,12 @@ def apply(args):
             duplicate = next((path for path, old in knowledge.items() if audit_projection(old)["body_hash"] == incoming_hash and path != ident), None)
             if duplicate: raise ValueError(f"草稿内容已发布为 {duplicate}")
             knowledge[ident] = node
+        if kind == "intent" and graph(tasks, knowledge)["children"].get(ident): node.pop("progress", None)
+        reopened = reopen_incomplete_done_tasks(tasks) if kind == "intent" else set()
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
+        for changed_id in sorted(reopened - {ident}):
+            write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         write_node(target, node, atomic=True); sync(home, by="apply")
         mark_draft_applied(home, draft)
     print(f"已发布 {target.relative_to(home)}")
@@ -911,11 +980,12 @@ def boot(args):
 def next_task(args):
     home = root(args)
     with locked(home): tasks, _ = prepare(home)
+    progresses = task_progresses(tasks)
     running = [(task_id, node) for task_id, node in sorted(tasks.items()) if node.get("status") == "in_progress"]
     if running:
         print("运行中（续接候选）：")
         for task_id, node in running:
-            progress = f" {node['progress']}%" if "progress" in node else ""
+            progress = f" {progresses[task_id]}%" if progresses[task_id] is not None else ""
             print(f"- {task_id}{progress} {node['title']}")
     print("可开工：")
     for task_id, node in sorted(tasks.items()):
@@ -929,6 +999,7 @@ def list_nodes(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
     observation_times = node_observation_times(read_events(home))
+    progresses = task_progresses(tasks)
     rows = []
     if args.type in {"all", "task"}:
         for task_id, node in sorted(tasks.items()):
@@ -937,7 +1008,7 @@ def list_nodes(args):
                 continue
             rows.append({
                 "id": task_id, "type": "task", "title": node["title"], "status": status,
-                "progress": node.get("progress"), "parent": node.get("parent"),
+                "progress": progresses[task_id], "parent": node.get("parent"),
                 "path": str(node["_path"].relative_to(home)),
                 **observation_times.get(("intent", task_id), {}),
             })
@@ -1091,6 +1162,7 @@ def view(args):
     with locked(home): tasks, knowledge = prepare(home)
     events = read_events(home)
     observation_times = node_observation_times(events)
+    progresses = task_progresses(tasks)
     relations = graph(tasks, knowledge)
     edges = []
     for task_id, task in tasks.items():
@@ -1112,7 +1184,7 @@ def view(args):
         "initialMode": args.mode,
         "tasks": {
             key: {
-                "title": node["title"], "status": node.get("status"), "progress": node.get("progress"),
+                "title": node["title"], "status": node.get("status"), "progress": progresses[key],
                 **observation_times.get(("intent", key), {}),
                 "path": str(node["_path"].relative_to(home)), "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
                 "metadata": {field: node.get(field) for field in ("parent", "depends_on", "affects", "when") if field in node},
@@ -1165,10 +1237,12 @@ def show(args):
     n = tasks.get(args.target) or knowledge.get(args.target.removesuffix(".md"))
     if not n: raise ValueError(f"不存在节点 {args.target}")
     print(n["_path"].relative_to(root(args))); print(n["title"])
-    for key in ("status", "progress", "parent", "depends_on", "affects", "when"):
+    for key in ("status", "parent", "depends_on", "affects", "when"):
         if key in n: print(f"{key}: {n[key]}")
     relations = graph(tasks, knowledge)
     if args.target in tasks:
+        progress = task_progresses(tasks)[args.target]
+        print(f"progress: {progress if progress is not None else '—'}")
         print("知识前提：" + ", ".join(sorted(relations["premises"].get(args.target, set()))))
         print("子任务：" + ", ".join(sorted(relations["children"].get(args.target, set()))))
         print("解锁：" + ", ".join(sorted(relations["unlocks"].get(args.target, set()))))

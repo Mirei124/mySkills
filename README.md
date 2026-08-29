@@ -107,6 +107,8 @@ python3 "$HYPHA_CLI" --workspace "$PROJECT" close
 
 `parent` means hierarchy; `needs` means execution dependency. Do not use chronology alone as a reason to create a dependency edge.
 
+Progress belongs only to leaf tasks. Set it with `progress <id> <0..100>` or complete a leaf with `done`; parent progress is the equal-weight average of every non-dropped descendant leaf, regardless of intermediate grouping. A parent cannot be assigned progress directly and can be marked done only after its derived progress reaches 100%. Adding a child removes the former leaf's stored progress, recalculates every ancestor, and reopens any `done` ancestor that falls below 100%. Reaching 100% does not automatically mark ancestors done because their acceptance and evidence still require confirmation. Dropping a task excludes its whole subtree from ancestor progress.
+
 ### 5. Add durable knowledge
 
 Write new content to `.hypha/.drafts/` first. For example:

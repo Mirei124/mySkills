@@ -1,8 +1,6 @@
 ---
+kind: task-update
 id: 0001
-status: in_progress
-bootstrap_confidence: low
-bootstrap_paths: ["."]
 ---
 
 # Adopt and maintain hypha
