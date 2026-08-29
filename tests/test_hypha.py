@@ -66,6 +66,35 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("0001: 孤立任务", output)
         self.assertIn("0002: 孤立任务", output)
 
+    def test_bootstrap_scans_project_writes_plan_and_applies_reviewed_tasks(self):
+        (self.workspace / "src").mkdir()
+        (self.workspace / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
+        (self.workspace / "tests").mkdir()
+        (self.workspace / "tests" / "test_app.py").write_text("def test_run():\n    assert True\n", encoding="utf-8")
+        (self.workspace / "docs").mkdir()
+        (self.workspace / "docs" / "plan.md").write_text("# Plan\n\n- [x] design\n- [ ] release\n", encoding="utf-8")
+
+        plan = json.loads(self.cli("bootstrap", "--dry-run").stdout)
+        self.assertFalse((self.workspace / ".hypha").exists())
+        self.assertEqual("hypha-bootstrap-plan", plan["kind"])
+        self.assertEqual("low", plan["tasks"][0]["confidence"])
+        self.assertEqual({"area:docs", "area:src", "area:tests", "root"}, {task["key"] for task in plan["tasks"]})
+        docs = next(task for task in plan["tasks"] if task["key"] == "area:docs")
+        self.assertEqual(50, docs["progress"])
+
+        self.cli("init")
+        output = self.cli("bootstrap").stdout
+        self.assertIn("bootstrap-plan.json", output)
+        plan_path = self.workspace / ".hypha" / ".drafts" / "bootstrap-plan.json"
+        self.assertTrue(plan_path.is_file())
+        applied = self.cli("bootstrap", "--apply", str(plan_path)).stdout
+        self.assertIn("创建 4 个任务", applied)
+        self.assertIn("子任务：0002, 0003, 0004", self.cli("show", "0001").stdout)
+        child = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
+        self.assertIn("bootstrap_confidence: low", child.read_text(encoding="utf-8"))
+        rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("仅支持空任务图", rejected.stderr)
+
     def test_apply_evidence_and_show(self):
         self.cli("init")
         self.cli("add", "oauth work")

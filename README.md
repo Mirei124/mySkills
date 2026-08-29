@@ -42,6 +42,22 @@ For active Hypha development, a symlink is more convenient than repeatedly copyi
 
 ### 3. Create and start the first task
 
+For an existing codebase, generate a reviewable bootstrap plan first:
+
+```bash
+python3 "$HYPHA_CLI" --workspace "$PROJECT" bootstrap
+```
+
+Hypha writes `.hypha/.drafts/bootstrap-plan.json`. It inventories Git-tracked and local files, groups top-level areas, counts tests, documentation, checklist completion, and TODO/FIXME markers, then proposes a low-confidence maturity estimate. Review titles, boundaries, parent links, and progress before applying it:
+
+```bash
+python3 "$HYPHA_CLI" --workspace "$PROJECT" bootstrap --apply "$PROJECT/.hypha/.drafts/bootstrap-plan.json"
+```
+
+Use `bootstrap --dry-run` to print the plan without writing a file, or `bootstrap --output path/to/plan.json` to choose its location. Applying a plan is allowed only when the task graph is empty, so it cannot silently mix inferred tasks into an active graph.
+
+For a new project, create the first task manually:
+
 ```bash
 python3 "$HYPHA_CLI" --workspace "$PROJECT" add "Ship the first working feature"
 python3 "$HYPHA_CLI" --workspace "$PROJECT" start 0001
@@ -128,6 +144,7 @@ The generated `.hypha/view.html` is read-only, self-contained, and works from `f
 | Resume context | `boot "topic"`, then `next` |
 | Inspect a node | `show 0001` or `show know/path` |
 | Create structure | `add`, `parent`, `needs` |
+| Bootstrap existing code | `bootstrap`, review JSON, then `bootstrap --apply` |
 | Update state | `start`, `progress`, `block`, `done`, `drop` |
 | Publish Markdown | `apply .hypha/.drafts/file.md` |
 | Check integrity | `lint --audit` |

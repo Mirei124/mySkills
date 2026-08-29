@@ -28,6 +28,8 @@ KNOWLEDGE_STATUSES = {"active", "superseded"}
 CLAIM_KINDS = {"sourced", "inference", "note"}
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 WORD = re.compile(r"[\w-]+", re.UNICODE)
+BOOTSTRAP_EXCLUDED = {".git", ".hypha", "node_modules", "dist", "build", "target", "vendor", "__pycache__", ".venv"}
+BOOTSTRAP_TEXT_SUFFIXES = {".md", ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".rs", ".go", ".java", ".kt", ".rb", ".php", ".cs", ".c", ".h", ".cpp", ".hpp"}
 
 
 def root(args: argparse.Namespace) -> Path:
@@ -270,6 +272,126 @@ def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
         for task_id in node.get("affects", []):
             if str(task_id) not in tasks: errors.append(f"{path}: 悬空 affects {task_id}")
     return errors
+
+
+def workspace_files(workspace: Path) -> list[Path]:
+    """Return a bounded, deterministic inventory without relying on Git alone."""
+    found = set()
+    try:
+        result = subprocess.run(["git", "-C", str(workspace), "ls-files"], capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            found.update(Path(line) for line in result.stdout.splitlines() if line.strip())
+    except OSError:
+        pass
+    for directory, names, files in os.walk(workspace):
+        names[:] = sorted(name for name in names if name not in BOOTSTRAP_EXCLUDED and (not name.startswith(".") or name == ".github"))
+        base = Path(directory)
+        for name in sorted(files):
+            relative = (base / name).relative_to(workspace)
+            if not any(part in BOOTSTRAP_EXCLUDED for part in relative.parts): found.add(relative)
+            if len(found) >= 5000: break
+        if len(found) >= 5000: break
+    return sorted(path for path in found
+                  if not any(part in BOOTSTRAP_EXCLUDED or (part.startswith(".") and part != ".github") for part in path.parts))[:5000]
+
+
+def bootstrap_signals(workspace: Path, paths: list[Path]) -> dict:
+    checked = unchecked = todos = 0
+    markdown = tests = 0
+    for relative in paths:
+        name = relative.name.casefold()
+        if relative.suffix.casefold() == ".md": markdown += 1
+        if "test" in name or "spec" in name or any(part.casefold() in {"test", "tests", "spec", "specs"} for part in relative.parts): tests += 1
+        absolute = workspace / relative
+        if relative.suffix.casefold() not in BOOTSTRAP_TEXT_SUFFIXES: continue
+        try:
+            if absolute.stat().st_size > 512_000: continue
+            text = absolute.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        checked += len(re.findall(r"(?im)^\s*[-*]\s*\[[xX]\]", text))
+        unchecked += len(re.findall(r"(?im)^\s*[-*]\s*\[ \]", text))
+        todos += len(re.findall(r"(?i)\b(?:TODO|FIXME)\b", text))
+    return {"files": len(paths), "tests": tests, "markdown": markdown, "checked": checked, "unchecked": unchecked, "todos": todos}
+
+
+def estimated_progress(signals: dict) -> tuple[int, list[str]]:
+    checklist_total = signals["checked"] + signals["unchecked"]
+    evidence = [f"{signals['files']} files"]
+    if checklist_total:
+        progress = round(100 * signals["checked"] / checklist_total)
+        evidence.append(f"checklist {signals['checked']}/{checklist_total} complete")
+    else:
+        progress = 35
+        if signals["tests"]:
+            progress += 20; evidence.append(f"{signals['tests']} test/spec files")
+        if signals["markdown"]:
+            progress += 10; evidence.append(f"{signals['markdown']} documentation files")
+    if signals["todos"]:
+        progress -= min(20, signals["todos"] * 2); evidence.append(f"{signals['todos']} TODO/FIXME markers")
+    return max(0, min(100, progress)), evidence
+
+
+def build_bootstrap_plan(workspace: Path) -> dict:
+    paths = workspace_files(workspace)
+    groups = defaultdict(list)
+    for path in paths:
+        if len(path.parts) > 1: groups[path.parts[0]].append(path)
+    areas = []
+    for name, area_paths in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))[:12]:
+        signals = bootstrap_signals(workspace, area_paths)
+        progress, evidence = estimated_progress(signals)
+        areas.append({"key": f"area:{name}", "title": f"Review and maintain {name}", "parent": "root",
+                      "status": "done" if progress == 100 else "in_progress", "progress": progress,
+                      "confidence": "low", "evidence": evidence, "signals": signals, "paths": [name]})
+    all_signals = bootstrap_signals(workspace, paths)
+    root_progress = round(sum(item["progress"] * max(1, item["signals"]["files"]) for item in areas)
+                          / max(1, sum(item["signals"]["files"] for item in areas))) if areas else estimated_progress(all_signals)[0]
+    root_task = {"key": "root", "title": f"Adopt and maintain {workspace.name}", "parent": None,
+                 "status": "done" if root_progress == 100 else "in_progress", "progress": root_progress,
+                 "confidence": "low", "evidence": [f"inventory covers {all_signals['files']} files", f"{len(areas)} top-level areas"], "paths": ["."]}
+    return {"schemaVersion": 1, "kind": "hypha-bootstrap-plan", "workspace": workspace.name,
+            "warning": "Progress is a low-confidence maturity estimate; review every task before apply.",
+            "inventory": all_signals, "tasks": [root_task, *areas]}
+
+
+def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
+    if plan.get("schemaVersion") != 1 or plan.get("kind") != "hypha-bootstrap-plan":
+        raise ValueError("无效 bootstrap plan schema")
+    entries = plan.get("tasks")
+    if not isinstance(entries, list) or not entries: raise ValueError("bootstrap plan 缺少 tasks")
+    tasks, knowledge = prepare(home)
+    if tasks: raise ValueError("bootstrap --apply 仅支持空任务图；已有任务请使用 add/parent")
+    keys = [entry.get("key") for entry in entries if isinstance(entry, dict)]
+    if len(keys) != len(entries) or len(set(keys)) != len(keys) or any(not key for key in keys):
+        raise ValueError("bootstrap plan task key 必须唯一且非空")
+    ids = {key: f"{index:04d}" for index, key in enumerate(keys, 1)}
+    proposed = {}
+    paths = []
+    for entry in entries:
+        progress = entry.get("progress")
+        if not isinstance(progress, int) or not 0 <= progress <= 100: raise ValueError("bootstrap progress 必须为 0..100 整数")
+        status = entry.get("status", "in_progress")
+        if status == "done" and progress != 100: raise ValueError("bootstrap done 任务的 progress 必须为 100")
+        parent_key = entry.get("parent")
+        if parent_key is not None and parent_key not in ids: raise ValueError(f"bootstrap parent 不存在：{parent_key}")
+        task_id = ids[entry["key"]]
+        title = str(entry.get("title", "")).strip()
+        if not title: raise ValueError("bootstrap task title 不能为空")
+        slug = re.sub(r"[^\w\-]+", "-", title.lower()).strip("-") or task_id
+        path = home / "intent" / f"{task_id}-{slug[:40]}.md"
+        evidence = [str(item) for item in entry.get("evidence", [])]
+        body = "\n# " + title + "\n\n## 验收\n\n- Review this bootstrap candidate against the repository's actual goals.\n\n## 证据\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
+        node = {"id": task_id, "status": status, "progress": progress, "bootstrap_confidence": entry.get("confidence", "low"),
+                "bootstrap_paths": [str(item) for item in entry.get("paths", [])], "_body": body, "_path": path, "title": title}
+        if parent_key is not None: node["parent"] = ids[parent_key]
+        proposed[task_id] = node; paths.append(path)
+    errors = validate(home, proposed, knowledge)
+    if errors: raise ValueError("\n".join(errors))
+    (home / "intent").mkdir(parents=True, exist_ok=True)
+    for task_id, node in proposed.items(): write_node(node["_path"], node, atomic=True)
+    sync(home, by="bootstrap")
+    return [str(path.relative_to(home)) for path in paths]
 
 
 def init(args):
@@ -858,6 +980,31 @@ def migrate(args):
     print("迁移检查完成；现有 markdown 保持不变。")
 
 
+def bootstrap(args):
+    if args.global_store: raise ValueError("bootstrap 仅支持 workspace，不支持 --global")
+    workspace, home = Path(args.workspace).resolve(), root(args)
+    if args.apply_plan:
+        plan_path = Path(args.apply_plan).resolve()
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        if not home.is_dir(): raise ValueError("尚未 init；请先运行 hypha init")
+        with locked(home): created = apply_bootstrap_plan(home, plan)
+        print(f"已从 bootstrap plan 创建 {len(created)} 个任务")
+        for path in created: print("- " + path)
+        return
+    plan = build_bootstrap_plan(workspace)
+    rendered = json.dumps(plan, ensure_ascii=False, indent=2) + "\n"
+    if args.dry_run:
+        print(rendered, end=""); return
+    if not home.is_dir(): raise ValueError("尚未 init；请先运行 hypha init")
+    target = Path(args.output).resolve() if args.output else home / ".drafts" / "bootstrap-plan.json"
+    try: target.relative_to(workspace)
+    except ValueError as exc: raise ValueError("bootstrap plan 必须写在 workspace 内") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(target, rendered)
+    print(f"已生成 bootstrap plan：{target}")
+    print(f"检查并编辑后运行：hypha --workspace {workspace} bootstrap --apply {target}")
+
+
 def view(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
@@ -994,6 +1141,11 @@ def main():
     p.add_argument("question", help="要查找的问题")
     p.add_argument("--file", help="可选的来源文件范围（供后续问答工作流使用）")
     sub.add_parser("migrate", help="校验并同步现有 Hypha Markdown")
+    p = sub.add_parser("bootstrap", help="扫描现有项目并生成可审阅的初始任务计划")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--dry-run", action="store_true", help="只把候选计划输出到 stdout")
+    group.add_argument("--output", help="把候选计划写到 workspace 内的指定 JSON 文件")
+    group.add_argument("--apply", dest="apply_plan", help="校验并应用已审阅的 bootstrap plan")
     p = sub.add_parser("view", help="生成可拖拽缩放的任务/知识 Canvas 面板")
     p.add_argument("--mode", choices=("all", "tasks", "knowledge"), default="all", help="初始图层：all、tasks 或 knowledge")
     p.add_argument("--open", action="store_true", help="生成后用系统默认浏览器打开（Linux 使用 xdg-open）")
@@ -1016,6 +1168,7 @@ def main():
         elif args.command == "ingest": ingest(args)
         elif args.command == "ask": ask(args)
         elif args.command == "migrate": migrate(args)
+        elif args.command == "bootstrap": bootstrap(args)
         else: view(args)
     except (ValueError, OSError) as exc:
         print(f"错误：{exc}", file=sys.stderr); raise SystemExit(2)
