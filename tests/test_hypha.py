@@ -29,6 +29,7 @@ class HyphaCliTest(unittest.TestCase):
         help_text = self.cli("--help").stdout
         self.assertIn("用命令维护结构，用草稿 + apply 发布正文", help_text)
         self.assertIn("输出当前任务与相关知识的精简上下文", help_text)
+        self.assertIn("列出所有任务和知识节点", help_text)
         self.assertIn("生成可拖拽缩放的任务/知识 Canvas 面板", help_text)
         self.assertIn("会话开始用 boot；结构问题用 lint；完成前用 close", help_text)
 
@@ -45,6 +46,33 @@ class HyphaCliTest(unittest.TestCase):
         events = list((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
         self.assertTrue(events)
         self.assertNotIn(".observed.json", {path.name for path in (self.workspace / ".hypha" / "snapshots").iterdir()})
+
+    def test_list_supports_table_filters_tree_and_json(self):
+        self.cli("init")
+        self.cli("add", "umbrella")
+        self.cli("add", "child work", "0001")
+        self.cli("start", "0002")
+        draft = self.workspace / ".hypha" / ".drafts" / "overview.md"
+        draft.write_text("---\nkind: know\nclaim_kind: note\naffects: [0002]\n---\n# Overview note\n", encoding="utf-8")
+        self.cli("apply", str(draft))
+
+        table = self.cli("list").stdout
+        self.assertIn("TYPE", table)
+        self.assertIn("0002", table)
+        self.assertIn("know/overview", table)
+        filtered = self.cli("list", "--type", "task", "--status", "in_progress").stdout
+        self.assertIn("child work", filtered)
+        self.assertNotIn("umbrella", filtered)
+        self.assertNotIn("Overview note", filtered)
+        tree = self.cli("list", "--tree").stdout
+        self.assertRegex(tree, r"(?m)^0001 \[todo\].*umbrella\n  0002 \[in_progress\].*child work$")
+        payload = json.loads(self.cli("list", "--json").stdout)
+        self.assertEqual({"total": 3, "task": 2, "knowledge": 1}, payload["counts"])
+        child = next(node for node in payload["nodes"] if node["id"] == "0002")
+        self.assertEqual("0001", child["parent"])
+        self.assertIn("created_at", child)
+        self.assertIn("updated_at", child)
+        self.assertEqual("No nodes match the filters.\n", self.cli("list", "--status", "blocked").stdout)
 
     def test_add_requires_explicit_root_or_parent_and_can_reparent(self):
         self.cli("init")

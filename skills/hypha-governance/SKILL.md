@@ -31,6 +31,7 @@ Hypha 将持久状态显式化，同时把语义判断留给 agent。CLI 负责�
 ## 在语义判断前运行确定性检查
 
 - `show <id-or-path>`：查看节点、反链、知识前提、子任务、解锁和红链。
+- `list [--type task|knowledge] [--status ...] [--tree|--json]`：查看全部节点的终端总览；用筛选缩小范围，用 tree 看任务层级，用 JSON 供 agent 或脚本消费。
 - `why <terms>`：展开路由候选及其分数。
 - `lint --audit`：检查结构并列出关系候选；agent 判断 related、unrelated 或 deferred，不能把启发式当事实。
 - `resolve <candidate-id> related|unrelated|deferred`：持久化 audit 判定，避免下次会话重复审同一候选。

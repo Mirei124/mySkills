@@ -925,6 +925,74 @@ def next_task(args):
     print("下一步：hypha start <id>")
 
 
+def list_nodes(args):
+    home = root(args)
+    with locked(home): tasks, knowledge = prepare(home)
+    observation_times = node_observation_times(read_events(home))
+    rows = []
+    if args.type in {"all", "task"}:
+        for task_id, node in sorted(tasks.items()):
+            status = str(node.get("status", "todo"))
+            if args.status and status != args.status:
+                continue
+            rows.append({
+                "id": task_id, "type": "task", "title": node["title"], "status": status,
+                "progress": node.get("progress"), "parent": node.get("parent"),
+                "path": str(node["_path"].relative_to(home)),
+                **observation_times.get(("intent", task_id), {}),
+            })
+    if args.type in {"all", "knowledge"}:
+        for path, node in sorted(knowledge.items()):
+            status = str(node.get("status", "active"))
+            if args.status and status != args.status:
+                continue
+            rows.append({
+                "id": path, "type": "knowledge", "title": node["title"], "status": status,
+                "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
+                **observation_times.get(("know", path), {}),
+            })
+    if args.json:
+        counts = {kind: sum(row["type"] == kind for row in rows) for kind in ("task", "knowledge")}
+        print(json.dumps({"schemaVersion": 1, "counts": {"total": len(rows), **counts}, "nodes": rows}, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        print("No nodes match the filters.")
+        return
+    if args.tree:
+        task_rows = {row["id"]: row for row in rows if row["type"] == "task"}
+        children = defaultdict(list)
+        for task_id, row in task_rows.items():
+            parent = str(row["parent"]) if row.get("parent") is not None else None
+            children[parent if parent in task_rows else None].append(task_id)
+        def render_task(task_id: str, prefix: str = "") -> None:
+            row = task_rows[task_id]
+            progress = f" {row['progress']}%" if row.get("progress") is not None else ""
+            print(f"{prefix}{task_id} [{row['status']}]{progress} {row['title']}")
+            for child in children[task_id]:
+                render_task(child, prefix + "  ")
+        if task_rows:
+            print("Tasks")
+            for task_id in children[None]:
+                render_task(task_id)
+        knowledge_rows = [row for row in rows if row["type"] == "knowledge"]
+        if knowledge_rows:
+            if task_rows: print()
+            print("Knowledge")
+            for row in knowledge_rows:
+                print(f"{row['id']} [{row['status']}] {row['title']}")
+        return
+    table = [[
+        row["type"], row["id"], row["status"],
+        f"{row['progress']}%" if row.get("progress") is not None else "—",
+        row.get("updated_at", "—")[:10], row["title"],
+    ] for row in rows]
+    headers = ["TYPE", "ID", "STATUS", "PROGRESS", "UPDATED", "TITLE"]
+    widths = [max(len(headers[index]), *(len(row[index]) for row in table)) for index in range(len(headers) - 1)]
+    print("  ".join(headers[index].ljust(widths[index]) for index in range(len(widths))) + "  " + headers[-1])
+    for row in table:
+        print("  ".join(row[index].ljust(widths[index]) for index in range(len(widths))) + "  " + row[-1])
+
+
 def why(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
@@ -1146,6 +1214,12 @@ def main():
     p = sub.add_parser("boot", help="输出当前任务与相关知识的精简上下文")
     p.add_argument("term", nargs="*", default=[], help="当前任务或话题关键词")
     sub.add_parser("next", help="列出运行中续接候选与依赖已满足的任务")
+    p = sub.add_parser("list", help="列出所有任务和知识节点", description="输出紧凑表格，也可筛选、按任务层级展示或输出 JSON。")
+    p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="节点类型（默认 all）")
+    p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="按状态精确筛选")
+    formats = p.add_mutually_exclusive_group()
+    formats.add_argument("--tree", action="store_true", help="按 parent 层级展示任务，并单列知识节点")
+    formats.add_argument("--json", action="store_true", help="输出稳定的机器可读 JSON")
     sub.add_parser("drafts", help="列出未 apply 草稿，供中断会话恢复")
     p = sub.add_parser("why", help="解释关键词命中的知识路由候选")
     p.add_argument("term", help="要展开的关键词")
@@ -1178,6 +1252,7 @@ def main():
         elif args.command == "resolve": resolve(args)
         elif args.command == "boot": args.term = " ".join(args.term); boot(args)
         elif args.command == "next": next_task(args)
+        elif args.command == "list": list_nodes(args)
         elif args.command == "drafts": drafts_command(args)
         elif args.command == "why": why(args)
         elif args.command == "show": show(args)

@@ -90,6 +90,8 @@ python3 "$HYPHA_CLI" --workspace "$PROJECT" start 0001
 While working:
 
 ```bash
+python3 "$HYPHA_CLI" --workspace "$PROJECT" list
+python3 "$HYPHA_CLI" --workspace "$PROJECT" list --tree
 python3 "$HYPHA_CLI" --workspace "$PROJECT" progress 0001 60
 python3 "$HYPHA_CLI" --workspace "$PROJECT" needs 0002 0001
 python3 "$HYPHA_CLI" --workspace "$PROJECT" parent 0002 0001
@@ -142,6 +144,7 @@ The generated `.hypha/view.html` is read-only, self-contained, and works from `f
 | Goal | Command |
 |---|---|
 | Resume context | `boot "topic"`, then `next` |
+| List every node | `list`, optionally `--type`, `--status`, `--tree`, or `--json` |
 | Inspect a node | `show 0001` or `show know/path` |
 | Create structure | `add`, `parent`, `needs` |
 | Bootstrap existing code | `bootstrap`, review JSON, then `bootstrap --apply` |
