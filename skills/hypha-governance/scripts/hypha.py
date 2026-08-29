@@ -14,10 +14,14 @@ import socket
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no advisory flock.
+    fcntl = None
 
 TASK_STATUSES = {"todo", "in_progress", "blocked", "done", "dropped"}
 KNOWLEDGE_STATUSES = {"active", "superseded"}
@@ -143,15 +147,13 @@ def locked(home: Path):
     home.mkdir(parents=True, exist_ok=True)
     fd = os.open(home / "lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        try:
-            import fcntl
+        if fcntl is not None:
             fcntl.flock(fd, fcntl.LOCK_EX)
-        except ImportError:
-            pass
         yield
     finally:
-        with contextlib.suppress(Exception):
-            import fcntl; fcntl.flock(fd, fcntl.LOCK_UN)
+        if fcntl is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
 
 
@@ -326,7 +328,7 @@ def append_audit(home: Path, tasks: dict, knowledge: dict, by: str = "direct") -
         for field in sorted(set(old) | set(new)):
             if old.get(field) == new.get(field): continue
             stamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            if stamp < last_stamp: stamp = last_stamp
+            stamp = max(stamp, last_stamp)
             last_stamp = stamp
             changes.append({"recorded_at": stamp, "origin": origin, "scope": "global" if home == Path.home() / ".hypha" else "ws",
                             "kind": kind, "id": ident, "field": field, "from": old.get(field), "to": new.get(field), "by": by})
@@ -615,7 +617,7 @@ def ingest(args):
 def ask(args):
     """Expose deterministic local context; assertion generation remains agent work."""
     home = root(args)
-    with locked(home): tasks, knowledge = prepare(home)
+    with locked(home): _tasks, knowledge = prepare(home)
     terms = {x.casefold() for x in WORD.findall(args.question)}
     for path, node in sorted(knowledge.items()):
         text = node["title"] + " " + " ".join(map(str, knowledge_triggers(node)))

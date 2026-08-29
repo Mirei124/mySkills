@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-CLI = [sys.executable, str(ROOT / "hypha.py")]
+CLI = [sys.executable, str(ROOT / "skills" / "hypha-governance" / "scripts" / "hypha.py")]
 
 class HyphaCliTest(unittest.TestCase):
     def setUp(self):
@@ -17,7 +17,7 @@ class HyphaCliTest(unittest.TestCase):
         self.temp.cleanup()
 
     def cli(self, *args, ok=True):
-        result = subprocess.run(CLI + ["--workspace", str(self.workspace), *args], text=True, capture_output=True)
+        result = subprocess.run(CLI + ["--workspace", str(self.workspace), *args], text=True, capture_output=True, check=False)
         if ok and result.returncode:
             self.fail(result.stderr + result.stdout)
         return result

@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+ruff check skills/hypha-governance/scripts/hypha.py tests
+python3 -m unittest discover -s tests -v

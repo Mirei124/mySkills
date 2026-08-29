@@ -1,0 +1,23 @@
+{
+  "skill_name": "hypha-governance",
+  "evals": [
+    {
+      "id": "cross-directory-handoff",
+      "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
+      "expected_output": "Initializes or boots Hypha, routes relevant context, and uses explicit tasks plus close/audit for the handoff.",
+      "files": []
+    },
+    {
+      "id": "evidence-backed-decision",
+      "prompt": "We need to retain the OAuth provider decision with a quote from its documentation and link it to the migration task so later agents can find it.",
+      "expected_output": "Uses a source snapshot, drafts an evidence-backed knowledge node, applies it, and relates it to the task without inventing semantic validation.",
+      "files": []
+    },
+    {
+      "id": "non-trigger-simple-edit",
+      "prompt": "Rename this one local variable and run the unit test.",
+      "expected_output": "Does not invoke Hypha governance for a self-contained edit.",
+      "files": []
+    }
+  ]
+}
