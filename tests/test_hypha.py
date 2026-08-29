@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).parents[1]
 CLI = [sys.executable, str(ROOT / "skills" / "hypha-governance" / "scripts" / "hypha.py")]
@@ -86,13 +87,31 @@ class HyphaCliTest(unittest.TestCase):
         html = view.read_text(encoding="utf-8")
         self.assertIn("任务 DAG", html)
         self.assertIn("知识关系", html)
-        self.assertIn('<canvas id=graph', html)
-        self.assertIn("pointerdown", html)
+        self.assertIn("Hypha Mycelial Canvas", html)
+        self.assertIn("全部关系", html)
         self.assertIn('"initialMode": "tasks"', html)
+        self.assertIn('"schemaVersion": 1', html)
+        self.assertIn('"diagnostics": {"redlinks"', html)
         self.assertIn('"kind": "parent"', html)
+        self.assertIn('"progress": 100', html)
+        self.assertIn('"path": "intent/', html)
+        self.assertIn('"summary":', html)
+        self.assertIn('"metadata":', html)
+        self.assertIn('"generatedAt":', html)
         task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("progress: 100", "progress: 99"), encoding="utf-8")
         self.assertIn("未托管正式写入", self.cli("lint").stdout)
+
+    def test_open_view_uses_linux_xdg_open_without_waiting(self):
+        module = runpy.run_path(str(CLI[1]))
+        with mock.patch.object(module["subprocess"], "Popen") as popen:
+            module["open_view"](Path("/tmp/hypha-view.html"))
+        popen.assert_called_once_with(
+            ["xdg-open", "/tmp/hypha-view.html"],
+            stdout=module["subprocess"].DEVNULL,
+            stderr=module["subprocess"].DEVNULL,
+            start_new_session=True,
+        )
 
     def test_apply_requires_explicit_publishable_kind(self):
         self.cli("init")

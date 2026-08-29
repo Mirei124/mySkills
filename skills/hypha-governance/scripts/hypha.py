@@ -817,40 +817,54 @@ def view(args):
             if str(task_id) in tasks:
                 edges.append({"from": path, "to": str(task_id), "kind": "affects"})
     data = {
+        "schemaVersion": 1,
+        "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         "initialMode": args.mode,
-        "tasks": {key: {"title": node["title"], "status": node.get("status")} for key, node in tasks.items()},
-        "knowledge": {key: {"title": node["title"], "claim_kind": node.get("claim_kind")} for key, node in knowledge.items()},
+        "tasks": {
+            key: {
+                "title": node["title"], "status": node.get("status"), "progress": node.get("progress"),
+                "path": str(node["_path"].relative_to(home)), "summary": node.get("body", "")[:280],
+                "metadata": {field: node.get(field) for field in ("parent", "depends_on", "affects", "when") if field in node},
+            } for key, node in tasks.items()
+        },
+        "knowledge": {
+            key: {
+                "title": node["title"], "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
+                "summary": node.get("body", "")[:280],
+                "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors") if field in node},
+            } for key, node in knowledge.items()
+        },
         "edges": edges,
         "redlinks": sorted(relations["redlinks"]),
+        "diagnostics": {"redlinks": sorted(relations["redlinks"]), "warnings": []},
         "events": read_events(home),
     }
-    page = """<!doctype html>
-<meta charset=utf-8><title>Hypha canvas</title>
-<style>
-:root{color:#142033;background:#f3f5f8;font:14px system-ui,sans-serif}*{box-sizing:border-box}body{margin:0}main{max-width:1440px;margin:auto;padding:22px}header{display:flex;align-items:baseline;gap:14px}h1{font-size:22px;margin:0}header p{margin:0;color:#5c677a}.toolbar{display:flex;gap:7px;align-items:center;margin:18px 0 12px;flex-wrap:wrap}button{border:1px solid #a9b4c3;background:#fff;color:#263247;padding:7px 11px;cursor:pointer}button.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff}.hint{margin-left:auto;color:#5c677a;font-size:12px}.board{height:680px;display:grid;grid-template-columns:minmax(0,1fr) 270px;border:1px solid #d5dbe5;background:#fff}.canvas-wrap{position:relative;min-width:0;overflow:hidden}canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}.canvas-wrap.dragging canvas{cursor:grabbing}aside{border-left:1px solid #d5dbe5;padding:16px;overflow:auto;background:#fafbfd}aside h2{font-size:14px;margin:0 0 12px}aside p{line-height:1.5;color:#536074}dl{margin:0}dt{font-size:11px;text-transform:uppercase;color:#6b7688;margin-top:13px}dd{margin:3px 0;word-break:break-word}.legend{display:grid;gap:7px;font-size:12px;color:#536074}.dot{display:inline-block;width:9px;height:9px;margin-right:6px}.dot.task{background:#2563eb}.dot.knowledge{background:#9333ea}.line{display:inline-block;width:20px;border-top:2px solid #0f766e;margin-right:6px}.line.wiki{border-color:#7c3aed}.line.affects{border-color:#c2410c}@media(max-width:800px){main{padding:12px}.board{grid-template-columns:1fr;height:720px}aside{border-left:0;border-top:1px solid #d5dbe5;max-height:210px}.hint{width:100%;margin-left:0}}</style>
-<main><header><h1>Hypha canvas</h1><p>拖拽节点 · 拖拽空白处平移 · 滚轮缩放 · 点击查看详情</p></header><div class=toolbar><button data-mode=all>全部关系</button><button data-mode=tasks>任务 DAG</button><button data-mode=knowledge>知识关系</button><button id=reset>重置视图</button><span class=hint>父子 / 依赖 / 双链 / affects</span></div><section class=board><div class=canvas-wrap id=canvas-wrap><canvas id=graph aria-label="Hypha 可交互关系图"></canvas></div><aside id=detail><h2>节点详情</h2><p>选择一个节点，查看它的类型、状态和相邻关系。</p><div class=legend><span><i class="dot task"></i>任务</span><span><i class="dot knowledge"></i>知识</span><span><i class=line></i>依赖</span><span><i class="line wiki"></i>双链</span><span><i class="line affects"></i>affects</span></div></aside></section></main>
-<script>const DATA=""" + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + r""";
-const canvas=document.querySelector('#graph'),ctx=canvas.getContext('2d'),wrap=document.querySelector('#canvas-wrap'),detail=document.querySelector('#detail');
-const view={x:0,y:0,scale:1},nodeSize={w:156,h:58},positions=new Map(),modes=['all','tasks','knowledge'];let mode=modes.includes(DATA.initialMode)?DATA.initialMode:'all',selected=null,gesture=null;
-const nodes=[...Object.entries(DATA.tasks).map(([id,n])=>({id,type:'task',...n})),...Object.entries(DATA.knowledge).map(([id,n])=>({id,type:'knowledge',...n}))];
-function visibleEdge(edge){return mode==='all'||(mode==='tasks'&&['parent','depends'].includes(edge.kind))||(mode==='knowledge'&&edge.kind==='wiki')}
-function visibleNodes(){return nodes.filter(n=>mode==='all'||n.type===(mode==='tasks'?'task':'knowledge'))}
-function layout(){const shown=visibleNodes(),cols=Math.max(1,Math.ceil(Math.sqrt(shown.length||1)));shown.forEach((n,i)=>{if(!positions.has(n.id)||mode!==positions.get(n.id).mode)positions.set(n.id,{x:130+(i%cols)*225,y:110+Math.floor(i/cols)*130,mode})})}
-function resize(){const r=wrap.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=r.width*dpr;canvas.height=r.height*dpr;canvas.style.width=r.width+'px';canvas.style.height=r.height+'px';ctx.setTransform(dpr,0,0,dpr,0,0);draw()}
-function screen(p){return{x:p.x*view.scale+view.x,y:p.y*view.scale+view.y}}
-function world(p){return{x:(p.x-view.x)/view.scale,y:(p.y-view.y)/view.scale}}
-function trim(text,max=21){return text.length>max?text.slice(0,max-1)+'…':text}
-function edgeStyle(kind){return kind==='depends'?'#0f766e':kind==='wiki'?'#7c3aed':kind==='affects'?'#c2410c':'#64748b'}
-function arrow(a,b,color,dashed){const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,end={x:b.x-ux*40,y:b.y-uy*30};ctx.save();ctx.strokeStyle=color;ctx.lineWidth=kindWidth(color);ctx.setLineDash(dashed?[7,5]:[]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(end.x,end.y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(end.x,end.y);ctx.lineTo(end.x-9*ux+5*uy,end.y-9*uy-5*ux);ctx.lineTo(end.x-9*ux-5*uy,end.y-9*uy+5*ux);ctx.closePath();ctx.fill();ctx.restore()}
-function kindWidth(color){return color==='#c2410c'?2.4:1.5}
-function draw(){const r=wrap.getBoundingClientRect();ctx.clearRect(0,0,r.width,r.height);layout();const shown=visibleNodes(),ids=new Set(shown.map(n=>n.id));ctx.fillStyle='#f8fafc';ctx.fillRect(0,0,r.width,r.height);for(const edge of DATA.edges.filter(e=>visibleEdge(e)&&ids.has(e.from)&&ids.has(e.to))){const a=screen(positions.get(edge.from)),b=screen(positions.get(edge.to));arrow(a,b,edgeStyle(edge.kind),edge.kind==='depends')}for(const n of shown){const p=screen(positions.get(n.id)),w=nodeSize.w*view.scale,h=nodeSize.h*view.scale;ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle=n.type==='task'?'#dbeafe':'#f3e8ff';ctx.strokeStyle=selected===n.id?'#111827':n.type==='task'?'#2563eb':'#9333ea';ctx.lineWidth=selected===n.id?3:1.5;ctx.beginPath();ctx.roundRect(-w/2,-h/2,w,h,6);ctx.fill();ctx.stroke();ctx.fillStyle='#182338';ctx.font=`${12*view.scale}px system-ui`;ctx.fillText(trim(n.id+' · '+n.title),-w/2+10*view.scale,-4*view.scale);ctx.fillStyle='#526176';ctx.font=`${11*view.scale}px system-ui`;ctx.fillText(n.type==='task'?(n.status||'todo'):(n.claim_kind||'note'),-w/2+10*view.scale,17*view.scale);ctx.restore()}}
-function hit(point){const p=world(point);return visibleNodes().reverse().find(n=>{const q=positions.get(n.id);return Math.abs(p.x-q.x)<=nodeSize.w/2&&Math.abs(p.y-q.y)<=nodeSize.h/2})}
-function select(node){selected=node?node.id:null;if(!node){detail.innerHTML='<h2>节点详情</h2><p>选择一个节点，查看它的类型、状态和相邻关系。</p>';draw();return}const connected=[...new Set(DATA.edges.filter(e=>e.from===node.id||e.to===node.id).map(e=>`${e.kind}: ${e.from===node.id?e.to:e.from}`))];detail.innerHTML=`<h2>${esc(node.title)}</h2><dl><dt>ID</dt><dd>${esc(node.id)}</dd><dt>类型</dt><dd>${node.type==='task'?'任务':'知识'}</dd><dt>${node.type==='task'?'状态':'断言类型'}</dt><dd>${esc(node.status||node.claim_kind||'—')}</dd><dt>关系</dt><dd>${connected.length?connected.map(esc).join('<br>'):'无直接关系'}</dd></dl>`;draw()}
-function esc(text){return String(text).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-canvas.addEventListener('pointerdown',event=>{const p={x:event.offsetX,y:event.offsetY},n=hit(p);canvas.setPointerCapture(event.pointerId);gesture={p,n,origin:n?{...positions.get(n.id)}:{x:view.x,y:view.y}};wrap.classList.add('dragging')});canvas.addEventListener('pointermove',event=>{if(!gesture)return;const p={x:event.offsetX,y:event.offsetY},dx=p.x-gesture.p.x,dy=p.y-gesture.p.y;if(gesture.n){const q=positions.get(gesture.n.id);q.x=gesture.origin.x+dx/view.scale;q.y=gesture.origin.y+dy/view.scale}else{view.x=gesture.origin.x+dx;view.y=gesture.origin.y+dy}draw()});canvas.addEventListener('pointerup',event=>{if(gesture&&Math.hypot(event.offsetX-gesture.p.x,event.offsetY-gesture.p.y)<4)select(gesture.n);gesture=null;wrap.classList.remove('dragging')});canvas.addEventListener('wheel',event=>{event.preventDefault();const before=world({x:event.offsetX,y:event.offsetY});view.scale=Math.min(2.4,Math.max(.35,view.scale*(event.deltaY<0?1.12:.89)));view.x=event.offsetX-before.x*view.scale;view.y=event.offsetY-before.y*view.scale;draw()},{passive:false});document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{mode=button.dataset.mode;selected=null;view.x=0;view.y=0;view.scale=1;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b===button));draw()}));document.querySelector('#reset').addEventListener('click',()=>{view.x=0;view.y=0;view.scale=1;draw()});document.querySelector(`[data-mode="${mode}"]`).classList.add('active');new ResizeObserver(resize).observe(wrap);resize();
-</script>"""
-    atomic_write(home / "view.html", page)
-    print(home / "view.html")
+    template_path = Path(__file__).parents[1] / "templates" / "view.html"
+    try:
+        template = template_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"缺少视图模板：{template_path}") from exc
+    page = template.replace("{{HYPHA_DATA}}", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
+    if page == template:
+        raise ValueError(f"视图模板缺少 {{HYPHA_DATA}} 占位符：{template_path}")
+    output = home / "view.html"
+    atomic_write(output, page)
+    print(output)
+    if args.open:
+        open_view(output)
+
+def open_view(path: Path) -> None:
+    """Open a generated local view without waiting for the viewer to exit."""
+    if sys.platform.startswith("linux"):
+        command = ["xdg-open", str(path)]
+    elif sys.platform == "darwin":  # pragma: no cover - exercised on macOS.
+        command = ["open", str(path)]
+    else:
+        raise ValueError("--open 目前仅支持 Linux（xdg-open）和 macOS（open）；请手动打开生成的 HTML 文件")
+    try:
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except FileNotFoundError as exc:
+        raise ValueError(f"找不到 {command[0]}；请手动打开 {path}") from exc
 
 
 def show(args):
@@ -919,6 +933,7 @@ def main():
     sub.add_parser("migrate", help="校验并同步现有 Hypha Markdown")
     p = sub.add_parser("view", help="生成可拖拽缩放的任务/知识 Canvas 面板")
     p.add_argument("--mode", choices=("all", "tasks", "knowledge"), default="all", help="初始图层：all、tasks 或 knowledge")
+    p.add_argument("--open", action="store_true", help="生成后用系统默认浏览器打开（Linux 使用 xdg-open）")
     args = parser.parse_args()
     try:
         if args.command == "init": init(args)

@@ -1,0 +1,37 @@
+import { test, expect } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+test("generated view is offline and supports graph interaction", async ({ page }) => {
+  const workspace = mkdtempSync(join(tmpdir(), "hypha-view-"));
+  const cli = resolve("../skills/hypha-governance/scripts/hypha.py");
+  const run = (...args: string[]) => execFileSync("python3", [cli, "--workspace", workspace, ...args]);
+  run("init"); run("add", "Implement canvas"); run("add", "Review canvas", "0001");
+  const draft = join(workspace, ".hypha", ".drafts", "knowledge.md");
+  writeFileSync(draft, "---\nkind: know\nclaim_kind: note\naffects: [0001]\ntriggers: [canvas]\n---\n# Canvas evidence\n\n[[know/other]]\n");
+  run("apply", draft);
+  writeFileSync(join(workspace, ".hypha", "know", "other.md"), "---\nclaim_kind: note\n---\n# Other evidence\n\n[[know/knowledge]]\n");
+  run("view");
+  const html = readFileSync(join(workspace, ".hypha", "view.html"), "utf8");
+  expect(html).toContain("data:,");
+  const requests: string[] = []; page.on("request", (request) => requests.push(request.url()));
+  await page.goto(`file://${join(workspace, ".hypha", "view.html")}`);
+  await expect(page.getByText("Hypha · Mycelial Canvas")).toBeVisible();
+  await page.getByRole("button", { name: "任务 DAG" }).click();
+  await page.getByRole("button", { name: "知识关系" }).click();
+  await page.getByRole("button", { name: "全部关系" }).click();
+  await page.getByRole("button", { name: "高对比" }).click();
+  await page.locator("#search").fill("Canvas evidence");
+  await page.locator(".results").getByRole("button", { name: /Canvas evidence/ }).click();
+  await expect(page.getByRole("complementary")).toContainText("Canvas evidence");
+  await expect(page.getByRole("complementary")).toContainText("元数据");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("complementary")).toContainText("节点详情");
+  const canvas = page.getByLabel("Hypha 可交互菌丝关系图");
+  const box = await canvas.boundingBox(); if (!box) throw new Error("canvas missing");
+  await canvas.hover({ position: { x: box.width / 2, y: box.height / 2 } }); await page.mouse.wheel(0, -180); await page.mouse.move(box.x + 120, box.y + 120); await page.mouse.down(); await page.mouse.move(box.x + 170, box.y + 150); await page.mouse.up();
+  await page.screenshot({ path: "test-results/mycelial-canvas.png", fullPage: true });
+  expect(requests.every((url) => url.startsWith("file:") || url.startsWith("data:"))).toBeTruthy();
+});
