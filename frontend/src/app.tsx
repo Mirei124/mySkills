@@ -21,6 +21,7 @@ function App() {
   const [mode, setMode] = useState<Mode>(data.initialMode || "all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<GraphNode>();
+  const [selectionHistory, setSelectionHistory] = useState<{ ids: string[]; index: number }>({ ids: [], index: -1 });
   const [focused, setFocused] = useState<Set<string>>();
   const [statusFilter, setStatusFilter] = useState("all");
   const [progressFilter, setProgressFilter] = useState("all");
@@ -38,7 +39,25 @@ function App() {
   const statuses = useMemo(() => [...new Set(nodes.map((node) => node.status || node.claim_kind).filter(Boolean) as string[])].sort(), []);
   const neighbors = selected ? new Set([selected.id, ...edges.filter((edge) => edge.from === selected.id || edge.to === selected.id).flatMap((edge) => [edge.from, edge.to])]) : new Set<string>();
   const filtersActive = statusFilter !== "all" || progressFilter !== "all" || typeFilter !== "all" || Boolean(focused);
-  const selectNode = (node?: GraphNode) => { setSelected(node); if (focused) setFocused(undefined); };
+  const selectNode = (node?: GraphNode) => {
+    setSelected(node);
+    if (focused) setFocused(undefined);
+    if (!node) return;
+    setSelectionHistory((current) => {
+      const visited = current.ids.slice(0, current.index + 1);
+      if (visited.at(-1) === node.id) return current;
+      const ids = [...visited, node.id];
+      return { ids, index: ids.length - 1 };
+    });
+  };
+  const navigateHistory = (offset: -1 | 1) => {
+    const index = selectionHistory.index + offset;
+    const node = nodes.find((item) => item.id === selectionHistory.ids[index]);
+    if (!node) return;
+    setSelectionHistory((current) => ({ ...current, index }));
+    setSelected(node);
+    setFocused(undefined);
+  };
   const resetFilters = () => { setStatusFilter("all"); setProgressFilter("all"); setTypeFilter("all"); setFocused(undefined); };
 
   useEffect(() => {
@@ -57,8 +76,8 @@ function App() {
       <div className="filters" aria-label="Filters"><label><span className="sr-only">Status</span><select aria-label="Status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setFocused(undefined); }}><option value="all">Status · All</option>{statuses.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></label><label><span className="sr-only">Progress</span><select aria-label="Progress" value={progressFilter} onChange={(event) => { setProgressFilter(event.target.value); setFocused(undefined); }}><option value="all">Progress · All</option><option value="not-started">Not started</option><option value="in-progress">1–99%</option><option value="complete">Complete</option></select></label><label><span className="sr-only">Type</span><select aria-label="Type" value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setFocused(undefined); }}><option value="all">Type · All</option><option value="task">Tasks</option><option value="knowledge">Knowledge</option></select></label><button className="reset-filters" disabled={!filtersActive} onClick={resetFilters} aria-label="Reset filters" title="Reset filters and focus">↺ Reset</button></div>
       <nav aria-label="Graph views">{(["all", "tasks", "knowledge"] as Mode[]).map((item) => <button key={item} aria-pressed={mode === item} className={mode === item ? "active" : ""} onClick={() => { setMode(item); setFocused(undefined); }}>{item === "all" ? "⌘ Mycelium" : item === "tasks" ? "Tasks" : "Knowledge"}</button>)}<button aria-pressed={Boolean(focused)} className={focused ? "active" : ""} disabled={!selected} title={selected ? "Show the selected node and its direct relations" : "Select a node to focus"} onClick={() => setFocused((value) => value ? undefined : neighbors)}>◎ Focus</button></nav>
     </header>
-    <section className="board"><div className="canvas"><Graph nodes={filteredNodes} edges={edges} mode={mode} selected={selected?.id} focused={focused} onSelect={selectNode} /><div className="legend" aria-label="Legend"><strong>Legend</strong><span><i className="task-key" />Task</span><span><i className="knowledge-key" />Knowledge</span><span><i className="depends-key" />Dependency</span><span><i className="affects-key" />Affects</span><span className="redlinks">Redlinks {data.diagnostics?.redlinks.length || 0}</span></div></div><aside aria-live="polite"><Inspector node={selected} nodes={nodes} edges={edges} onFocus={() => setFocused(neighbors)} onSelectNode={(id) => selectNode(nodes.find((node) => node.id === id))} /><p className="read-only">Read-only view · update state through Hypha CLI</p></aside></section>
-    <div className="sr-only" aria-live="polite">{selected ? `Selected ${selected.title}` : "No node selected"}</div><ul className="sr-only" aria-label="Node list">{nodes.map((node) => <li key={node.id}><button onClick={() => setSelected(node)}>{node.id} {node.title}</button></li>)}</ul>
+    <section className="board"><div className="canvas"><Graph nodes={filteredNodes} edges={edges} mode={mode} selected={selected?.id} focused={focused} onSelect={selectNode} /><div className="legend" aria-label="Legend"><strong>Legend</strong><span><i className="task-key" />Task</span><span><i className="knowledge-key" />Knowledge</span><span><i className="depends-key" />Dependency</span><span><i className="affects-key" />Affects</span><span className="redlinks">Redlinks {data.diagnostics?.redlinks.length || 0}</span></div></div><aside aria-live="polite"><Inspector node={selected} nodes={nodes} edges={edges} onFocus={() => setFocused(neighbors)} onSelectNode={(id) => selectNode(nodes.find((node) => node.id === id))} canGoBack={selectionHistory.index > 0} canGoForward={selectionHistory.index >= 0 && selectionHistory.index < selectionHistory.ids.length - 1} onBack={() => navigateHistory(-1)} onForward={() => navigateHistory(1)} /><p className="read-only">Read-only view · update state through Hypha CLI</p></aside></section>
+    <div className="sr-only" aria-live="polite">{selected ? `Selected ${selected.title}` : "No node selected"}</div><ul className="sr-only" aria-label="Node list">{nodes.map((node) => <li key={node.id}><button onClick={() => selectNode(node)}>{node.id} {node.title}</button></li>)}</ul>
   </main>;
 }
 

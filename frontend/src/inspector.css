@@ -18,6 +18,38 @@
 .inspector-title {
   padding-bottom: 16px;
 }
+.inspector-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.node-history {
+  display: flex;
+  gap: 5px;
+}
+.node-history button {
+  display: grid;
+  width: 31px;
+  height: 28px;
+  place-items: center;
+  margin: 0;
+  border-color: #d8d2c4b8;
+  border-radius: 8px;
+  background: #fff8;
+  padding: 0;
+  color: #5f674f;
+  font-size: 15px;
+  line-height: 1;
+}
+.node-history button:not(:disabled):hover {
+  border-color: #9daa83;
+  background: #ffffffe6;
+}
+.node-history button:disabled {
+  cursor: default;
+  opacity: 0.32;
+}
 .inspector-title h2 {
   margin-top: 9px;
 }

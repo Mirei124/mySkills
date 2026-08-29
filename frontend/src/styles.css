@@ -763,7 +763,6 @@ nav button:disabled:hover {
     #6e9040 73%,
     transparent 82%
   );
-  box-shadow: 0 0 13px #78944d4d;
   animation: selection-flow 2.4s linear infinite;
   mask:
     linear-gradient(#000 0 0) content-box,
@@ -781,34 +780,6 @@ nav button:disabled:hover {
     #65428e 76%,
     transparent 85%
   );
-  box-shadow: 0 0 14px #8065a65c;
-}
-.edge-related {
-  filter: drop-shadow(0 0 5px #78964eaa);
-  stroke-width: 3.4;
-  opacity: 0.9;
-}
-.edge-flow {
-  fill: none;
-  pointer-events: none;
-  stroke: #fff4b8;
-  stroke-width: 4;
-  stroke-linecap: round;
-  stroke-dasharray: 12 18;
-  filter: drop-shadow(0 0 3px #ecdc7d);
-  animation: hypha-flow 0.78s linear infinite;
-}
-.edge-flow-parent,
-.edge-flow-depends {
-  stroke: #dff09f;
-}
-.edge-flow-wiki {
-  stroke: #d8baff;
-  filter: drop-shadow(0 0 4px #9b72c9);
-}
-.edge-flow-affects {
-  stroke: #ffd08d;
-  filter: drop-shadow(0 0 4px #d4773d);
 }
 .edge-label.related {
   border-color: #8aa35e;
@@ -866,7 +837,6 @@ nav button:disabled:hover {
   }
 }
 .react-flow__edge-path.edge-related {
-  filter: drop-shadow(0 0 5px #78964eaa);
   stroke-width: 3.4;
   opacity: 1;
 }
@@ -887,8 +857,7 @@ nav button:disabled:hover {
   stroke-width: 4.5;
   stroke-linecap: round;
   stroke-dasharray: 14 16;
-  filter: drop-shadow(0 0 4px #ecdc7d);
-  animation-duration: 0.72s;
+  animation: hypha-flow 1.4s steps(28, end) infinite;
 }
 .react-flow__edge-path.edge-flow-parent,
 .react-flow__edge-path.edge-flow-depends {
@@ -896,11 +865,9 @@ nav button:disabled:hover {
 }
 .react-flow__edge-path.edge-flow-wiki {
   stroke: #e2c7ff;
-  filter: drop-shadow(0 0 5px #9b72c9);
 }
 .react-flow__edge-path.edge-flow-affects {
   stroke: #ffd58f;
-  filter: drop-shadow(0 0 5px #d4773d);
 }
 
 /* Warm frosted specimen panels */
@@ -957,21 +924,16 @@ aside {
   stroke: #c7baa2;
   stroke-width: 3.5;
   stroke-dasharray: 11 20;
-  filter: drop-shadow(0 0 3px #8f826c66);
-  animation-duration: 1.4s;
 }
 .react-flow__edge-path.edge-flow-parent,
 .react-flow__edge-path.edge-flow-depends {
   stroke: #9caf7d;
-  filter: drop-shadow(0 0 3px #66794d66);
 }
 .react-flow__edge-path.edge-flow-wiki {
   stroke: #a68cbe;
-  filter: drop-shadow(0 0 3px #76549466);
 }
 .react-flow__edge-path.edge-flow-affects {
   stroke: #d58a63;
-  filter: drop-shadow(0 0 3px #a65d3966);
 }
 
 /* Backdrop scenery makes glass blur visible instead of blurring a flat color. */
@@ -1039,6 +1001,7 @@ main {
 }
 .graph-node.selected::before {
   animation-duration: 4.2s;
+  animation-timing-function: steps(48, end);
 }
 .canvas {
   background:
@@ -1068,7 +1031,6 @@ main {
   stroke: #fff;
   stroke-width: 7;
   opacity: 0.16;
-  filter: blur(3px);
 }
 .edge-glow-wiki {
   stroke: #9c7cbb;
@@ -1088,4 +1050,40 @@ main {
 }
 .edge-label {
   transition: opacity 0.28s ease;
+}
+
+/* Firefox can repeatedly re-composite large backdrop-filter regions while SVG
+   strokes animate. Keep the translucent material, but avoid that hot path. */
+@supports (-moz-appearance: none) {
+  .topbar,
+  aside,
+  .legend,
+  .results,
+  .search-wrap,
+  .filters select,
+  .react-flow__controls,
+  .read-only,
+  .markdown {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .topbar {
+    background: linear-gradient(115deg, #fffdf8f2, #f4f0e7e8 58%, #fffaf0ee);
+  }
+  aside {
+    background:
+      radial-gradient(circle at 14% 8%, #fff8 0 1px, transparent 1.6px) 0 0/17px 19px,
+      linear-gradient(145deg, #fffdf8f2, #f2ecdfeb);
+  }
+  .legend,
+  .results {
+    background: linear-gradient(135deg, #fffdf7f2, #eee8daec);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge-path.edge-flow,
+  .graph-node.selected::before {
+    animation: none;
+  }
 }

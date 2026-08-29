@@ -40,6 +40,8 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await page.locator(".results").getByRole("button", { name: /Canvas evidence/ }).click();
   await expect(page.locator(".react-flow__node.selected")).toHaveCount(1);
   await expect(page.locator(".edge-flow")).toHaveCount(2);
+  await expect(page.locator(".edge-flow").first()).toHaveCSS("filter", "none");
+  await expect(page.locator(".edge-flow").first()).toHaveCSS("animation-timing-function", "steps(28)");
   const focus = page.getByRole("button", { name: "◎ Focus" });
   await expect(focus).toBeEnabled();
   await focus.click();
@@ -52,6 +54,18 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await expect(page.getByRole("complementary")).toContainText("Metadata");
   await expect(page.getByRole("complementary")).toContainText("Markdown content");
   await expect(page.getByRole("complementary")).toContainText("[[know/other]]");
+  const previousNode = page.getByRole("button", { name: "Previous node" });
+  const nextNode = page.getByRole("button", { name: "Next node" });
+  await expect(previousNode).toBeDisabled();
+  await page.getByRole("complementary").getByRole("button", { name: /0001.*Implement canvas/ }).click();
+  await expect(page.getByRole("complementary")).toContainText("Implement canvas");
+  await expect(previousNode).toBeEnabled();
+  await expect(nextNode).toBeDisabled();
+  await previousNode.click();
+  await expect(page.getByRole("complementary")).toContainText("Canvas evidence");
+  await expect(nextNode).toBeEnabled();
+  await nextNode.click();
+  await expect(page.getByRole("complementary")).toContainText("Implement canvas");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("complementary")).toContainText("Node details");
   const graph = page.getByLabel("Interactive Hypha relationship graph");

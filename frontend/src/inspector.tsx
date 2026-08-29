@@ -10,7 +10,7 @@ function RelationList({ title, ids, nodes, onSelectNode }: { title: string; ids:
   return <section className="relation-section"><div className="section-heading"><h3>{title}</h3><span>{unique.length}</span></div><div className="relation-list">{unique.map((id) => { const item = nodes.find((node) => node.id === id); return <button key={id} onClick={() => onSelectNode(id)}><span className={`relation-dot ${item?.type || "task"}`} /><span><small>{id}</small>{item?.title || id}</span><b>↗</b></button>; })}</div></section>;
 }
 
-export function Inspector({ node, nodes, edges, onFocus, onSelectNode }: { node?: InspectorNode; nodes: InspectorNode[]; edges: InspectorEdge[]; onFocus: () => void; onSelectNode: (id: string) => void }): ReactNode {
+export function Inspector({ node, nodes, edges, onFocus, onSelectNode, canGoBack, canGoForward, onBack, onForward }: { node?: InspectorNode; nodes: InspectorNode[]; edges: InspectorEdge[]; onFocus: () => void; onSelectNode: (id: string) => void; canGoBack: boolean; canGoForward: boolean; onBack: () => void; onForward: () => void }): ReactNode {
   if (!node) return <div className="inspector-empty"><span aria-hidden="true">✦</span><h2>Node details</h2><p>Select a node to inspect its relationships. Press Esc to clear or / to search.</p></div>;
   const incoming = (kind: string) => edges.filter((edge) => edge.kind === kind && edge.to === node.id).map((edge) => edge.from);
   const outgoing = (kind: string) => edges.filter((edge) => edge.kind === kind && edge.from === node.id).map((edge) => edge.to);
@@ -22,7 +22,7 @@ export function Inspector({ node, nodes, edges, onFocus, onSelectNode }: { node?
   const summary = node.summary?.replace(/^#.*$/m, "").trim();
 
   return <>
-    <div className="inspector-title"><span className={`type-chip ${node.type}`}>{node.type === "task" ? "Task" : node.claim_kind || "Knowledge"}</span><h2>{node.title}</h2><p>{summary || "No summary available."}</p></div>
+    <div className="inspector-title"><div className="inspector-titlebar"><span className={`type-chip ${node.type}`}>{node.type === "task" ? "Task" : node.claim_kind || "Knowledge"}</span><div className="node-history" aria-label="Node navigation"><button aria-label="Previous node" title="Previous node" disabled={!canGoBack} onClick={onBack}>←</button><button aria-label="Next node" title="Next node" disabled={!canGoForward} onClick={onForward}>→</button></div></div><h2>{node.title}</h2><p>{summary || "No summary available."}</p></div>
     <section className="overview-card"><div><span>Status</span><strong>{(node.status || node.claim_kind || "Unknown").replaceAll("_", " ")}</strong></div>{node.type === "task" && <div className="inspector-progress"><span>Progress</span><strong>{node.progress == null ? "—" : `${progress}%`}</strong><i><b style={{ width: `${progress}%` }} /></i></div>}<div><span>ID</span><strong>{node.id}</strong></div></section>
     {node.type === "task" ? <>
       <RelationList title="Upstream dependencies" ids={[...incoming("depends"), ...incoming("parent")]} nodes={nodes} onSelectNode={onSelectNode} />
