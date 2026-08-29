@@ -4,19 +4,31 @@
     {
       "id": "cross-directory-handoff",
       "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
-      "expected_output": "Initializes or boots Hypha, routes relevant context, and uses explicit tasks plus close/audit for the handoff.",
+      "expected_output": "初始化或启动 Hypha，路由相关上下文，并以显式任务、lint --audit 与 close 完成交接。",
       "files": []
     },
     {
       "id": "evidence-backed-decision",
       "prompt": "We need to retain the OAuth provider decision with a quote from its documentation and link it to the migration task so later agents can find it.",
-      "expected_output": "Uses a source snapshot, drafts an evidence-backed knowledge node, applies it, and relates it to the task without inventing semantic validation.",
+      "expected_output": "使用来源快照，起草并发布带证据的知识节点，再关联任务；不把语义判断伪装成自动校验。",
       "files": []
     },
     {
       "id": "non-trigger-simple-edit",
       "prompt": "Rename this one local variable and run the unit test.",
-      "expected_output": "Does not invoke Hypha governance for a self-contained edit.",
+      "expected_output": "不为自包含的简单编辑触发 Hypha 治理。",
+      "files": []
+    },
+    {
+      "id": "context-exhaustion-recovery",
+      "prompt": "上一会话中断，0002 仍是 in_progress，.hypha/.drafts/ 里留有 handoff。恢复后继续实现，不能误把 handoff 发布为知识。",
+      "expected_output": "boot/next 主动提示中断、运行中任务与草稿；读取 drafts，并保留 handoff 为不可发布恢复记录。",
+      "files": []
+    },
+    {
+      "id": "audit-resolution-memory",
+      "prompt": "lint --audit 给出一个可能缺少 affects 的候选。我判断它不相关；下个会话不应让我再次审同一个候选。",
+      "expected_output": "用 resolve 持久化 unrelated 判定，后续 lint --audit 不再显示该候选。",
       "files": []
     }
   ]

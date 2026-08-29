@@ -1,4 +1,6 @@
 import json
+import re
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,13 @@ class HyphaCliTest(unittest.TestCase):
             self.fail(result.stderr + result.stdout)
         return result
 
+    def test_help_explains_workflow(self):
+        help_text = self.cli("--help").stdout
+        self.assertIn("用命令维护结构，用草稿 + apply 发布正文", help_text)
+        self.assertIn("输出当前任务与相关知识的精简上下文", help_text)
+        self.assertIn("生成可拖拽缩放的任务/知识 Canvas 面板", help_text)
+        self.assertIn("会话开始用 boot；结构问题用 lint；完成前用 close", help_text)
+
     def test_task_flow_relations_and_sync(self):
         self.cli("init")
         self.cli("add", "first task")
@@ -43,7 +52,7 @@ class HyphaCliTest(unittest.TestCase):
         source.write_text("# Tokens\n\n## Refreshing Tokens\nrotate token safely\n", encoding="utf-8")
         self.cli("ingest", str(source))
         draft = self.workspace / ".hypha" / ".drafts" / "oauth.md"
-        draft.write_text("---\nclaim_kind: sourced\nwhen: OAuth refresh fails\ntriggers: [oauth, refresh]\nanchors: [src/source.md#refreshing-tokens]\nevidence:\n  - anchor: src/source.md#refreshing-tokens\n    quote: rotate token safely\naffects: [0001]\n---\n# OAuth token rotation\n\nUse the documented rotation procedure.\n", encoding="utf-8")
+        draft.write_text("---\nkind: know\nclaim_kind: sourced\nwhen: OAuth refresh fails\ntriggers: [oauth, refresh]\nanchors: [src/source.md#refreshing-tokens]\nevidence:\n  - anchor: src/source.md#refreshing-tokens\n    quote: rotate token safely\naffects: [0001]\n---\n# OAuth token rotation\n\nUse the documented rotation procedure.\n", encoding="utf-8")
         self.cli("apply", str(draft))
         self.assertIn("知识前提：know/oauth", self.cli("show", "0001").stdout)
         self.assertIn("know/oauth", self.cli("why", "oauth").stdout)
@@ -52,7 +61,7 @@ class HyphaCliTest(unittest.TestCase):
     def test_invalid_task_body_intent_link_is_rejected(self):
         self.cli("init")
         self.cli("add", "task")
-        task = next((self.workspace / ".hypha" / "intent").glob("*.md"))
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         task.write_text(task.read_text(encoding="utf-8") + "\n[[intent/9999-missing]]\n", encoding="utf-8")
         result = self.cli("lint", ok=False)
         self.assertNotEqual(result.returncode, 0)
@@ -71,12 +80,91 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         self.cli("add", "deliverable")
         self.cli("done", "0001")
+        self.cli("add", "follow up", "0001")
         self.assertIn("完成候选 0001", self.cli("close").stdout)
-        view = Path(self.cli("view").stdout.strip())
-        self.assertIn("graph and timeline", view.read_text(encoding="utf-8"))
-        task = next((self.workspace / ".hypha" / "intent").glob("*.md"))
+        view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
+        html = view.read_text(encoding="utf-8")
+        self.assertIn("任务 DAG", html)
+        self.assertIn("知识关系", html)
+        self.assertIn('<canvas id=graph', html)
+        self.assertIn("pointerdown", html)
+        self.assertIn('"initialMode": "tasks"', html)
+        self.assertIn('"kind": "parent"', html)
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("progress: 100", "progress: 99"), encoding="utf-8")
         self.assertIn("未托管正式写入", self.cli("lint").stdout)
+
+    def test_apply_requires_explicit_publishable_kind(self):
+        self.cli("init")
+        self.cli("add", "recover flow")
+        drafts = self.workspace / ".hypha" / ".drafts"
+        handoff = drafts / "handoff.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Continue task 0001\n", encoding="utf-8")
+        result = self.cli("apply", str(handoff), ok=False)
+        self.assertIn("不能 apply 发布", result.stderr)
+        partial = drafts / "partial.md"
+        partial.write_text("---\nkind: task-update\ntask: 0001\n---\n# Partial\n", encoding="utf-8")
+        result = self.cli("apply", str(partial), ok=False)
+        self.assertIn("必须提供 id", result.stderr)
+        unknown = drafts / "unknown.md"
+        unknown.write_text("---\nclaim_kind: note\n---\n# Unknown\n", encoding="utf-8")
+        result = self.cli("apply", str(unknown), ok=False)
+        self.assertIn("必须显式写 kind: know", result.stderr)
+        self.assertFalse(list((self.workspace / ".hypha" / "know").glob("*.md")))
+        update = drafts / "task-update.md"
+        update.write_text("---\nkind: task-update\nid: 0001\n---\n# Recovered flow\n\n## 验收\nrecovered\n", encoding="utf-8")
+        self.cli("apply", str(update))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("Recovered flow", shown)
+        self.assertIn("status: todo", shown)
+
+    def test_frontmatter_round_trip_preserves_quotes_and_lists(self):
+        self.cli("init")
+        draft = self.workspace / ".hypha" / ".drafts" / "quote.md"
+        inference = "Provider A's evidence: \"rotate, then retry\""
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: inference\nwhen: Choosing a provider\nanchors: [src/provider.md#decision]\ninference: [\""
+            + inference.replace('"', '\\"')
+            + "\"]\n---\n# Provider decision\n",
+            encoding="utf-8",
+        )
+        self.cli("apply", str(draft))
+        published = next((self.workspace / ".hypha" / "know").glob("*.md"))
+        module = runpy.run_path(str(CLI[1]))
+        self.assertEqual([inference], module["read_node"](published)["inference"])
+
+    def test_recovery_hints_and_non_git_lint_are_quiet(self):
+        self.cli("init")
+        self.assertNotIn(".drafts/", (self.workspace / ".hypha" / ".gitignore").read_text(encoding="utf-8"))
+        self.cli("add", "continue flow")
+        self.cli("start", "0001")
+        self.cli("progress", "0001", "40")
+        draft = self.workspace / ".hypha" / ".drafts" / "resume.md"
+        draft.write_text("---\nkind: handoff\n---\n# Resume OAuth flow\n", encoding="utf-8")
+        boot = self.cli("boot", "oauth")
+        self.assertIn("上次会话可能未收尾", boot.stdout)
+        self.assertIn("未 apply 草稿：1 个", boot.stdout)
+        next_output = self.cli("next").stdout
+        self.assertIn("运行中（续接候选）", next_output)
+        self.assertIn("0001 40%", next_output)
+        self.assertIn("kind=handoff", self.cli("drafts").stdout)
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        lint = self.cli("lint", "--audit")
+        self.assertEqual("", lint.stderr)
+        self.cli("close")
+        self.assertNotIn("上次会话可能未收尾", self.cli("boot", "oauth").stdout)
+
+    def test_audit_resolution_suppresses_repeated_candidate(self):
+        self.cli("init")
+        self.cli("add", "OAuth provider")
+        draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
+        draft.write_text("---\nkind: know\nclaim_kind: inference\nwhen: Choosing OAuth provider\nanchors: [src/provider.md]\ninference: provider evidence\ntriggers: [oauth, provider]\n---\n# OAuth provider decision\n", encoding="utf-8")
+        self.cli("apply", str(draft))
+        output = self.cli("lint", "--audit").stdout
+        match = re.search(r"\[([0-9a-f]{12})\] 0001", output)
+        self.assertIsNotNone(match)
+        self.cli("resolve", match.group(1), "unrelated")
+        self.assertNotIn(match.group(1), self.cli("lint", "--audit").stdout)
 
 if __name__ == "__main__":
     unittest.main()
