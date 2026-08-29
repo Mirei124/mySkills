@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "kind": "hypha-bootstrap-plan",
+  "workspace": "hypha",
+  "warning": "Progress is a low-confidence maturity estimate; review every task before apply.",
+  "inventory": {
+    "files": 199,
+    "tests": 29,
+    "markdown": 29,
+    "checked": 0,
+    "unchecked": 0,
+    "todos": 58
+  },
+  "tasks": [
+    {
+      "key": "root",
+      "title": "Adopt and maintain hypha",
+      "parent": null,
+      "status": "in_progress",
+      "progress": 46,
+      "confidence": "low",
+      "evidence": [
+        "inventory covers 199 files",
+        "6 top-level areas"
+      ],
+      "paths": [
+        "."
+      ]
+    },
+    {
+      "key": "area:design_reference",
+      "title": "Review and maintain design_reference",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 45,
+      "confidence": "low",
+      "evidence": [
+        "166 files",
+        "23 test/spec files",
+        "21 documentation files",
+        "21 TODO/FIXME markers"
+      ],
+      "signals": {
+        "files": 166,
+        "tests": 23,
+        "markdown": 21,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 21
+      },
+      "paths": [
+        "design_reference"
+      ]
+    },
+    {
+      "key": "area:frontend",
+      "title": "Review and maintain frontend",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 57,
+      "confidence": "low",
+      "evidence": [
+        "23 files",
+        "4 test/spec files",
+        "3 documentation files",
+        "4 TODO/FIXME markers"
+      ],
+      "signals": {
+        "files": 23,
+        "tests": 4,
+        "markdown": 3,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 4
+      },
+      "paths": [
+        "frontend"
+      ]
+    },
+    {
+      "key": "area:skills",
+      "title": "Review and maintain skills",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 25,
+      "confidence": "low",
+      "evidence": [
+        "4 files",
+        "1 documentation files",
+        "13 TODO/FIXME markers"
+      ],
+      "signals": {
+        "files": 4,
+        "tests": 0,
+        "markdown": 1,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 13
+      },
+      "paths": [
+        "skills"
+      ]
+    },
+    {
+      "key": "area:design_docs",
+      "title": "Review and maintain design_docs",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 45,
+      "confidence": "low",
+      "evidence": [
+        "3 files",
+        "1 test/spec files",
+        "3 documentation files",
+        "15 TODO/FIXME markers"
+      ],
+      "signals": {
+        "files": 3,
+        "tests": 1,
+        "markdown": 3,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 15
+      },
+      "paths": [
+        "design_docs"
+      ]
+    },
+    {
+      "key": "area:tests",
+      "title": "Review and maintain tests",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 49,
+      "confidence": "low",
+      "evidence": [
+        "1 files",
+        "1 test/spec files",
+        "3 TODO/FIXME markers"
+      ],
+      "signals": {
+        "files": 1,
+        "tests": 1,
+        "markdown": 0,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 3
+      },
+      "paths": [
+        "tests"
+      ]
+    },
+    {
+      "key": "area:tools",
+      "title": "Review and maintain tools",
+      "parent": "root",
+      "status": "in_progress",
+      "progress": 35,
+      "confidence": "low",
+      "evidence": [
+        "1 files"
+      ],
+      "signals": {
+        "files": 1,
+        "tests": 0,
+        "markdown": 0,
+        "checked": 0,
+        "unchecked": 0,
+        "todos": 0
+      },
+      "paths": [
+        "tools"
+      ]
+    }
+  ]
+}

@@ -4,6 +4,7 @@ __pycache__/
 design_docs/mycelial-canvas.md
 design_reference
 frontend/dist
+frontend/docs/reference/mycelium-task-map-reference.png
 frontend/node_modules
 frontend/playwright-report
 frontend/test-results
