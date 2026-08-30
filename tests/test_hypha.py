@@ -27,11 +27,15 @@ class HyphaCliTest(unittest.TestCase):
 
     def test_help_explains_workflow(self):
         help_text = self.cli("--help").stdout
-        self.assertIn("用命令维护结构，用草稿 + apply 发布正文", help_text)
-        self.assertIn("输出当前任务与相关知识的精简上下文", help_text)
-        self.assertIn("列出所有任务和知识节点", help_text)
-        self.assertIn("生成可拖拽缩放的任务/知识 Canvas 面板", help_text)
-        self.assertIn("会话开始用 boot；结构问题用 lint；完成前用 close", help_text)
+        self.assertIn("maintain structure with commands", help_text)
+        self.assertIn("Show concise current task and relevant knowledge", help_text)
+        self.assertIn("List all task and knowledge nodes", help_text)
+        self.assertIn("Generate a draggable, zoomable task/knowledge canvas", help_text)
+        self.assertIn("Use boot at session start", help_text)
+        commands = re.search(r"\{([^}]+)\}", help_text).group(1).split(",")
+        for command in commands:
+            command_help = self.cli(command, "--help").stdout
+            self.assertIsNone(re.search(r"[\u3400-\u9fff]", command_help), command_help)
 
     def test_task_flow_relations_and_sync(self):
         self.cli("init")
@@ -78,12 +82,12 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         self.cli("add", "umbrella")
         result = self.cli("add", "independent", ok=False)
-        self.assertIn("请指定父任务 ID，或用 --root", result.stderr)
+        self.assertIn("specify a parent task ID or use --root", result.stderr)
         duplicate = self.cli("add", "umbrella", "--root", ok=False)
-        self.assertIn("已有同名任务 0001", duplicate.stderr)
+        self.assertIn("active task with this title already exists: 0001", duplicate.stderr)
         self.cli("add", "independent", "--root")
         self.cli("parent", "0002", "0001")
-        self.assertIn("子任务：0002", self.cli("show", "0001").stdout)
+        self.assertIn("Child tasks: 0002", self.cli("show", "0001").stdout)
         self.assertIn("parent: 0001", self.cli("show", "0002").stdout)
 
     def test_parent_progress_is_derived_from_non_dropped_leaves(self):
@@ -94,7 +98,7 @@ class HyphaCliTest(unittest.TestCase):
         parent = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         self.assertNotIn("progress:", parent.read_text(encoding="utf-8"))
         rejected = self.cli("progress", "0001", "90", ok=False)
-        self.assertIn("请更新叶子节点进度", rejected.stderr)
+        self.assertIn("update progress on its leaves", rejected.stderr)
         self.cli("progress", "0002", "40")
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         self.cli("add", "second leaf", "0001")
@@ -103,7 +107,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("drop", "0003")
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         blocked_done = self.cli("done", "0001", ok=False)
-        self.assertIn("聚合进度为 40%", blocked_done.stderr)
+        self.assertIn("aggregate leaf progress 40%", blocked_done.stderr)
         self.cli("done", "0002")
         self.cli("done", "0001")
         self.assertIn("progress: 100", self.cli("show", "0001").stdout)
@@ -130,8 +134,8 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "first")
         self.cli("add", "second", "--root")
         output = self.cli("lint", "--audit").stdout
-        self.assertIn("0001: 孤立任务", output)
-        self.assertIn("0002: 孤立任务", output)
+        self.assertIn("0001: isolated task", output)
+        self.assertIn("0002: isolated task", output)
 
     def test_bootstrap_scans_project_writes_plan_and_applies_reviewed_tasks(self):
         (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Always use Git.\n", encoding="utf-8")
@@ -169,12 +173,12 @@ class HyphaCliTest(unittest.TestCase):
         plan["tasks"][0]["confidence"] = "reviewed"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
-        self.assertIn("knowledge 候选必须审阅", rejected.stderr)
+        self.assertIn("knowledge candidates must be reviewed", rejected.stderr)
         plan["knowledge"][0]["confidence"] = "reviewed"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         applied = self.cli("bootstrap", "--apply", str(plan_path)).stdout
-        self.assertIn("创建 4 个节点", applied)
-        self.assertIn("子任务：0002, 0003", self.cli("show", "0001").stdout)
+        self.assertIn("Created 4 nodes", applied)
+        self.assertIn("Child tasks: 0002, 0003", self.cli("show", "0001").stdout)
         self.assertIn("progress: 50", self.cli("show", "0001").stdout)
         root = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         self.assertNotIn("progress:", root.read_text(encoding="utf-8"))
@@ -184,7 +188,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("claim_kind: sourced", knowledge.read_text(encoding="utf-8"))
         self.assertTrue((self.workspace / ".hypha" / "src" / "bootstrap" / "docs" / "plan.md").is_file())
         rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
-        self.assertIn("仅支持空任务与知识图", rejected.stderr)
+        self.assertIn("requires an empty task and knowledge graph", rejected.stderr)
 
     def test_apply_evidence_and_show(self):
         self.cli("init")
@@ -195,10 +199,10 @@ class HyphaCliTest(unittest.TestCase):
         draft = self.workspace / ".hypha" / ".drafts" / "oauth.md"
         draft.write_text("---\nkind: know\nclaim_kind: sourced\nwhen: OAuth refresh fails\ntriggers: [oauth, refresh]\nanchors: [src/source.md#refreshing-tokens]\nevidence:\n  - anchor: src/source.md#refreshing-tokens\n    quote: rotate token safely\naffects: [0001]\n---\n# OAuth token rotation\n\nUse the documented rotation procedure.\n", encoding="utf-8")
         self.cli("apply", str(draft))
-        self.assertIn("没有未 apply 草稿", self.cli("drafts").stdout)
+        self.assertIn("No unapplied drafts", self.cli("drafts").stdout)
         draft.write_text(draft.read_text(encoding="utf-8") + "\nchanged after publish\n", encoding="utf-8")
         self.assertIn("oauth.md", self.cli("drafts").stdout)
-        self.assertIn("知识前提：know/oauth", self.cli("show", "0001").stdout)
+        self.assertIn("Knowledge premises: know/oauth", self.cli("show", "0001").stdout)
         self.assertIn("know/oauth", self.cli("route", "oauth").stdout)
         self.cli("lint")
 
@@ -233,9 +237,9 @@ class HyphaCliTest(unittest.TestCase):
         scoped = self.cli("search", "登录失败,session", "--file", "docs", "--limit", "1").stdout
         self.assertEqual("docs/runbook.txt:1: Rotate the session cookie after authentication failure.\n", scoped)
         rejected = self.cli("search", "session", "--file", "../outside", ok=False)
-        self.assertIn("必须位于 workspace 内", rejected.stderr)
+        self.assertIn("must be inside the workspace", rejected.stderr)
         empty = self.cli("search", ",，,", ok=False)
-        self.assertIn("至少需要一个非空关键词", empty.stderr)
+        self.assertIn("requires at least one non-empty keyword", empty.stderr)
 
     def test_agreement_draft_publishes_without_duplicating_agents(self):
         self.cli("init")
@@ -268,7 +272,7 @@ class HyphaCliTest(unittest.TestCase):
             encoding="utf-8",
         )
         rejected = self.cli("apply", str(duplicate), ok=False)
-        self.assertIn("已存在于 AGENTS.md", rejected.stderr)
+        self.assertIn("already exists in AGENTS.md", rejected.stderr)
 
     def test_invalid_task_body_intent_link_is_rejected(self):
         self.cli("init")
@@ -277,7 +281,7 @@ class HyphaCliTest(unittest.TestCase):
         task.write_text(task.read_text(encoding="utf-8") + "\n[[intent/9999-missing]]\n", encoding="utf-8")
         result = self.cli("lint", ok=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("悬空任务正文链接", result.stdout)
+        self.assertIn("dangling task body link", result.stdout)
 
     def test_snapshots_replay_shape(self):
         self.cli("init")
@@ -308,7 +312,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "deliverable")
         self.cli("done", "0001")
         self.cli("add", "follow up", "0001")
-        self.assertIn("完成候选 0001", self.cli("close").stdout)
+        self.assertIn("Completion candidate 0001", self.cli("close").stdout)
         view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
         html = view.read_text(encoding="utf-8")
         self.assertIn("Tasks", html)
@@ -330,7 +334,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"updated_at":', html)
         task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("# deliverable", "# deliverable changed"), encoding="utf-8")
-        self.assertIn("未托管正式写入", self.cli("lint").stdout)
+        self.assertIn("unmanaged writes to formal nodes", self.cli("lint").stdout)
 
     def test_open_view_uses_linux_xdg_open_without_waiting(self):
         module = runpy.run_path(str(CLI[1]))
@@ -350,15 +354,15 @@ class HyphaCliTest(unittest.TestCase):
         handoff = drafts / "handoff.md"
         handoff.write_text("---\nkind: handoff\n---\n# Continue task 0001\n", encoding="utf-8")
         result = self.cli("apply", str(handoff), ok=False)
-        self.assertIn("不能 apply 发布", result.stderr)
+        self.assertIn("cannot be published with apply", result.stderr)
         partial = drafts / "partial.md"
         partial.write_text("---\nkind: task-update\ntask: 0001\n---\n# Partial\n", encoding="utf-8")
         result = self.cli("apply", str(partial), ok=False)
-        self.assertIn("必须提供 id", result.stderr)
+        self.assertIn("requires id", result.stderr)
         unknown = drafts / "unknown.md"
         unknown.write_text("---\nclaim_kind: note\n---\n# Unknown\n", encoding="utf-8")
         result = self.cli("apply", str(unknown), ok=False)
-        self.assertIn("必须显式写 kind: know", result.stderr)
+        self.assertIn("must explicitly use kind: know", result.stderr)
         self.assertFalse(list((self.workspace / ".hypha" / "know").glob("*.md")))
         update = drafts / "task-update.md"
         update.write_text("---\nkind: task-update\nid: 0001\n---\n# Recovered flow\n\n## 验收\nrecovered\n", encoding="utf-8")
@@ -391,17 +395,17 @@ class HyphaCliTest(unittest.TestCase):
         draft = self.workspace / ".hypha" / ".drafts" / "resume.md"
         draft.write_text("---\nkind: handoff\n---\n# Resume OAuth flow\n", encoding="utf-8")
         boot = self.cli("boot", "oauth")
-        self.assertIn("上次会话可能未收尾", boot.stdout)
-        self.assertIn("未 apply 草稿：1 个", boot.stdout)
+        self.assertIn("previous session may not have been closed", boot.stdout)
+        self.assertIn("Unapplied drafts: 1", boot.stdout)
         ready_output = self.cli("ready").stdout
-        self.assertIn("运行中（续接候选）", ready_output)
+        self.assertIn("In progress (resume candidates)", ready_output)
         self.assertIn("0001 40%", ready_output)
         self.assertIn("kind=handoff", self.cli("drafts").stdout)
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         lint = self.cli("lint", "--audit")
         self.assertEqual("", lint.stderr)
         self.cli("close")
-        self.assertNotIn("上次会话可能未收尾", self.cli("boot", "oauth").stdout)
+        self.assertNotIn("previous session may not have been closed", self.cli("boot", "oauth").stdout)
 
     def test_dismiss_suppresses_repeated_candidate(self):
         self.cli("init")
@@ -436,10 +440,10 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("AGENT FOLLOW-UP", audit)
         candidate = re.search(r"\[([0-9a-f]{12})\] 0001", audit).group(1)
         deferred = self.cli("defer", candidate).stdout
-        self.assertIn("仍会在后续 audit 中显示", deferred)
+        self.assertIn("remain visible in later audits", deferred)
         self.assertIn(candidate, self.cli("lint", "--audit").stdout)
         rejected = self.cli("dismiss", "deadbeefdead", ok=False)
-        self.assertIn("不是当前 lint --audit 候选", rejected.stderr)
+        self.assertIn("not present in the current lint --audit output", rejected.stderr)
 
     def test_session_completion_scope_and_migrate_protocol(self):
         self.cli("init")
@@ -449,8 +453,8 @@ class HyphaCliTest(unittest.TestCase):
         close = self.cli("close").stdout
         self.assertIn("completion candidates since latest boot: 0001", close)
         self.assertIn("AGENT FOLLOW-UP", close)
-        self.assertNotIn("上次会话可能未收尾", self.cli("boot").stdout)
-        self.assertIn("没有检测到需要迁移", self.cli("migrate").stdout)
+        self.assertNotIn("previous session may not have been closed", self.cli("boot").stdout)
+        self.assertIn("No legacy agreements require migration", self.cli("migrate").stdout)
 
         agreements = self.workspace / ".hypha" / "agreements"
         agreements.mkdir()
@@ -475,15 +479,15 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("trigger_hits=oauth", routed)
         self.assertIn("title_hits=oauth", routed)
         lint = self.cli("lint").stdout
-        self.assertIn("警告：共享 trigger 候选", lint)
-        self.assertIn("lint 通过", lint)
+        self.assertIn("Warning: Shared trigger candidate", lint)
+        self.assertIn("Lint passed", lint)
 
     def test_command_surface_is_unambiguous_and_progress_starts_work(self):
         self.cli("init")
         self.cli("add", "implementation")
         progress = self.cli("progress", "0001", "100").stdout
-        self.assertIn("已更新 0001: in_progress", progress)
-        self.assertIn("100% 只表示叶子工作量完成", progress)
+        self.assertIn("Updated 0001: in_progress", progress)
+        self.assertIn("100% represents leaf work progress only", progress)
         self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
 
         help_text = self.cli("--help").stdout
@@ -496,7 +500,7 @@ class HyphaCliTest(unittest.TestCase):
             text=True, capture_output=True, check=False,
         )
         self.assertNotEqual(0, rejected.returncode)
-        self.assertIn("任务治理必须使用 workspace-local", rejected.stderr)
+        self.assertIn("task governance must use workspace-local", rejected.stderr)
 
 if __name__ == "__main__":
     unittest.main()

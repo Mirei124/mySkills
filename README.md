@@ -163,7 +163,7 @@ Inspect the draft and run `apply` only after its meaning and scope are confirmed
 Search active knowledge with comma-separated literal keywords selected by the agent:
 
 ```bash
-python3 "$HYPHA_CLI" --workspace "$PROJECT" search "login failed,authentication,session,登录"
+python3 "$HYPHA_CLI" --workspace "$PROJECT" search "login failed,authentication,session,token"
 ```
 
 `search` is deterministic rg-style literal full-text search, not an embedded language model. The single query argument is split on English or Chinese commas. It searches active, routable knowledge pages by default and prints `path:line: snippet`, ranked by distinct keyword hits and occurrences. Repeat `--file` to search only selected workspace files or directories, and use `--limit` to bound output. Use `route "terms"` instead when you want to explain topic-based knowledge recall rather than find literal text.

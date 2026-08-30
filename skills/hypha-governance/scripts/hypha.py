@@ -94,7 +94,7 @@ def parse_frontmatter(front: str) -> dict:
         if not line.strip():
             i += 1; continue
         if line.startswith((" ", "\t")) or ":" not in line:
-            raise ValueError(f"无效 frontmatter 行：{line}")
+            raise ValueError(f"Invalid frontmatter line: {line}")
         key, value = line.split(":", 1)
         key, value = key.strip(), value.strip()
         if value:
@@ -104,7 +104,7 @@ def parse_frontmatter(front: str) -> dict:
             if not lines[i].strip(): i += 1; continue
             item = lines[i].strip()
             if not item.startswith("-"):
-                raise ValueError(f"无效 frontmatter 缩进行：{lines[i]}")
+                raise ValueError(f"Invalid indented frontmatter line: {lines[i]}")
             item = item[1:].strip()
             if ":" not in item:
                 items.append(parse_value(item)); i += 1; continue
@@ -121,7 +121,7 @@ def parse_frontmatter(front: str) -> dict:
 def read_node(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
-        raise ValueError(f"{path}: 缺少 frontmatter")
+        raise ValueError(f"{path}: missing frontmatter")
     _, front, body = text.split("---\n", 2)
     data = parse_frontmatter(front)
     data["_path"] = path
@@ -243,7 +243,7 @@ def task_progresses(tasks: dict) -> dict[str, int | None]:
     visiting = set()
     def totals(task_id: str) -> tuple[int, int]:
         if task_id in memo: return memo[task_id]
-        if task_id in visiting: raise ValueError(f"任务 parent 成环：{task_id}")
+        if task_id in visiting: raise ValueError(f"Task parent cycle detected at {task_id}")
         visiting.add(task_id)
         node = tasks[task_id]
         if node.get("status") == "dropped":
@@ -298,7 +298,7 @@ def cycle_errors(tasks: dict) -> list[str]:
         targets = ([str(node["parent"])] if node.get("parent") else []) + [str(x) for x in node.get("depends_on", [])]
         for target in targets:
             if target not in tasks: continue
-            if state.get(target) == 1: errors.append("任务关系成环：" + " -> ".join(stack + [task_id, target]))
+            if state.get(target) == 1: errors.append("Task relationship cycle: " + " -> ".join(stack + [task_id, target]))
             elif not state.get(target): visit(target, stack + [task_id])
         state[task_id] = 2
     for task_id in tasks:
@@ -309,30 +309,30 @@ def cycle_errors(tasks: dict) -> list[str]:
 def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
     errors, agents_text = [], None
     for task_id, node in tasks.items():
-        if not node.get("id") or not node.get("status"): errors.append(f"{task_id}: 缺 id 或 status")
-        if node.get("status") not in TASK_STATUSES: errors.append(f"{task_id}: 无效状态")
-        if node.get("status") == "blocked" and not node.get("blocked_reason"): errors.append(f"{task_id}: blocked 缺 blocked_reason")
-        if node.get("parent") and str(node["parent"]) not in tasks: errors.append(f"{task_id}: 悬空 parent {node['parent']}")
+        if not node.get("id") or not node.get("status"): errors.append(f"{task_id}: missing id or status")
+        if node.get("status") not in TASK_STATUSES: errors.append(f"{task_id}: invalid status")
+        if node.get("status") == "blocked" and not node.get("blocked_reason"): errors.append(f"{task_id}: blocked task is missing blocked_reason")
+        if node.get("parent") and str(node["parent"]) not in tasks: errors.append(f"{task_id}: dangling parent {node['parent']}")
         for dep in node.get("depends_on", []):
-            if str(dep) not in tasks: errors.append(f"{task_id}: 悬空依赖 {dep}")
+            if str(dep) not in tasks: errors.append(f"{task_id}: dangling dependency {dep}")
         for link in links(node):
             linked_id = intent_link_id(link)
             if linked_id == "" or (linked_id and linked_id not in tasks):
-                errors.append(f"{task_id}: 悬空任务正文链接 {link}")
+                errors.append(f"{task_id}: dangling task body link {link}")
     errors.extend(cycle_errors(tasks))
     for path, node in knowledge.items():
         kind = node.get("claim_kind")
-        if kind not in CLAIM_KINDS: errors.append(f"{path}: 无效或缺少 claim_kind")
-        if node.get("status", "active") not in KNOWLEDGE_STATUSES: errors.append(f"{path}: 无效知识状态")
-        if node.get("status") == "superseded" and not node.get("superseded_by"): errors.append(f"{path}: superseded 缺 superseded_by")
+        if kind not in CLAIM_KINDS: errors.append(f"{path}: invalid or missing claim_kind")
+        if node.get("status", "active") not in KNOWLEDGE_STATUSES: errors.append(f"{path}: invalid knowledge status")
+        if node.get("status") == "superseded" and not node.get("superseded_by"): errors.append(f"{path}: superseded node is missing superseded_by")
         anchors = node.get("anchors", [])
-        if kind == "sourced" and (not anchors or not node.get("evidence")): errors.append(f"{path}: sourced 缺 anchor 或 evidence")
-        if kind == "inference" and (not anchors or not node.get("inference")): errors.append(f"{path}: inference 缺 inference 或来源 anchor")
+        if kind == "sourced" and (not anchors or not node.get("evidence")): errors.append(f"{path}: sourced node is missing anchors or evidence")
+        if kind == "inference" and (not anchors or not node.get("inference")): errors.append(f"{path}: inference node is missing inference or source anchors")
         if kind == "agreement":
-            if node.get("authority") not in {"user_explicit", "user_confirmed"}: errors.append(f"{path}: agreement 必须标明 user_explicit 或 user_confirmed authority")
-            if not node.get("agreement_quote"): errors.append(f"{path}: agreement 缺 agreement_quote")
-            if node.get("knowledge_kind") not in KNOWLEDGE_KINDS: errors.append(f"{path}: agreement 缺有效 knowledge_kind")
-            if node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: agreement 缺有效 scope")
+            if node.get("authority") not in {"user_explicit", "user_confirmed"}: errors.append(f"{path}: agreement authority must be user_explicit or user_confirmed")
+            if not node.get("agreement_quote"): errors.append(f"{path}: agreement is missing agreement_quote")
+            if node.get("knowledge_kind") not in KNOWLEDGE_KINDS: errors.append(f"{path}: agreement is missing a valid knowledge_kind")
+            if node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: agreement is missing a valid scope")
             if node.get("agreement_quote"):
                 if agents_text is None:
                     documents = []
@@ -343,20 +343,20 @@ def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
                             except OSError: pass
                     agents_text = "\n".join(documents)
                 if str(node["agreement_quote"]).strip() in agents_text:
-                    errors.append(f"{path}: agreement_quote 已存在于 AGENTS.md；Hypha 只保存缘由、范围、历史或失效条件")
+                    errors.append(f"{path}: agreement_quote already exists in AGENTS.md; Hypha should store only rationale, scope, history, or review conditions")
         if node.get("knowledge_kind") is not None and node.get("knowledge_kind") not in KNOWLEDGE_KINDS:
-            errors.append(f"{path}: 无效 knowledge_kind")
-        if node.get("scope") is not None and node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: 无效 scope")
-        if node.get("authority") is not None and node.get("authority") not in KNOWLEDGE_AUTHORITIES: errors.append(f"{path}: 无效 authority")
-        if kind != "note" and not node.get("when"): errors.append(f"{path}: 缺 when")
+            errors.append(f"{path}: invalid knowledge_kind")
+        if node.get("scope") is not None and node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: invalid scope")
+        if node.get("authority") is not None and node.get("authority") not in KNOWLEDGE_AUTHORITIES: errors.append(f"{path}: invalid authority")
+        if kind != "note" and not node.get("when"): errors.append(f"{path}: missing when")
         for evidence in node.get("evidence", []):
             if not isinstance(evidence, dict) or not evidence.get("anchor") or not evidence.get("quote"):
-                errors.append(f"{path}: 无效 evidence"); continue
+                errors.append(f"{path}: invalid evidence"); continue
             section = anchor_text(home, str(evidence["anchor"]))
-            if section is None: errors.append(f"{path}: 证据 anchor 不存在：{evidence['anchor']}")
-            elif str(evidence["quote"]) not in section: errors.append(f"{path}: quote 不在指定 anchor 段落中")
+            if section is None: errors.append(f"{path}: evidence anchor does not exist: {evidence['anchor']}")
+            elif str(evidence["quote"]) not in section: errors.append(f"{path}: quote is not present in the referenced anchor section")
         for task_id in node.get("affects", []):
-            if str(task_id) not in tasks: errors.append(f"{path}: 悬空 affects {task_id}")
+            if str(task_id) not in tasks: errors.append(f"{path}: dangling affects reference {task_id}")
     return errors
 
 
@@ -488,45 +488,45 @@ def build_bootstrap_plan(workspace: Path) -> dict:
 
 def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
     if plan.get("schemaVersion") != 2 or plan.get("kind") != "hypha-bootstrap-plan":
-        raise ValueError("无效 bootstrap plan schema")
+        raise ValueError("Invalid bootstrap plan schema")
     if plan.get("reviewed") is not True:
-        raise ValueError("bootstrap plan 必须由 agent 审阅并显式设置 reviewed: true")
+        raise ValueError("The bootstrap plan must be reviewed by an agent and explicitly set reviewed: true")
     entries = plan.get("tasks")
-    if not isinstance(entries, list) or not entries: raise ValueError("bootstrap plan 缺少 tasks")
+    if not isinstance(entries, list) or not entries: raise ValueError("Bootstrap plan is missing tasks")
     knowledge_entries = plan.get("knowledge", [])
-    if not isinstance(knowledge_entries, list): raise TypeError("bootstrap plan knowledge 必须为数组")
+    if not isinstance(knowledge_entries, list): raise TypeError("Bootstrap plan knowledge must be an array")
     tasks, knowledge = prepare(home)
-    if tasks or knowledge: raise ValueError("bootstrap --apply 仅支持空任务与知识图；已有节点请使用 add/apply")
+    if tasks or knowledge: raise ValueError("bootstrap --apply requires an empty task and knowledge graph; use add/apply when nodes already exist")
     keys = [entry.get("key") for entry in entries if isinstance(entry, dict)]
     if len(keys) != len(entries) or len(set(keys)) != len(keys) or any(not key for key in keys):
-        raise ValueError("bootstrap plan task key 必须唯一且非空")
+        raise ValueError("Bootstrap plan task keys must be unique and non-empty")
     ids = {key: f"{index:04d}" for index, key in enumerate(keys, 1)}
     parent_keys = {entry.get("parent") for entry in entries if entry.get("parent") is not None}
     proposed = {}
     paths = []
     for entry in entries:
         status = entry.get("status", "todo")
-        if status not in TASK_STATUSES: raise ValueError(f"bootstrap status 无效：{status}")
+        if status not in TASK_STATUSES: raise ValueError(f"Invalid bootstrap status: {status}")
         parent_key = entry.get("parent")
-        if parent_key is not None and parent_key not in ids: raise ValueError(f"bootstrap parent 不存在：{parent_key}")
+        if parent_key is not None and parent_key not in ids: raise ValueError(f"Bootstrap parent does not exist: {parent_key}")
         task_id = ids[entry["key"]]
         title = str(entry.get("title", "")).strip()
-        if not title: raise ValueError("bootstrap task title 不能为空")
+        if not title: raise ValueError("Bootstrap task title cannot be empty")
         acceptance = [str(item).strip() for item in entry.get("acceptance", []) if str(item).strip()]
         evidence = [str(item).strip() for item in entry.get("evidence", []) if str(item).strip()]
         if not acceptance or any(item.startswith("Replace with ") for item in acceptance):
-            raise ValueError(f"bootstrap task {entry['key']} 必须有已审阅的具体验收条件")
-        if not evidence: raise ValueError(f"bootstrap task {entry['key']} 必须有证据")
+            raise ValueError(f"Bootstrap task {entry['key']} requires reviewed, concrete acceptance criteria")
+        if not evidence: raise ValueError(f"Bootstrap task {entry['key']} requires evidence")
         slug = re.sub(r"[^\w\-]+", "-", title.lower()).strip("-") or task_id
         path = home / "intent" / f"{task_id}-{slug[:40]}.md"
-        body = "\n# " + title + "\n\n## 验收\n\n" + "\n".join(f"- {item}" for item in acceptance)
-        body += "\n\n## 证据\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
+        body = "\n# " + title + "\n\n## Acceptance\n\n" + "\n".join(f"- {item}" for item in acceptance)
+        body += "\n\n## Evidence\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
         node = {"id": task_id, "status": status, "bootstrap_confidence": entry.get("confidence", "reviewed"),
                 "_body": body, "_path": path, "title": title}
         if entry["key"] not in parent_keys:
             progress = entry.get("progress", 0)
-            if not isinstance(progress, int) or not 0 <= progress <= 100: raise ValueError("bootstrap leaf progress 必须为 0..100 整数")
-            if status == "done" and progress != 100: raise ValueError("bootstrap done 叶子任务的 progress 必须为 100")
+            if not isinstance(progress, int) or not 0 <= progress <= 100: raise ValueError("Bootstrap leaf progress must be an integer from 0 to 100")
+            if status == "done" and progress != 100: raise ValueError("A done bootstrap leaf must have progress 100")
             node["progress"] = progress
         if parent_key is not None: node["parent"] = ids[parent_key]
         proposed[task_id] = node; paths.append(path)
@@ -534,24 +534,24 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
     proposed_knowledge, source_copies = {}, []
     workspace = home.parent
     for index, entry in enumerate(knowledge_entries, 1):
-        if not isinstance(entry, dict): raise TypeError("bootstrap knowledge 条目必须是对象")
+        if not isinstance(entry, dict): raise TypeError("Bootstrap knowledge entries must be objects")
         if entry.get("confidence") == "unreviewed":
-            raise ValueError("bootstrap knowledge 候选必须审阅、删除或把 confidence 改为 reviewed")
+            raise ValueError("Bootstrap knowledge candidates must be reviewed, removed, or set to confidence: reviewed")
         title, source, quote = (str(entry.get(field, "")).strip() for field in ("title", "source", "quote"))
-        if not title or not source or not quote: raise ValueError("bootstrap knowledge 必须有 title、source、quote")
+        if not title or not source or not quote: raise ValueError("Bootstrap knowledge requires title, source, and quote")
         source_path = (workspace / source).resolve()
         try: relative = source_path.relative_to(workspace.resolve())
-        except ValueError as exc: raise ValueError(f"bootstrap knowledge source 越界：{source}") from exc
-        if not source_path.is_file() or ".hypha" in relative.parts: raise ValueError(f"bootstrap knowledge source 无效：{source}")
+        except ValueError as exc: raise ValueError(f"Bootstrap knowledge source is outside the workspace: {source}") from exc
+        if not source_path.is_file() or ".hypha" in relative.parts: raise ValueError(f"Invalid bootstrap knowledge source: {source}")
         captured = Path("src") / "bootstrap" / relative
         anchor = captured.as_posix()
         if entry.get("heading"): anchor += "#" + heading_slug(str(entry["heading"]))
         affects = []
         for key in entry.get("affects", []):
-            if key not in ids: raise ValueError(f"bootstrap knowledge affects 不存在：{key}")
+            if key not in ids: raise ValueError(f"Bootstrap knowledge affects target does not exist: {key}")
             affects.append(ids[key])
         triggers = [str(item).casefold() for item in entry.get("triggers", []) if str(item).strip()]
-        if not triggers: raise ValueError(f"bootstrap knowledge {title} 缺 triggers")
+        if not triggers: raise ValueError(f"Bootstrap knowledge {title} is missing triggers")
         slug = re.sub(r"[^\w-]+", "-", title.lower()).strip("-") or f"background-{index}"
         ident = f"know/bootstrap/{slug[:48]}"
         if ident in proposed_knowledge: ident += f"-{index}"
@@ -583,7 +583,7 @@ def init(args):
         atomic_write(home / ".gitignore", "lock\nview.html\n")
         atomic_write(home / ".gitattributes", "snapshots/*.jsonl merge=union\naudit-resolutions.jsonl merge=union\n")
         sync(home)
-    print(f"已初始化 {home}")
+    print(f"Initialized {home}")
 
 
 def rebuild_index(home: Path):
@@ -625,9 +625,9 @@ def replay(home: Path) -> tuple[dict[str, dict], dict[tuple[str, str, str], str]
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip(): continue
             try: event = json.loads(line)
-            except json.JSONDecodeError as exc: raise ValueError(f"{path}:{line_no}: 无效快照 JSON：{exc}")
+            except json.JSONDecodeError as exc: raise ValueError(f"{path}:{line_no}: invalid snapshot JSON: {exc}")
             if not {"kind", "id", "field", "to", "recorded_at", "origin"} <= set(event):
-                raise ValueError(f"{path}:{line_no}: 快照字段不完整")
+                raise ValueError(f"{path}:{line_no}: incomplete snapshot fields")
             if event["kind"] not in {"intent", "know"}:
                 continue
             key = f"{event['kind']}:{event['id']}"
@@ -677,20 +677,20 @@ def add(args):
         (home / "intent").mkdir(parents=True, exist_ok=True)
         tasks, knowledge = prepare(home)
         if args.parent and args.root:
-            raise ValueError("不能同时指定父任务和 --root")
+            raise ValueError("Cannot specify both a parent and --root")
         if args.parent and args.parent not in tasks:
-            raise ValueError(f"父任务不存在：{args.parent}")
+            raise ValueError(f"Parent task does not exist: {args.parent}")
         if tasks and not args.parent and not args.root:
-            raise ValueError("已有任务；请指定父任务 ID，或用 --root 显式创建独立根任务")
+            raise ValueError("Tasks already exist; specify a parent task ID or use --root to create an independent root")
         duplicate = next((task_id for task_id, node in tasks.items()
                           if node.get("status") != "dropped" and node["title"].casefold() == args.title.casefold()), None)
         if duplicate:
-            raise ValueError(f"已有同名任务 {duplicate}；请续接该任务，或使用不同标题")
+            raise ValueError(f"An active task with this title already exists: {duplicate}; resume it or use a different title")
         numeric = [int(x) for x in tasks if x.isdigit()]
         task_id = f"{(max(numeric, default=0) + 1):04d}"
         slug = re.sub(r"[^\w\-]+", "-", args.title.lower()).strip("-") or task_id
         path = home / "intent" / f"{task_id}-{slug[:40]}.md"
-        node = {"id": task_id, "status": "todo", "_body": f"\n# {args.title}\n\n## 验收\n\n## 证据\n"}
+        node = {"id": task_id, "status": "todo", "_body": f"\n# {args.title}\n\n## Acceptance\n\n## Evidence\n"}
         if args.parent: node["parent"] = args.parent
         probe = dict(tasks); probe[task_id] = node
         if args.parent: probe[args.parent].pop("progress", None)
@@ -701,19 +701,19 @@ def add(args):
             write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         write_node(path, node, atomic=True)
         sync(home, by="cli")
-    print(f"已创建 {task_id}: {path.relative_to(home)}")
+    print(f"Created {task_id}: {path.relative_to(home)}")
 
 
 def task_mutate(args):
     home = root(args)
     with locked(home):
         tasks, knowledge = prepare(home); node = tasks.get(args.id)
-        if not node: raise ValueError(f"不存在任务 {args.id}")
+        if not node: raise ValueError(f"Task does not exist: {args.id}")
         children = graph(tasks, knowledge)["children"].get(args.id, set())
         if args.command == "progress":
-            if children: raise ValueError(f"{args.id} 有子任务；请更新叶子节点进度")
+            if children: raise ValueError(f"{args.id} has child tasks; update progress on its leaves")
             value = int(args.value)
-            if not 0 <= value <= 100: raise ValueError("progress 必须为 0..100")
+            if not 0 <= value <= 100: raise ValueError("progress must be from 0 to 100")
             node["progress"] = value
             if value > 0 and node.get("status") == "todo": node["status"] = "in_progress"
             if value < 100 and node.get("status") == "done": node["status"] = "in_progress"
@@ -724,7 +724,7 @@ def task_mutate(args):
             if args.command == "done":
                 if children:
                     progress = task_progresses(tasks)[args.id]
-                    if progress != 100: raise ValueError(f"{args.id} 的叶子节点聚合进度为 {progress if progress is not None else '—'}%；达到 100% 后才能完成")
+                    if progress != 100: raise ValueError(f"{args.id} has aggregate leaf progress {progress if progress is not None else '—'}%; it must reach 100% before completion")
                     node.pop("progress", None)
                 else: node["progress"] = 100
         reopened = reopen_incomplete_done_tasks(tasks)
@@ -732,17 +732,17 @@ def task_mutate(args):
         if errors: raise ValueError("\n".join(errors))
         for changed_id in sorted(reopened | {args.id}): write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
-    print(f"已更新 {args.id}: {node['status']}")
+    print(f"Updated {args.id}: {node['status']}")
     if args.command == "progress" and int(args.value) == 100:
-        print(f"提示：100% 只表示叶子工作量完成；核实验收与证据后再运行 hypha done {args.id}。")
+        print(f"Note: 100% represents leaf work progress only; verify acceptance and evidence before running hypha done {args.id}.")
 
 
 def lint_findings(home: Path, tasks: dict, knowledge: dict, trigger_warn_ratio: float) -> tuple[list[str], list[str], list[str]]:
     errors = validate(home, tasks, knowledge)
     ignored = (home / ".gitignore").read_text(encoding="utf-8") if (home / ".gitignore").exists() else ""
-    if "lock" not in ignored: errors.append(".hypha/.gitignore 必须忽略 lock")
-    if ".drafts/" in ignored: errors.append(".hypha/.drafts/ 是跨机器恢复状态，不能被忽略")
-    if workspace_ignores_hypha(home.parent): errors.append("工作区 Git 忽略了 .hypha/")
+    if "lock" not in ignored: errors.append(".hypha/.gitignore must ignore lock")
+    if ".drafts/" in ignored: errors.append(".hypha/.drafts/ is cross-machine recovery state and must not be ignored")
+    if workspace_ignores_hypha(home.parent): errors.append("The workspace Git configuration ignores .hypha/")
     return errors, trigger_warnings(knowledge, trigger_warn_ratio), unmanaged_fields(home, tasks, knowledge)
 
 
@@ -753,23 +753,23 @@ def lint(args):
         errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, args.trigger_warn_ratio)
         if args.audit: audit(home, tasks, knowledge)
         if unmanaged:
-            print("提示：检测到未托管正式写入（已审计，建议下次使用草稿 + apply）：")
+            print("Note: unmanaged writes to formal nodes were detected and audited; use drafts + apply next time:")
             for item in unmanaged[:12]: print("- " + item)
-        for warning in warnings: print("警告：" + warning)
+        for warning in warnings: print("Warning: " + warning)
     if errors:
-        print("\n".join("错误：" + e for e in errors)); raise SystemExit(1)
-    print("lint 通过")
+        print("\n".join("Error: " + e for e in errors)); raise SystemExit(1)
+    print("Lint passed")
 
 
 def trigger_warnings(knowledge: dict, ratio: float = .5) -> list[str]:
     if not 0 < ratio <= 1:
-        raise ValueError("--trigger-warn-ratio 必须大于 0 且不超过 1")
+        raise ValueError("--trigger-warn-ratio must be greater than 0 and at most 1")
     active = [node for node in knowledge.values()
               if node.get("claim_kind") != "note" and node.get("status", "active") == "active"]
     population = max(len(active), 1); counts = defaultdict(int)
     for node in active:
         for trigger in set(knowledge_triggers(node)): counts[trigger] += 1
-    return [f"共享 trigger 候选：{trigger} 命中 {count}/{population} 条 active 知识；请由 agent 判断是否过宽"
+    return [f"Shared trigger candidate: {trigger} matches {count}/{population} active knowledge nodes; an agent must decide whether it is too broad"
             for trigger, count in sorted(counts.items()) if count > 1 and count / population >= ratio]
 
 
@@ -813,7 +813,7 @@ def load_audit_resolutions(home: Path) -> dict[str, str]:
             record = json.loads(line)
             resolutions[str(record["candidate"])] = str(record["resolution"])
         except (KeyError, json.JSONDecodeError) as exc:
-            raise ValueError(f"{path}:{line_no}: 无效 audit 判定：{exc}") from exc
+            raise ValueError(f"{path}:{line_no}: invalid audit resolution: {exc}") from exc
     return resolutions
 
 
@@ -846,22 +846,22 @@ def audit_candidates(tasks: dict, knowledge: dict) -> list[dict]:
 
 def audit(home: Path, tasks: dict, knowledge: dict) -> None:
     """Heuristic-only audit; it never changes nodes or task state."""
-    print("audit（候选，需人工判断）：")
+    print("Audit candidates (semantic review required):")
     resolutions = load_audit_resolutions(home)
     unresolved = [candidate for candidate in audit_candidates(tasks, knowledge)
                   if resolutions.get(candidate_id(candidate)) != "unrelated"]
     for candidate in unresolved:
         if candidate["kind"] == "isolated-task":
-            print(f"- [{candidate_id(candidate)}] {candidate['task']}: 孤立任务；请判断是否应设置 parent/needs，或保留为独立根任务")
+            print(f"- [{candidate_id(candidate)}] {candidate['task']}: isolated task; decide whether to set parent/needs or retain it as an independent root")
         else:
-            print(f"- [{candidate_id(candidate)}] {candidate['task']}: 可能缺 affects/正文链接：{candidate['knowledge']}")
+            print(f"- [{candidate_id(candidate)}] {candidate['task']}: possible missing affects/body link: {candidate['knowledge']}")
     if not unresolved:
-        print("- 没有未判定的关系候选")
-    print("路由预演：")
+        print("- No unresolved relationship candidates")
+    print("Routing preview:")
     for task_id, task in sorted(tasks.items()):
         if task.get("status") in {"todo", "in_progress", "blocked"}:
             candidates = route(tasks, knowledge, task["title"])
-            print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or '无'}")
+            print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or 'none'}")
     if unresolved:
         agent_follow_up(
             "Adjudicate heuristic graph candidates without inventing relationships.",
@@ -881,7 +881,7 @@ def resolve_candidate(args, resolution: str):
         tasks, knowledge = prepare(home)
         current = {candidate_id(candidate): candidate for candidate in audit_candidates(tasks, knowledge)}
         if args.candidate not in current:
-            raise ValueError("candidate 不是当前 lint --audit 候选；请重新运行 lint --audit")
+            raise ValueError("Candidate is not present in the current lint --audit output; run lint --audit again")
         path = home / "audit-resolutions.jsonl"
         record = {
             "candidate": args.candidate,
@@ -892,8 +892,8 @@ def resolve_candidate(args, resolution: str):
             handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-    print(f"已记录 {args.candidate}: {resolution}")
-    if resolution == "deferred": print("提示：deferred 候选仍会在后续 audit 中显示。")
+    print(f"Recorded {args.candidate}: {resolution}")
+    if resolution == "deferred": print("Note: deferred candidates remain visible in later audits.")
 
 
 def dismiss(args): resolve_candidate(args, "unrelated")
@@ -906,22 +906,22 @@ def needs(args):
     home = root(args)
     with locked(home):
         tasks, knowledge = prepare(home)
-        if args.id not in tasks or args.dependency not in tasks: raise ValueError("任务不存在")
+        if args.id not in tasks or args.dependency not in tasks: raise ValueError("Task does not exist")
         node = tasks[args.id]; deps = list(node.get("depends_on", []))
         if args.dependency not in deps: deps.append(args.dependency)
         node["depends_on"] = deps
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
         write_node(node["_path"], node, atomic=True); sync(home, by="cli")
-    print(f"{args.id} 依赖 {args.dependency}")
+    print(f"{args.id} depends on {args.dependency}")
 
 
 def set_parent(args):
     home = root(args)
     with locked(home):
         tasks, knowledge = prepare(home)
-        if args.id not in tasks or args.parent not in tasks: raise ValueError("任务不存在")
-        if args.id == args.parent: raise ValueError("任务不能以自身为父任务")
+        if args.id not in tasks or args.parent not in tasks: raise ValueError("Task does not exist")
+        if args.id == args.parent: raise ValueError("A task cannot be its own parent")
         tasks[args.id]["parent"] = args.parent
         tasks[args.parent].pop("progress", None)
         reopened = reopen_incomplete_done_tasks(tasks)
@@ -930,37 +930,37 @@ def set_parent(args):
         for changed_id in sorted(reopened | {args.id, args.parent}):
             write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
-    print(f"{args.id} 的父任务为 {args.parent}")
+    print(f"Set parent of {args.id} to {args.parent}")
 
 
 def apply(args):
     home, draft = root(args), Path(args.draft).resolve()
     drafts = (home / ".drafts").resolve()
-    if drafts not in draft.parents: raise ValueError("草稿必须位于 .hypha/.drafts/")
+    if drafts not in draft.parents: raise ValueError("Draft must be located under .hypha/.drafts/")
     with locked(home):
         node = read_node(draft)
         draft_kind = node.pop("kind", None)
         if draft_kind in {"note", "handoff"}:
-            raise ValueError(f"kind: {draft_kind} 是交接/笔记草稿，不能 apply 发布")
+            raise ValueError(f"kind: {draft_kind} is a handoff/note draft and cannot be published with apply")
         if draft_kind == "task-update":
-            if args.global_store: raise ValueError("--global apply 只允许知识草稿，不能发布 task-update")
+            if args.global_store: raise ValueError("--global apply accepts knowledge drafts only, not task-update")
             if not node.get("id"):
-                raise ValueError("kind: task-update 必须提供 id")
+                raise ValueError("kind: task-update requires id")
             kind, ident = "intent", str(node["id"])
         elif draft_kind == "know":
             if node.get("id") is not None:
-                raise ValueError("kind: know 不能包含任务 id")
+                raise ValueError("kind: know cannot contain a task id")
             kind, ident = "know", ""
         elif draft_kind is None:
             if node.get("id") is None:
-                raise ValueError("无 id 的草稿必须显式写 kind: know；交接请使用 kind: handoff")
-            raise ValueError("任务更新必须显式写 kind: task-update")
+                raise ValueError("A draft without id must explicitly use kind: know; use kind: handoff for handoff drafts")
+            raise ValueError("Task updates must explicitly use kind: task-update")
         else:
-            raise ValueError(f"未知草稿 kind: {draft_kind}；可用 task-update、know、handoff、note")
+            raise ValueError(f"Unknown draft kind: {draft_kind}; expected task-update, know, handoff, or note")
         tasks, knowledge = prepare(home)
         if kind == "intent":
             if ident not in tasks:
-                raise ValueError(f"task-update 只能更新已有任务：{ident}")
+                raise ValueError(f"task-update can only update an existing task: {ident}")
             existing = tasks[ident]
             target = existing["_path"]
             node = {**existing, **node, "_path": target}
@@ -974,7 +974,7 @@ def apply(args):
         else:
             incoming_hash = audit_projection(node)["body_hash"]
             duplicate = next((path for path, old in knowledge.items() if audit_projection(old)["body_hash"] == incoming_hash and path != ident), None)
-            if duplicate: raise ValueError(f"草稿内容已发布为 {duplicate}")
+            if duplicate: raise ValueError(f"Draft content is already published as {duplicate}")
             knowledge[ident] = node
         if kind == "intent" and graph(tasks, knowledge)["children"].get(ident): node.pop("progress", None)
         reopened = reopen_incomplete_done_tasks(tasks) if kind == "intent" else set()
@@ -984,7 +984,7 @@ def apply(args):
             write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         write_node(target, node, atomic=True); sync(home, by="apply")
         mark_draft_applied(home, draft)
-    print(f"已发布 {target.relative_to(home)}")
+    print(f"Published {target.relative_to(home)}")
 
 
 def route(tasks: dict, knowledge: dict, text: str) -> list[tuple[int, str, dict]]:
@@ -1090,7 +1090,7 @@ def print_draft_summary(home: Path, verbose: bool = False) -> None:
     drafts = pending_drafts(home)
     if not drafts:
         return
-    print(f"未 apply 草稿：{len(drafts)} 个（.hypha/.drafts/；跨机器恢复状态）")
+    print(f"Unapplied drafts: {len(drafts)} (.hypha/.drafts/; cross-machine recovery state)")
     if verbose:
         for path, kind, task_id, title in drafts:
             suffix = f" id={task_id}" if task_id else ""
@@ -1103,7 +1103,7 @@ def drafts_command(args):
         prepare(home)
         drafts = pending_drafts(home)
     if not drafts:
-        print("没有未 apply 草稿。")
+        print("No unapplied drafts.")
         return
     print_draft_summary(home, verbose=True)
 
@@ -1111,6 +1111,11 @@ def drafts_command(args):
 def section(body: str, name: str) -> str:
     match = re.search(rf"(?ms)^##\s+{re.escape(name)}\s*$\n?(.*?)(?=^##\s|\Z)", body)
     return match.group(1).strip() if match else ""
+
+
+def task_section(body: str, english: str, legacy: str) -> str:
+    """Read current English headings while preserving old Chinese task files."""
+    return section(body, english) or section(body, legacy)
 
 
 def done_in_current_session(home: Path) -> set[str]:
@@ -1134,25 +1139,25 @@ def boot(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
     if previous_session_unclosed(home):
-        running = ", ".join(task_id for task_id, node in sorted(tasks.items()) if node.get("status") == "in_progress") or "无"
-        print(f"提示：上次会话可能未收尾；运行中任务：{running}")
+        running = ", ".join(task_id for task_id, node in sorted(tasks.items()) if node.get("status") == "in_progress") or "none"
+        print(f"Note: the previous session may not have been closed; in-progress tasks: {running}")
     agreements = sorted((home / "agreements").glob("*.md"))
     if agreements:
-        print("迁移提示：agreements/ 已弃用；操作规则移入适用范围内的 AGENTS.md，缘由与历史移入 know/。")
+        print("Migration note: agreements/ is deprecated; move operating rules to the nearest AGENTS.md and rationale/history to know/.")
         for path in agreements: print(f"- legacy agreements/{path.name}")
-    print("任务：")
+    print("Tasks:")
     for task_id, node in sorted(tasks.items()):
         ready = node.get("status") == "todo" and all(tasks[str(dep)].get("status") == "done" for dep in node.get("depends_on", []))
         if node.get("status") in {"in_progress", "blocked"} or ready:
             print(f"- {task_id} [{node.get('status')}] {node['title']}")
-    print("知识：")
+    print("Knowledge:")
     for _, path, node in route(tasks, knowledge, args.term)[:12]:
         triggers = knowledge_triggers(node)
         print(f"- {path} | {node.get('when', '')} | {', '.join(map(str, triggers))}")
     redlinks = graph(tasks, knowledge)["redlinks"]
-    if redlinks: print("红链：" + ", ".join(sorted(redlinks)))
+    if redlinks: print("Redlinks: " + ", ".join(sorted(redlinks)))
     print_draft_summary(home)
-    print("选择候选后运行：hypha start <id>")
+    print("After choosing a candidate, run: hypha start <id>")
     with locked(home): append_session_marker(home, "open")
 
 
@@ -1162,16 +1167,16 @@ def ready(args):
     progresses = task_progresses(tasks)
     running = [(task_id, node) for task_id, node in sorted(tasks.items()) if node.get("status") == "in_progress"]
     if running:
-        print("运行中（续接候选）：")
+        print("In progress (resume candidates):")
         for task_id, node in running:
             progress = f" {progresses[task_id]}%" if progresses[task_id] is not None else ""
             print(f"- {task_id}{progress} {node['title']}")
-    print("可开工：")
+    print("Ready to start:")
     for task_id, node in sorted(tasks.items()):
         if node.get("status") == "todo" and all(tasks[str(dep)].get("status") == "done" for dep in node.get("depends_on", [])):
             print(f"- {task_id} {node['title']}")
     print_draft_summary(home)
-    print("下一步：hypha start <id>")
+    print("Next: hypha start <id>")
 
 
 def list_nodes(args):
@@ -1264,29 +1269,29 @@ def close(args):
     with locked(home): tasks, knowledge = prepare(home)
     errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, .5)
     if errors:
-        raise ValueError("收尾前 lint 未通过：\n" + "\n".join(errors))
-    for warning in warnings: print("警告：" + warning)
+        raise ValueError("Lint failed before session close:\n" + "\n".join(errors))
+    for warning in warnings: print("Warning: " + warning)
     if unmanaged:
-        print("提示：检测到未托管正式写入：")
+        print("Note: unmanaged writes to formal nodes were detected:")
         for item in unmanaged[:12]: print("- " + item)
-    print("运行中：" + ", ".join(k for k,v in tasks.items() if v.get("status") == "in_progress"))
-    print("受阻：" + ", ".join(k for k,v in tasks.items() if v.get("status") == "blocked"))
+    print("In progress: " + ", ".join(k for k,v in tasks.items() if v.get("status") == "in_progress"))
+    print("Blocked: " + ", ".join(k for k,v in tasks.items() if v.get("status") == "blocked"))
     redlinks = graph(tasks, knowledge)["redlinks"]
-    print("红链：" + ", ".join(sorted(redlinks)))
+    print("Redlinks: " + ", ".join(sorted(redlinks)))
     audit(home, tasks, knowledge)
     done = done_in_current_session(home)
     for task_id in done:
         if task_id not in tasks: continue
         node = tasks[task_id]
-        print(f"完成候选 {task_id}：")
-        print(section(node.get("_body", ""), "验收") or "（无验收）")
-        print(section(node.get("_body", ""), "证据") or "（无证据）")
-        print("知识前提：" + ", ".join(sorted(graph(tasks, knowledge)["premises"].get(task_id, set()))) )
+        print(f"Completion candidate {task_id}:")
+        print(task_section(node.get("_body", ""), "Acceptance", "\u9a8c\u6536") or "(no acceptance criteria)")
+        print(task_section(node.get("_body", ""), "Evidence", "\u8bc1\u636e") or "(no evidence)")
+        print("Knowledge premises: " + ", ".join(sorted(graph(tasks, knowledge)["premises"].get(task_id, set()))) )
     changes = git_changes(home.parent)
     if changes:
-        print("本轮文件：" + ", ".join(changes))
-        print("建议提交：git add " + " ".join(changes) + " && git commit -m 'hypha: update state'")
-    else: print("本轮没有未提交文件。")
+        print("Session files: " + ", ".join(changes))
+        print("Suggested commit: git add " + " ".join(changes) + " && git commit -m 'hypha: update state'")
+    else: print("No uncommitted Hypha files in this session.")
     agent_follow_up(
         "Finish the governed session using semantic evidence, not status or Git activity alone.",
         [
@@ -1304,7 +1309,7 @@ def close(args):
 
 def ingest(args):
     home, source = root(args), Path(args.file).resolve()
-    if not source.is_file(): raise ValueError(f"来源不存在：{source}")
+    if not source.is_file(): raise ValueError(f"Source does not exist: {source}")
     with locked(home):
         tasks, knowledge = prepare(home)
         destination = home / "src" / source.name
@@ -1313,8 +1318,8 @@ def ingest(args):
         if not destination.exists(): shutil.copy2(source, destination)
         sync(home, by="cli")
     candidates = route(tasks, knowledge, source.stem)[:8]
-    print(f"已复制来源：{destination.relative_to(home)}")
-    print("候选旧知识：" + ", ".join(path for _, path, _ in candidates) if candidates else "候选旧知识：无")
+    print(f"Captured source: {destination.relative_to(home)}")
+    print("Existing knowledge candidates: " + ", ".join(path for _, path, _ in candidates) if candidates else "Existing knowledge candidates: none")
     agent_follow_up(
         "Turn the captured source into evidence-backed project knowledge.",
         [
@@ -1332,14 +1337,14 @@ def ingest(args):
 
 def search(args):
     """Search knowledge or explicit source files using comma-separated literals."""
-    if args.limit < 1: raise ValueError("search --limit 必须大于 0")
+    if args.limit < 1: raise ValueError("search --limit must be greater than 0")
     home = root(args)
     with locked(home): _tasks, knowledge = prepare(home)
     terms = []
     for term in args.keywords.replace("，", ",").split(","):
         normalized = term.strip().casefold()
         if normalized and normalized not in terms: terms.append(normalized)
-    if not terms: raise ValueError("search 至少需要一个非空关键词")
+    if not terms: raise ValueError("search requires at least one non-empty keyword")
     candidates = []
     if args.file:
         workspace = home.parent.resolve()
@@ -1348,8 +1353,8 @@ def search(args):
             requested = Path(value)
             target = requested.resolve() if requested.is_absolute() else (workspace / requested).resolve()
             try: target.relative_to(workspace)
-            except ValueError as exc: raise ValueError(f"search --file 必须位于 workspace 内：{value}") from exc
-            if not target.exists(): raise ValueError(f"search --file 不存在：{value}")
+            except ValueError as exc: raise ValueError(f"search --file must be inside the workspace: {value}") from exc
+            if not target.exists(): raise ValueError(f"search --file does not exist: {value}")
             paths = [target] if target.is_file() else sorted(path for path in target.rglob("*") if path.is_file())
             for path in paths:
                 resolved = path.resolve()
@@ -1391,7 +1396,7 @@ def migrate(args):
         if errors: raise ValueError("\n".join(errors))
         agreements = sorted((home / "agreements").glob("*.md"))
     if not agreements:
-        print("没有检测到需要迁移的 legacy agreements；结构校验请使用 hypha lint。")
+        print("No legacy agreements require migration; use hypha lint for structural validation.")
         return
     agent_follow_up(
         "Migrate legacy agreements without losing rationale or duplicating always-on rules.",
@@ -1407,27 +1412,27 @@ def migrate(args):
 
 
 def bootstrap(args):
-    if args.global_store: raise ValueError("bootstrap 仅支持 workspace，不支持 --global")
+    if args.global_store: raise ValueError("bootstrap supports workspace storage only, not --global")
     workspace, home = Path(args.workspace).resolve(), root(args)
     if args.apply_plan:
         plan_path = Path(args.apply_plan).resolve()
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        if not home.is_dir(): raise ValueError("尚未 init；请先运行 hypha init")
+        if not home.is_dir(): raise ValueError("Hypha is not initialized; run hypha init first")
         with locked(home): created = apply_bootstrap_plan(home, plan)
-        print(f"已从 bootstrap plan 创建 {len(created)} 个节点")
+        print(f"Created {len(created)} nodes from the bootstrap plan")
         for path in created: print("- " + path)
         return
     plan = build_bootstrap_plan(workspace)
     rendered = json.dumps(plan, ensure_ascii=False, indent=2) + "\n"
     if args.dry_run:
         print(rendered, end=""); return
-    if not home.is_dir(): raise ValueError("尚未 init；请先运行 hypha init")
+    if not home.is_dir(): raise ValueError("Hypha is not initialized; run hypha init first")
     target = Path(args.output).resolve() if args.output else home / ".drafts" / "bootstrap-plan.json"
     try: target.relative_to(workspace)
-    except ValueError as exc: raise ValueError("bootstrap plan 必须写在 workspace 内") from exc
+    except ValueError as exc: raise ValueError("Bootstrap plan must be written inside the workspace") from exc
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target, rendered)
-    print(f"已生成 bootstrap plan：{target}")
+    print(f"Generated bootstrap plan: {target}")
     agent_follow_up(
         "Convert repository observations into a truthful initial long-running task and knowledge graph.",
         [
@@ -1492,10 +1497,10 @@ def view(args):
     try:
         template = template_path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
-        raise ValueError(f"缺少视图模板：{template_path}") from exc
+        raise ValueError(f"View template is missing: {template_path}") from exc
     page = template.replace("{{HYPHA_DATA}}", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
     if page == template:
-        raise ValueError(f"视图模板缺少 {{HYPHA_DATA}} 占位符：{template_path}")
+        raise ValueError(f"View template is missing the {{HYPHA_DATA}} placeholder: {template_path}")
     output = home / "view.html"
     atomic_write(output, page)
     print(output)
@@ -1509,18 +1514,18 @@ def open_view(path: Path) -> None:
     elif sys.platform == "darwin":  # pragma: no cover - exercised on macOS.
         command = ["open", str(path)]
     else:
-        raise ValueError("--open 目前仅支持 Linux（xdg-open）和 macOS（open）；请手动打开生成的 HTML 文件")
+        raise ValueError("--open currently supports Linux (xdg-open) and macOS (open) only; open the generated HTML manually")
     try:
         subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except FileNotFoundError as exc:
-        raise ValueError(f"找不到 {command[0]}；请手动打开 {path}") from exc
+        raise ValueError(f"Could not find {command[0]}; open {path} manually") from exc
 
 
 def show(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
     n = tasks.get(args.target) or knowledge.get(args.target.removesuffix(".md"))
-    if not n: raise ValueError(f"不存在节点 {args.target}")
+    if not n: raise ValueError(f"Node does not exist: {args.target}")
     print(n["_path"].relative_to(root(args))); print(n["title"])
     for key in ("status", "parent", "depends_on", "affects", "when", "claim_kind", "knowledge_kind", "scope", "authority", "review_when"):
         if key in n: print(f"{key}: {n[key]}")
@@ -1528,83 +1533,83 @@ def show(args):
     if args.target in tasks:
         progress = task_progresses(tasks)[args.target]
         print(f"progress: {progress if progress is not None else '—'}")
-        print("知识前提：" + ", ".join(sorted(relations["premises"].get(args.target, set()))))
-        print("子任务：" + ", ".join(sorted(relations["children"].get(args.target, set()))))
-        print("解锁：" + ", ".join(sorted(relations["unlocks"].get(args.target, set()))))
+        print("Knowledge premises: " + ", ".join(sorted(relations["premises"].get(args.target, set()))))
+        print("Child tasks: " + ", ".join(sorted(relations["children"].get(args.target, set()))))
+        print("Unlocks: " + ", ".join(sorted(relations["unlocks"].get(args.target, set()))))
     else:
         path = args.target.removesuffix(".md")
-        print("反链：" + ", ".join(sorted(relations["backlinks"].get(path, set()))))
-    print("红链：" + ", ".join(sorted(relations["redlinks"])))
+        print("Backlinks: " + ", ".join(sorted(relations["backlinks"].get(path, set()))))
+    print("Redlinks: " + ", ".join(sorted(relations["redlinks"])))
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="hypha",
-        description="本地任务与知识图谱：用命令维护结构，用草稿 + apply 发布正文。",
-        epilog="会话开始用 boot；结构问题用 lint；完成前用 close。",
+        description="Local task and knowledge graph: maintain structure with commands and publish content through drafts + apply.",
+        epilog="Use boot at session start, lint for structural diagnostics, and close before finishing governed work.",
     )
-    parser.add_argument("--workspace", default=".", help="工作区根目录（默认当前目录）")
-    parser.add_argument("--global", dest="global_store", action="store_true", help="改用 ~/.hypha 跨仓库知识库")
-    sub = parser.add_subparsers(dest="command", required=True, title="命令")
-    sub.add_parser("init", help="初始化当前工作区的 .hypha 目录", description="创建任务、知识、草稿、来源和审计目录。")
-    p = sub.add_parser("add", help="创建一个 todo 任务", description="任务 ID 自动分配；可选地挂到已有父任务下。")
-    p.add_argument("title", help="任务标题")
-    p.add_argument("parent", nargs="?", help="可选父任务 ID，例如 0001")
-    p.add_argument("--root", action="store_true", help="已有任务时，显式创建一个独立根任务")
+    parser.add_argument("--workspace", default=".", help="Workspace root (default: current directory)")
+    parser.add_argument("--global", dest="global_store", action="store_true", help="Use ~/.hypha for cross-repository knowledge")
+    sub = parser.add_subparsers(dest="command", required=True, title="commands")
+    sub.add_parser("init", help="Initialize the .hypha directory", description="Create task, knowledge, draft, source, and audit directories.")
+    p = sub.add_parser("add", help="Create a todo task", description="Task IDs are allocated automatically; optionally attach the task to an existing parent.")
+    p.add_argument("title", help="Task title")
+    p.add_argument("parent", nargs="?", help="Optional parent task ID, for example 0001")
+    p.add_argument("--root", action="store_true", help="Explicitly create an independent root when tasks already exist")
     for name in ("start", "done", "drop"):
-        actions = {"start": "开始执行任务", "done": "标记任务完成", "drop": "放弃任务"}
-        p = sub.add_parser(name, help=actions[name]); p.add_argument("id", help="任务 ID")
-    p = sub.add_parser("progress", help="更新任务进度（0 到 100）")
-    p.add_argument("id", help="任务 ID"); p.add_argument("value", help="进度整数，例如 60")
-    p = sub.add_parser("block", help="标记任务受阻并记录原因")
-    p.add_argument("id", help="任务 ID"); p.add_argument("value", help="阻塞原因")
-    p = sub.add_parser("needs", help="声明任务依赖，形成 DAG 边")
-    p.add_argument("id", help="依赖方任务 ID"); p.add_argument("dependency", help="必须先完成的任务 ID")
-    p = sub.add_parser("parent", help="为已有任务设置父任务，形成层级边")
-    p.add_argument("id", help="子任务 ID"); p.add_argument("parent", help="父任务 ID")
-    p = sub.add_parser("apply", help="校验并原子发布一份草稿")
-    p.add_argument("draft", help=".hypha/.drafts/ 下的 Markdown 草稿路径")
-    p = sub.add_parser("lint", help="检查结构、证据、链接和路由规则")
-    p.add_argument("--audit", action="store_true", help="额外列出可能缺失的关系和路由候选")
-    p.add_argument("--trigger-warn-ratio", type=float, default=.5, help="共享 trigger 警告比例（默认 0.5；仅警告）")
-    p = sub.add_parser("dismiss", help="确认 audit 候选无关并永久隐藏")
-    p.add_argument("candidate", help="lint --audit 输出的候选 ID")
-    p = sub.add_parser("defer", help="暂缓判断 audit 候选，并在后续继续显示")
-    p.add_argument("candidate", help="lint --audit 输出的候选 ID")
-    p = sub.add_parser("boot", help="输出当前任务与相关知识的精简上下文")
-    p.add_argument("term", nargs="*", default=[], help="当前任务或话题关键词")
-    sub.add_parser("ready", help="列出运行中续接候选与依赖已满足的任务")
-    p = sub.add_parser("list", help="列出所有任务和知识节点", description="输出紧凑表格，也可筛选、按任务层级展示或输出 JSON。")
-    p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="节点类型（默认 all）")
-    p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="按状态精确筛选")
+        actions = {"start": "Start a task", "done": "Mark a task done", "drop": "Drop a task"}
+        p = sub.add_parser(name, help=actions[name]); p.add_argument("id", help="Task ID")
+    p = sub.add_parser("progress", help="Update task progress from 0 to 100")
+    p.add_argument("id", help="Task ID"); p.add_argument("value", help="Integer progress value, for example 60")
+    p = sub.add_parser("block", help="Mark a task blocked and record the reason")
+    p.add_argument("id", help="Task ID"); p.add_argument("value", help="Blocking reason")
+    p = sub.add_parser("needs", help="Declare an execution dependency and create a DAG edge")
+    p.add_argument("id", help="Dependent task ID"); p.add_argument("dependency", help="Task ID that must finish first")
+    p = sub.add_parser("parent", help="Set the parent of an existing task and create a hierarchy edge")
+    p.add_argument("id", help="Child task ID"); p.add_argument("parent", help="Parent task ID")
+    p = sub.add_parser("apply", help="Validate and atomically publish a draft")
+    p.add_argument("draft", help="Path to a Markdown draft under .hypha/.drafts/")
+    p = sub.add_parser("lint", help="Validate structure, evidence, links, and routing rules")
+    p.add_argument("--audit", action="store_true", help="Also list possible missing relationships and routing candidates")
+    p.add_argument("--trigger-warn-ratio", type=float, default=.5, help="Shared-trigger warning ratio (default: 0.5; warning only)")
+    p = sub.add_parser("dismiss", help="Confirm an audit candidate is unrelated and hide it permanently")
+    p.add_argument("candidate", help="Candidate ID from lint --audit")
+    p = sub.add_parser("defer", help="Postpone an audit candidate and keep showing it later")
+    p.add_argument("candidate", help="Candidate ID from lint --audit")
+    p = sub.add_parser("boot", help="Show concise current task and relevant knowledge context")
+    p.add_argument("term", nargs="*", default=[], help="Current task or topic keywords")
+    sub.add_parser("ready", help="List resumable in-progress tasks and todo tasks with satisfied dependencies")
+    p = sub.add_parser("list", help="List all task and knowledge nodes", description="Print a compact table, filter nodes, show task hierarchy, or emit JSON.")
+    p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="Node type (default: all)")
+    p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="Filter by exact status")
     formats = p.add_mutually_exclusive_group()
-    formats.add_argument("--tree", action="store_true", help="按 parent 层级展示任务，并单列知识节点")
-    formats.add_argument("--json", action="store_true", help="输出稳定的机器可读 JSON")
-    sub.add_parser("drafts", help="列出未 apply 草稿，供中断会话恢复")
-    p = sub.add_parser("route", help="解释当前话题召回了哪些知识及其评分")
-    p.add_argument("term", help="要展开的关键词")
-    p = sub.add_parser("show", help="显示节点及其派生关系")
-    p.add_argument("target", help="任务 ID 或 know/... 路径")
-    sub.add_parser("close", help="会话收尾：审计、完成证据与提交建议")
-    p = sub.add_parser("ingest", help="复制一份外部来源，并列出旧知识候选")
-    p.add_argument("file", help="要复制进 .hypha/src/ 的来源文件")
-    p = sub.add_parser("search", help="用逗号分隔的字面关键词全文检索知识")
-    p.add_argument("keywords", help="逗号分隔关键词，例如 登录,认证,auth,session")
-    p.add_argument("--file", action="append", help="只搜索 workspace 内指定文件或目录；可重复使用")
-    p.add_argument("--limit", type=int, default=30, help="最多返回的匹配行数（默认 30）")
-    sub.add_parser("migrate", help="检查 legacy agreements 并输出语义迁移协议")
-    p = sub.add_parser("bootstrap", help="扫描现有项目并生成可审阅的初始任务计划")
+    formats.add_argument("--tree", action="store_true", help="Show tasks by parent hierarchy and list knowledge separately")
+    formats.add_argument("--json", action="store_true", help="Emit stable machine-readable JSON")
+    sub.add_parser("drafts", help="List unapplied drafts for interrupted-session recovery")
+    p = sub.add_parser("route", help="Explain which knowledge the current topic recalls and how it was scored")
+    p.add_argument("term", help="Topic keywords to explain")
+    p = sub.add_parser("show", help="Show a node and its derived relationships")
+    p.add_argument("target", help="Task ID or know/... path")
+    sub.add_parser("close", help="Close a session with validation, audit, evidence review, and commit guidance")
+    p = sub.add_parser("ingest", help="Capture an external source and list existing knowledge candidates")
+    p.add_argument("file", help="Source file to copy into .hypha/src/")
+    p = sub.add_parser("search", help="Full-text search with comma-separated literal keywords")
+    p.add_argument("keywords", help="Comma-separated keywords, for example login,authentication,session")
+    p.add_argument("--file", action="append", help="Search only the specified workspace file or directory; repeatable")
+    p.add_argument("--limit", type=int, default=30, help="Maximum matching lines to return (default: 30)")
+    sub.add_parser("migrate", help="Inspect legacy agreements and print the semantic migration protocol")
+    p = sub.add_parser("bootstrap", help="Scan an existing project and generate a reviewable initialization plan")
     group = p.add_mutually_exclusive_group()
-    group.add_argument("--dry-run", action="store_true", help="只把候选计划输出到 stdout")
-    group.add_argument("--output", help="把候选计划写到 workspace 内的指定 JSON 文件")
-    group.add_argument("--apply", dest="apply_plan", help="校验并应用已审阅的 bootstrap plan")
-    p = sub.add_parser("view", help="生成可拖拽缩放的任务/知识 Canvas 面板")
-    p.add_argument("--mode", choices=("all", "tasks", "knowledge"), default="all", help="初始图层：all、tasks 或 knowledge")
-    p.add_argument("--open", action="store_true", help="生成后用系统默认浏览器打开（Linux 使用 xdg-open）")
+    group.add_argument("--dry-run", action="store_true", help="Print the candidate plan to stdout only")
+    group.add_argument("--output", help="Write the candidate plan to a JSON file inside the workspace")
+    group.add_argument("--apply", dest="apply_plan", help="Validate and apply a reviewed bootstrap plan")
+    p = sub.add_parser("view", help="Generate a draggable, zoomable task/knowledge canvas")
+    p.add_argument("--mode", choices=("all", "tasks", "knowledge"), default="all", help="Initial layer: all, tasks, or knowledge")
+    p.add_argument("--open", action="store_true", help="Open the generated view in the default browser (xdg-open on Linux)")
     args = parser.parse_args()
     try:
         if args.global_store and args.command not in GLOBAL_COMMANDS:
-            raise ValueError(f"--global 不支持 {args.command}；任务治理必须使用 workspace-local .hypha")
+            raise ValueError(f"--global does not support {args.command}; task governance must use workspace-local .hypha")
         if args.command == "init": init(args)
         elif args.command == "add": add(args)
         elif args.command in {"start", "progress", "block", "done", "drop"}: task_mutate(args)
@@ -1627,7 +1632,7 @@ def main():
         elif args.command == "bootstrap": bootstrap(args)
         else: view(args)
     except (TypeError, ValueError, OSError) as exc:
-        print(f"错误：{exc}", file=sys.stderr); raise SystemExit(2)
+        print(f"Error: {exc}", file=sys.stderr); raise SystemExit(2)
 
 
 if __name__ == "__main__": main()
