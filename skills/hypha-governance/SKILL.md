@@ -1,11 +1,11 @@
 ---
 name: hypha-governance
-description: Maintain a repo-local Hypha graph so long-running work does not drift and durable project knowledge compounds like an Obsidian wiki. Use its task workflow when the user asks to initialize, inspect, update, summarize, resume, or close persistent work; when work spans sessions or very large context; or when task boundaries, dependencies, progress, evidence, blockers, or deviations materially change. Use its knowledge workflow—even during a short task—when the conversation establishes durable project rationale, constraints, decisions, confirmed consensus, non-goals, invariants, definitions, reusable lessons, sourced synthesis, or high-impact assumptions whose loss could cause future mistakes or repeated work. Do not use for ordinary execution, transient details or output, speculation, secrets, or facts cheap to recover. Put concise always-on instructions in AGENTS.md; use Hypha for their rationale, scope, history, evidence, exceptions, and links to long-running work instead of duplicating rules.
+description: "Use a repo-local Hypha graph as low-frequency memory for work that outlives a normal runtime plan: cross-session or context-scale tasks, material drift risk, major decisions, milestone evidence, and handoff. Capture durable rationale, constraints, decisions, non-goals, lessons, consensus, and high-impact assumptions whose loss could cause future mistakes. Do not invoke task governance for ordinary one-session execution, per-turn bookkeeping, or merely because a task has several plan steps. If the user explicitly asks for Hypha on a short task, use the smallest useful record rather than manufacturing a task tree. Keep concise always-on rules in AGENTS.md and their rationale/history in Hypha."
 ---
 
 # Hypha Governance
 
-Hypha keeps long-running work aligned across sessions and accumulates durable project knowledge in a searchable, linked, evolving Obsidian-like wiki. The CLI maintains deterministic structure; the agent judges semantics, truth, relationships, and acceptance.
+Hypha sits above a runtime plan: plans coordinate the current execution; Hypha preserves outcomes and knowledge when that plan will not fit safely in one session or context. Its value is observable only when it restores context, changes a decision, catches drift, or improves a handoff.
 
 ## Separate AGENTS.md From Hypha
 
@@ -14,20 +14,17 @@ Hypha keeps long-running work aligned across sessions and accumulates durable pr
 - Content that answers only “what must be done?” belongs in AGENTS.md. Content that answers “why, what does it affect, when should it be reviewed, and how has it evolved?” belongs in Hypha. When both matter, keep the short rule in AGENTS.md and its explanation in Hypha without verbatim duplication.
 - `agreements/` is deprecated. Move operating rules to AGENTS.md and their rationale and history to `know/`.
 
-## Trigger Rules
+## Use Low-Frequency Checkpoints
 
-Either workflow may trigger independently.
+Use task governance at these checkpoints:
 
-### Task governance
+- At the start of a new session, restore the active goal, constraints, verified results, and remaining acceptance items.
+- Before a major design choice, recall related decisions, non-goals, rejected alternatives, and lessons.
+- Update when the goal, acceptance boundary, dependency, real blocker, or design direction materially changes.
+- Record evidence when an independently acceptable milestone is completed.
+- Before handoff or context exhaustion, record the next concrete step and unresolved risks.
 
-Use the task workflow when:
-
-- the user explicitly asks to initialize, inspect, update, summarize, resume, or close Hypha;
-- work spans sessions, many directories or dependencies, extremely large context, or has material drift risk;
-- a governed task materially changes boundary, acceptance, dependency, status, trustworthy leaf progress, evidence, blocker, or deviation;
-- a request must align with a long-running goal or requires deciding root, child, and dependency relationships.
-
-Do not create task nodes merely for an ordinary fix, short review, or one-session implementation. Governance manages work; it does not replace execution.
+An explicit request to initialize, inspect, update, summarize, resume, or close Hypha triggers the relevant operation, but does not make a short task long-lived. For an explicitly governed short task, create at most one outcome node unless later work becomes independently schedulable across sessions. Do not create or update task nodes for ordinary implementation steps, every tool call, every compile, small percentage changes, or each conversation turn. A Hypha command completing is never by itself a reason to report, wait, or end the turn.
 
 ### Knowledge accumulation
 
@@ -58,13 +55,18 @@ Do not store one-off output, temporary debugging steps, facts cheap to recover f
 - A runtime goal is the current conversation thread's persistent objective and completion/blocking state. Create it only when the user explicitly asks; it does not replace repository state.
 - Hypha stores stable, Git-shared task boundaries, milestones, dependencies, acceptance, evidence, and knowledge. Do not mirror goal wording or synchronize plan state each turn.
 
-## Task Workflow
+## Default Task Workflow
 
-1. Run `python3 <skill-dir>/scripts/hypha.py --workspace <repo> init`. For a brownfield repository, `bootstrap` may generate an evidence bundle. An agent must rewrite the real goal, acceptance, status, leaf progress, and knowledge candidates before setting `reviewed: true` and applying it.
-2. Resume with `boot "<task and keywords>"`. It lists in-progress, blocked, and unlocked tasks plus relevant knowledge. Use `ready` only to refresh candidates later.
-3. Reuse an existing node for feedback, fixes, and acceptance work serving the same outcome. Add a node only for independently acceptable and schedulable work. Use `parent`/`needs` for structure and `start`/`block`/`done`/`drop` for status.
-4. Only leaves accept `progress`. Parents use the equal-weight average of non-dropped descendant leaves. Adding or lowering a leaf reopens any done ancestor below 100%. Reaching 100% never implies acceptance or automatically marks done.
-5. Unless directly commanded by the user, propose task creation, completion, removal, or major reclassification before writing it. Keep low-confidence content in drafts.
+1. **Resume once.** At a new-session boundary, run `boot "<task and keywords>"`. Inspect the relevant task and recalled knowledge only as needed to recover the goal, constraints, verified evidence, remaining acceptance, next step, and risks. Do not repeat `boot` in every turn.
+2. **Execute continuously.** Return to the user's primary work. Do not mirror a runtime plan in Hypha, record routine activity, or stop after a governance command.
+3. **Checkpoint only material change.** Reuse the current task. Update status/structure when scope, dependencies, blockers, or direction change; publish one evidence update for an independently acceptable milestone. Prefer statuses and acceptance evidence over invented precision. Use numeric leaf progress only when it can be explained by explicit acceptance items; parents remain derived.
+4. **Handoff once.** When the user requests handoff/close or context is genuinely ending, record the next concrete step and unresolved risks, then run `close`. Do not use `close` between ordinary turns or while execution is expected to continue.
+
+Use `init` once for a new graph. For a brownfield repository, `bootstrap` is an optional initialization aid, not a default session step; review and rewrite its evidence bundle before applying it. Add a node only for independently acceptable, schedulable work. Within a user-authorized Hypha goal, normal child creation and lifecycle updates are authorized; ask before creating an unrelated root, deleting scope, or making a materially ambiguous reclassification.
+
+Before adding a child, ask whether it could be independently accepted, handed off, deferred, or scheduled while its siblings proceed separately. If not, it is an acceptance item or runtime-plan step, not a Hypha node. Several steps performed consecutively in the same turn to produce one deliverable belong in one task.
+
+`Acceptance` defines the observable outcome and must be present before completion. `Evidence` records why completion is trustworthy and must cite concrete tests, files, commands, or user confirmation. Keep both concise. `todo` may begin without them, but `done` may not; never mark work done merely because code was written or a Git change exists.
 
 ## Knowledge Workflow
 
@@ -77,31 +79,41 @@ Do not store one-off output, temporary debugging steps, facts cheap to recover f
 
 `claim_kind` records evidence method; `knowledge_kind` is rationale, constraint, decision, consensus, invariant, non_goal, definition, lesson, assumption, or synthesis; `scope` is project, subsystem, or task; `authority` records origin; `review_when` records reconsideration conditions.
 
-## Deterministic Commands
+## Command Selection
+
+The normal path is deliberately short: `boot` once, ordinary implementation, a material state/evidence update when warranted, and `close` only for real handoff.
 
 - `show <id-or-path>`: node, backlinks, premises, child tasks, unlocks, and redlinks.
 - `list [--type task|knowledge] [--status ...] [--tree|--json]`: complete node overview.
 - `search "keyword1,keyword2,keyword3" [--file <path>]`: literal full-text search in knowledge or sources.
 - `route <terms>`: topic recall candidates and score components. Use `show` when the node is known.
-- `lint --audit`, `dismiss`, and `defer`: inspect candidates. Dismiss only false positives, defer insufficient evidence, and materialize confirmed relationships using parent, needs, affects, or body links.
-- `ready`: refresh in-progress and dependency-ready tasks.
+- `lint`: validate after structural or published knowledge changes. Add `--audit` only when relationship review is useful, not as routine bookkeeping.
+- `ready`: refresh candidates only when execution choices have changed; it is not part of the normal loop.
 - `migrate`: inspect deprecated agreements and print the migration protocol. Every command synchronizes derived indexes.
 - `drafts`: unpublished candidates and interrupted-session recovery state.
 - `view --mode all|tasks|knowledge`: self-contained graph view.
 
 ## Close A Session
 
-Only in task-governance mode, update evidence and status and run `close`; it performs lint, audit, and semantic close guidance. Use `lint [--audit]` separately only for diagnostics. In knowledge-only mode, verify confirmed drafts and supersession needs. Hypha does not commit automatically; follow AGENTS.md.
+`close` ends a governed task session, not an assistant turn. Run it only when the user explicitly asks to close or hand off Hypha work, or when a real multi-session work period is ending after task evidence and status have already been reviewed. Do not run it automatically at the end of every response, after an ordinary commit, during knowledge-only capture, while work is expected to continue in the next turn, or while a material graph change still needs confirmation.
+
+`close` is terminal and deterministic: it performs lint, prints audit candidates and a session summary, records the lifecycle marker, and exits. Its output is a report, not a request for more work, and must not by itself cause the agent to wait, ask a question, or mark a runtime goal blocked. Use `lint --audit` before `close` only when semantic relationship review is actually needed. Hypha does not commit automatically; follow AGENTS.md.
 
 ## Execute Semantic CLI Hand-offs
 
-`bootstrap`, `ingest`, `lint --audit`, `migrate`, and `close` may print `AGENT FOLLOW-UP`. This does not mean semantic work is complete. Continue its Instructions until:
+`bootstrap`, `ingest`, `lint --audit`, and `migrate` may print `AGENT FOLLOW-UP`. This means the command completed a mechanical first stage and the calling agent should continue its Instructions in the same turn whenever safely possible. It is not, by itself, a reason to yield, ask the user a question, or mark work blocked. Continue until:
 
 - evidence from nodes, sources, code, or user confirmation supports a validated change;
 - a candidate is confirmed unrelated and recorded with `dismiss`; or
 - evidence is insufficient, so it is retained with `defer` and uncertainty is reported.
 
 The CLI supplies candidates, paths, status, and constraints. The agent owns summarization, support/refinement/contradiction classification, relationship selection, acceptance review, deviation detection, and deciding when user confirmation is required. Never treat prompt candidates as facts or merely print the prompt and claim completion.
+
+Exhaust safe, authorized work before asking for confirmation. Ask only when a missing decision would materially change formal task/knowledge state or requires new authority. If confirmation concerns optional knowledge capture rather than the user's primary request, leave a draft or defer the candidate, report it briefly, and still finish the primary work. A deferred audit candidate remains visible but does not emit another follow-up, so do not rerun `lint --audit` merely to revisit it.
+
+## Handle CLI Rejections Without Stalling
+
+A nonzero CLI exit is a validation result, not proof that the user's work is blocked. Read the error, inspect current nodes, and perform every safe deterministic correction available. For example, update leaves before completing a parent, choose `parent` versus `needs` from established task semantics, or keep an uncertain node as a draft. Ask the user only when the remaining choice is materially ambiguous and would change formal state. Do not mark a runtime goal blocked merely because `add`, `apply`, `done`, `lint`, or `close` rejected invalid state.
 
 ## Boundaries
 

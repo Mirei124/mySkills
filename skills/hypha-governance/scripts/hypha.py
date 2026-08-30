@@ -43,7 +43,8 @@ ROUTE_OPEN_TASK_TIE_BREAK = 1
 
 def agent_follow_up(purpose: str, steps: list[str], context: list[str] | None = None) -> None:
     """Print a stable hand-off for semantic work the deterministic CLI cannot do."""
-    print("AGENT FOLLOW-UP (semantic judgment required; do not treat candidates as facts)")
+    print("AGENT FOLLOW-UP (continue safe, authorized steps in this turn)")
+    print("Execution rule: do not stop or mark work blocked solely because this block exists; ask only when a material decision requires user authority.")
     print(f"Purpose: {purpose}")
     if context:
         print("Context:")
@@ -710,6 +711,8 @@ def task_mutate(args):
         tasks, knowledge = prepare(home); node = tasks.get(args.id)
         if not node: raise ValueError(f"Task does not exist: {args.id}")
         children = graph(tasks, knowledge)["children"].get(args.id, set())
+        acceptance = task_section(node.get("_body", ""), "Acceptance", "\u9a8c\u6536").strip()
+        evidence = task_section(node.get("_body", ""), "Evidence", "\u8bc1\u636e").strip()
         if args.command == "progress":
             if children: raise ValueError(f"{args.id} has child tasks; update progress on its leaves")
             value = int(args.value)
@@ -722,6 +725,10 @@ def task_mutate(args):
             node["status"] = {"start": "in_progress", "done": "done", "drop": "dropped"}[args.command]
             node.pop("blocked_reason", None)
             if args.command == "done":
+                if not acceptance:
+                    raise ValueError(f"{args.id} cannot be completed without non-empty Acceptance criteria")
+                if not evidence:
+                    raise ValueError(f"{args.id} cannot be completed without non-empty Evidence")
                 if children:
                     progress = task_progresses(tasks)[args.id]
                     if progress != 100: raise ValueError(f"{args.id} has aggregate leaf progress {progress if progress is not None else '—'}%; it must reach 100% before completion")
@@ -733,6 +740,8 @@ def task_mutate(args):
         for changed_id in sorted(reopened | {args.id}): write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
     print(f"Updated {args.id}: {node['status']}")
+    if args.command == "start" and not acceptance:
+        print(f"Warning: {args.id} has no Acceptance criteria; define the observable outcome before completion.")
     if args.command == "progress" and int(args.value) == 100:
         print(f"Note: 100% represents leaf work progress only; verify acceptance and evidence before running hypha done {args.id}.")
 
@@ -844,25 +853,30 @@ def audit_candidates(tasks: dict, knowledge: dict) -> list[dict]:
     return candidates
 
 
-def audit(home: Path, tasks: dict, knowledge: dict) -> None:
+def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True) -> None:
     """Heuristic-only audit; it never changes nodes or task state."""
-    print("Audit candidates (semantic review required):")
+    print("Audit candidates (semantic review required):" if emit_follow_up else
+          "Audit candidates carried forward (close report only):")
     resolutions = load_audit_resolutions(home)
     unresolved = [candidate for candidate in audit_candidates(tasks, knowledge)
                   if resolutions.get(candidate_id(candidate)) != "unrelated"]
+    actionable = [candidate for candidate in unresolved
+                  if resolutions.get(candidate_id(candidate)) != "deferred"]
     for candidate in unresolved:
+        state = " [deferred]" if resolutions.get(candidate_id(candidate)) == "deferred" else ""
         if candidate["kind"] == "isolated-task":
-            print(f"- [{candidate_id(candidate)}] {candidate['task']}: isolated task; decide whether to set parent/needs or retain it as an independent root")
+            print(f"- [{candidate_id(candidate)}]{state} {candidate['task']}: isolated task; decide whether to set parent/needs or retain it as an independent root")
         else:
-            print(f"- [{candidate_id(candidate)}] {candidate['task']}: possible missing affects/body link: {candidate['knowledge']}")
+            print(f"- [{candidate_id(candidate)}]{state} {candidate['task']}: possible missing affects/body link: {candidate['knowledge']}")
     if not unresolved:
         print("- No unresolved relationship candidates")
-    print("Routing preview:")
-    for task_id, task in sorted(tasks.items()):
-        if task.get("status") in {"todo", "in_progress", "blocked"}:
-            candidates = route(tasks, knowledge, task["title"])
-            print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or 'none'}")
-    if unresolved:
+    if emit_follow_up:
+        print("Routing preview:")
+        for task_id, task in sorted(tasks.items()):
+            if task.get("status") in {"todo", "in_progress", "blocked"}:
+                candidates = route(tasks, knowledge, task["title"])
+                print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or 'none'}")
+    if emit_follow_up and actionable:
         agent_follow_up(
             "Adjudicate heuristic graph candidates without inventing relationships.",
             [
@@ -871,8 +885,12 @@ def audit(home: Path, tasks: dict, knowledge: dict) -> None:
                 "For isolated tasks, decide whether the task is a legitimate root, a child, or dependency-related; change the graph only with evidence or user confirmation.",
                 "Run lint --audit again. Use dismiss <id> only for confirmed false positives; use defer <id> when evidence is currently insufficient.",
             ],
-            [f"unresolved candidates: {len(unresolved)}"],
+            [f"actionable candidates: {len(actionable)}", f"deferred candidates: {len(unresolved) - len(actionable)}"],
         )
+    elif not emit_follow_up:
+        print("- close requests no action on these candidates; review them in a later lint --audit session if needed")
+    elif unresolved and not actionable:
+        print("- All visible candidates are deferred; no action is requested until new evidence appears")
 
 
 def resolve_candidate(args, resolution: str):
@@ -1278,7 +1296,7 @@ def close(args):
     print("Blocked: " + ", ".join(k for k,v in tasks.items() if v.get("status") == "blocked"))
     redlinks = graph(tasks, knowledge)["redlinks"]
     print("Redlinks: " + ", ".join(sorted(redlinks)))
-    audit(home, tasks, knowledge)
+    audit(home, tasks, knowledge, emit_follow_up=False)
     done = done_in_current_session(home)
     for task_id in done:
         if task_id not in tasks: continue
@@ -1292,19 +1310,9 @@ def close(args):
         print("Session files: " + ", ".join(changes))
         print("Suggested commit: git add " + " ".join(changes) + " && git commit -m 'hypha: update state'")
     else: print("No uncommitted Hypha files in this session.")
-    agent_follow_up(
-        "Finish the governed session using semantic evidence, not status or Git activity alone.",
-        [
-            "Compare the user's requested outcome with each active task's acceptance criteria and the actual repository changes.",
-            "For every completion candidate, verify acceptance item by item and cite concrete tests, files, commands, or user confirmation; reopen tasks whose evidence is insufficient.",
-            "Identify durable rationale, constraints, decisions, consensus, lessons, assumptions, or deviations from this session; update existing knowledge before creating duplicates.",
-            "Propose task creation, done/drop, reparenting, or major knowledge changes to the user unless they directly requested that state change.",
-            "If this review causes further graph changes, run close once more; otherwise this command records the session close. Follow AGENTS.md for version-control actions.",
-        ],
-        [f"completion candidates since latest boot: {', '.join(sorted(done)) or 'none'}"],
-    )
     with locked(home):
         append_session_marker(home, "close")
+    print("Session closed.")
 
 
 def ingest(args):
@@ -1545,8 +1553,8 @@ def show(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="hypha",
-        description="Local task and knowledge graph: maintain structure with commands and publish content through drafts + apply.",
-        epilog="Use boot at session start, lint for structural diagnostics, and close before finishing governed work.",
+        description="Low-frequency memory for long-running tasks and durable project knowledge.",
+        epilog="Recommended path: boot once at a new-session boundary; work normally; update only material changes or accepted milestones; close only for a real handoff.",
     )
     parser.add_argument("--workspace", default=".", help="Workspace root (default: current directory)")
     parser.add_argument("--global", dest="global_store", action="store_true", help="Use ~/.hypha for cross-repository knowledge")
@@ -1559,7 +1567,7 @@ def main():
     for name in ("start", "done", "drop"):
         actions = {"start": "Start a task", "done": "Mark a task done", "drop": "Drop a task"}
         p = sub.add_parser(name, help=actions[name]); p.add_argument("id", help="Task ID")
-    p = sub.add_parser("progress", help="Update task progress from 0 to 100")
+    p = sub.add_parser("progress", help="Update explainable leaf progress from 0 to 100")
     p.add_argument("id", help="Task ID"); p.add_argument("value", help="Integer progress value, for example 60")
     p = sub.add_parser("block", help="Mark a task blocked and record the reason")
     p.add_argument("id", help="Task ID"); p.add_argument("value", help="Blocking reason")
@@ -1569,16 +1577,16 @@ def main():
     p.add_argument("id", help="Child task ID"); p.add_argument("parent", help="Parent task ID")
     p = sub.add_parser("apply", help="Validate and atomically publish a draft")
     p.add_argument("draft", help="Path to a Markdown draft under .hypha/.drafts/")
-    p = sub.add_parser("lint", help="Validate structure, evidence, links, and routing rules")
+    p = sub.add_parser("lint", help="Validate after structural or published knowledge changes")
     p.add_argument("--audit", action="store_true", help="Also list possible missing relationships and routing candidates")
     p.add_argument("--trigger-warn-ratio", type=float, default=.5, help="Shared-trigger warning ratio (default: 0.5; warning only)")
     p = sub.add_parser("dismiss", help="Confirm an audit candidate is unrelated and hide it permanently")
     p.add_argument("candidate", help="Candidate ID from lint --audit")
     p = sub.add_parser("defer", help="Postpone an audit candidate and keep showing it later")
     p.add_argument("candidate", help="Candidate ID from lint --audit")
-    p = sub.add_parser("boot", help="Show concise current task and relevant knowledge context")
+    p = sub.add_parser("boot", help="Restore task and knowledge context once at a new-session boundary")
     p.add_argument("term", nargs="*", default=[], help="Current task or topic keywords")
-    sub.add_parser("ready", help="List resumable in-progress tasks and todo tasks with satisfied dependencies")
+    sub.add_parser("ready", help="Refresh execution candidates when choices have materially changed")
     p = sub.add_parser("list", help="List all task and knowledge nodes", description="Print a compact table, filter nodes, show task hierarchy, or emit JSON.")
     p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="Node type (default: all)")
     p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="Filter by exact status")
@@ -1590,7 +1598,7 @@ def main():
     p.add_argument("term", help="Topic keywords to explain")
     p = sub.add_parser("show", help="Show a node and its derived relationships")
     p.add_argument("target", help="Task ID or know/... path")
-    sub.add_parser("close", help="Close a session with validation, audit, evidence review, and commit guidance")
+    sub.add_parser("close", help="Validate and record a real handoff or governed-session end")
     p = sub.add_parser("ingest", help="Capture an external source and list existing knowledge candidates")
     p.add_argument("file", help="Source file to copy into .hypha/src/")
     p = sub.add_parser("search", help="Full-text search with comma-separated literal keywords")

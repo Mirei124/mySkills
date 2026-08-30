@@ -25,13 +25,21 @@ class HyphaCliTest(unittest.TestCase):
             self.fail(result.stderr + result.stdout)
         return result
 
+    def document_task(self, task_id, acceptance="Outcome is verified.", evidence="Verification passed."):
+        task = next((self.workspace / ".hypha" / "intent").glob(f"{task_id}-*.md"))
+        text = task.read_text(encoding="utf-8")
+        text = text.replace("## Acceptance\n\n", f"## Acceptance\n\n- {acceptance}\n\n", 1)
+        text = text.replace("## Evidence\n", f"## Evidence\n\n- {evidence}\n", 1)
+        task.write_text(text, encoding="utf-8")
+
     def test_help_explains_workflow(self):
         help_text = self.cli("--help").stdout
-        self.assertIn("maintain structure with commands", help_text)
-        self.assertIn("Show concise current task and relevant knowledge", help_text)
+        self.assertIn("Low-frequency memory for long-running tasks", help_text)
+        self.assertIn("Restore task and knowledge context once", help_text)
         self.assertIn("List all task and knowledge nodes", help_text)
         self.assertIn("Generate a draggable, zoomable task/knowledge canvas", help_text)
-        self.assertIn("Use boot at session start", help_text)
+        self.assertIn("boot once at a new-session boundary", help_text)
+        self.assertIn("close only for a real handoff", help_text)
         commands = re.search(r"\{([^}]+)\}", help_text).group(1).split(",")
         for command in commands:
             command_help = self.cli(command, "--help").stdout
@@ -42,6 +50,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "first task")
         self.cli("add", "second task", "--root")
         self.cli("needs", "0002", "0001")
+        self.document_task("0001")
         self.cli("done", "0001")
         self.assertIn("0002 second task", self.cli("ready").stdout)
         task = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
@@ -50,6 +59,28 @@ class HyphaCliTest(unittest.TestCase):
         events = list((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
         self.assertTrue(events)
         self.assertNotIn(".observed.json", {path.name for path in (self.workspace / ".hypha" / "snapshots").iterdir()})
+
+    def test_completion_requires_acceptance_and_evidence(self):
+        self.cli("init")
+        self.cli("add", "verified outcome")
+        started = self.cli("start", "0001").stdout
+        self.assertIn("has no Acceptance criteria", started)
+        missing_acceptance = self.cli("done", "0001", ok=False)
+        self.assertIn("without non-empty Acceptance", missing_acceptance.stderr)
+
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        text = task.read_text(encoding="utf-8").replace(
+            "## Acceptance\n\n", "## Acceptance\n\n- The outcome works.\n\n", 1
+        )
+        task.write_text(text, encoding="utf-8")
+        missing_evidence = self.cli("done", "0001", ok=False)
+        self.assertIn("without non-empty Evidence", missing_evidence.stderr)
+
+        text = task.read_text(encoding="utf-8").replace(
+            "## Evidence\n", "## Evidence\n\n- The verification command passed.\n", 1
+        )
+        task.write_text(text, encoding="utf-8")
+        self.assertIn("Updated 0001: done", self.cli("done", "0001").stdout)
 
     def test_list_supports_table_filters_tree_and_json(self):
         self.cli("init")
@@ -93,8 +124,10 @@ class HyphaCliTest(unittest.TestCase):
     def test_parent_progress_is_derived_from_non_dropped_leaves(self):
         self.cli("init")
         self.cli("add", "parent")
+        self.document_task("0001")
         self.cli("progress", "0001", "40")
         self.cli("add", "first leaf", "0001")
+        self.document_task("0002")
         parent = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         self.assertNotIn("progress:", parent.read_text(encoding="utf-8"))
         rejected = self.cli("progress", "0001", "90", ok=False)
@@ -102,6 +135,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("progress", "0002", "40")
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         self.cli("add", "second leaf", "0001")
+        self.document_task("0003")
         self.cli("progress", "0003", "80")
         self.assertIn("progress: 60", self.cli("show", "0001").stdout)
         self.cli("drop", "0003")
@@ -310,9 +344,13 @@ class HyphaCliTest(unittest.TestCase):
     def test_close_view_and_unmanaged_warning(self):
         self.cli("init")
         self.cli("add", "deliverable")
+        self.document_task("0001")
         self.cli("done", "0001")
         self.cli("add", "follow up", "0001")
-        self.assertIn("Completion candidate 0001", self.cli("close").stdout)
+        close_output = self.cli("close").stdout
+        self.assertIn("Completion candidate 0001", close_output)
+        self.assertIn("Session closed.", close_output)
+        self.assertNotIn("AGENT FOLLOW-UP", close_output)
         view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
         html = view.read_text(encoding="utf-8")
         self.assertIn("Tasks", html)
@@ -426,6 +464,7 @@ class HyphaCliTest(unittest.TestCase):
         source.write_text("# Provider\n\nUse short-lived access tokens.\n", encoding="utf-8")
         ingest = self.cli("ingest", str(source)).stdout
         self.assertIn("AGENT FOLLOW-UP", ingest)
+        self.assertIn("do not stop or mark work blocked", ingest)
         self.assertIn("support, refinement, contradiction", ingest)
 
         draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
@@ -441,7 +480,10 @@ class HyphaCliTest(unittest.TestCase):
         candidate = re.search(r"\[([0-9a-f]{12})\] 0001", audit).group(1)
         deferred = self.cli("defer", candidate).stdout
         self.assertIn("remain visible in later audits", deferred)
-        self.assertIn(candidate, self.cli("lint", "--audit").stdout)
+        deferred_audit = self.cli("lint", "--audit").stdout
+        self.assertIn(candidate, deferred_audit)
+        self.assertIn("[deferred]", deferred_audit)
+        self.assertNotIn("AGENT FOLLOW-UP", deferred_audit)
         rejected = self.cli("dismiss", "deadbeefdead", ok=False)
         self.assertIn("not present in the current lint --audit output", rejected.stderr)
 
@@ -449,10 +491,14 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         self.cli("add", "deliver")
         self.cli("boot")
+        self.document_task("0001")
         self.cli("done", "0001")
         close = self.cli("close").stdout
-        self.assertIn("completion candidates since latest boot: 0001", close)
-        self.assertIn("AGENT FOLLOW-UP", close)
+        self.assertIn("Completion candidate 0001", close)
+        self.assertIn("Session closed.", close)
+        self.assertNotIn("AGENT FOLLOW-UP", close)
+        self.assertIn("close requests no action", close)
+        self.assertNotIn("Routing preview", close)
         self.assertNotIn("previous session may not have been closed", self.cli("boot").stdout)
         self.assertIn("No legacy agreements require migration", self.cli("migrate").stdout)
 

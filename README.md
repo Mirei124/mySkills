@@ -81,37 +81,43 @@ python3 "$HYPHA_CLI" --workspace "$PROJECT" add "Independent maintenance track" 
 
 Hypha intentionally rejects ambiguous new roots and duplicate active titles. Follow-up feedback, small fixes, and acceptance work should normally continue the current task instead of creating one node per conversation turn.
 
-### 4. Use this session loop
+Hypha is for work that outlives a normal runtime plan. A short task explicitly tracked with Hypha normally gets one outcome node. Setup, implementation, tests, and documentation performed consecutively for that deliverable belong in its Acceptance section, not in separate child nodes. Add a child only when it can be independently accepted, handed off, deferred, or scheduled.
 
-At the beginning of a session:
+### 4. Use the low-frequency session path
+
+At the beginning of a new working session, restore context once:
 
 ```bash
 python3 "$HYPHA_CLI" --workspace "$PROJECT" boot "what you are working on"
-python3 "$HYPHA_CLI" --workspace "$PROJECT" start 0001
 ```
 
-While working:
+Read the relevant task or knowledge node if `boot` identifies one, then continue the primary work. Do not run Hypha after every tool call, compile, commit, or conversation turn.
+
+Update Hypha only when something materially changes:
 
 ```bash
-python3 "$HYPHA_CLI" --workspace "$PROJECT" list
-python3 "$HYPHA_CLI" --workspace "$PROJECT" list --tree
-python3 "$HYPHA_CLI" --workspace "$PROJECT" progress 0001 60
+python3 "$HYPHA_CLI" --workspace "$PROJECT" block 0001 "Waiting for an API decision"
 python3 "$HYPHA_CLI" --workspace "$PROJECT" needs 0002 0001
-python3 "$HYPHA_CLI" --workspace "$PROJECT" parent 0002 0001
+python3 "$HYPHA_CLI" --workspace "$PROJECT" done 0002
 ```
 
-When the acceptance criteria and evidence are real:
+The useful checkpoints are: a new-session restore; recall before a major design choice; a changed goal, dependency, blocker, or direction; an independently accepted milestone; and handoff or context exhaustion. Record milestone evidence through one reviewed task-update draft. Use numeric leaf progress only when explicit acceptance items make the number explainable.
+
+When governed work is genuinely being handed off or closed, record the next step and unresolved risks in the task update, then run:
 
 ```bash
-python3 "$HYPHA_CLI" --workspace "$PROJECT" done 0001
 python3 "$HYPHA_CLI" --workspace "$PROJECT" close
 ```
 
-Some commands print an `AGENT FOLLOW-UP` block. This is a stable hand-off contract for work that requires semantic judgment. The calling agent must continue its instructions: read the cited nodes or sources, check evidence, ask for confirmation when required, and publish only validated changes. Keyword overlap does not prove a relationship, and task status or Git activity alone does not prove completion.
+`bootstrap`, `ingest`, `lint --audit`, and `migrate` may print an `AGENT FOLLOW-UP` block. It is a same-turn continuation checklist for semantic work, not a reason to stop or mark the task blocked. Complete safe steps immediately; ask only when a missing decision would materially change formal state or require new authority. `close` never emits this block.
+
+`close` ends a governed multi-session work period, not an assistant turn. Use it only for an explicit close/handoff or when work is genuinely leaving the current session after evidence and status have already been reviewed. It validates, summarizes, records the close marker, and exits; do not run it automatically after every response or ordinary commit.
 
 `parent` means hierarchy; `needs` means execution dependency. Do not use chronology alone as a reason to create a dependency edge.
 
 Progress belongs only to leaf tasks. Set it with `progress <id> <0..100>` or complete a leaf with `done`; parent progress is the equal-weight average of every non-dropped descendant leaf, regardless of intermediate grouping. A parent cannot be assigned progress directly and can be marked done only after its derived progress reaches 100%. Adding a child removes the former leaf's stored progress, recalculates every ancestor, and reopens any `done` ancestor that falls below 100%. Reaching 100% does not automatically mark ancestors done because their acceptance and evidence still require confirmation. Dropping a task excludes its whole subtree from ancestor progress.
+
+`done` requires non-empty Acceptance and Evidence sections. Acceptance says what observable result was promised; Evidence cites concrete verification such as tests, commands, files, or user confirmation. Writing code or making a Git commit is not sufficient evidence by itself.
 
 ### 5. Add durable knowledge
 
@@ -276,7 +282,7 @@ pnpm test:e2e
 4. Add regression coverage close to the changed behavior.
 5. Run CLI tests and the proportional frontend checks.
 6. For frontend changes, rebuild the template and inspect a mixed graph plus a selected-node state at 1920 × 1080.
-7. Publish acceptance/evidence through a task-update draft and run `close`, which performs lint and audit itself.
+7. Publish acceptance/evidence through a task-update draft. Run `close` only for an explicit handoff or the real end of an active multi-session Hypha session; do not run it for an ordinary code change or commit.
 8. Review `git diff --check` and commit code together with the corresponding `.hypha` state.
 
 ### 5. Test and release notes
