@@ -30,11 +30,28 @@ CLAIM_KINDS = {"sourced", "inference", "agreement", "note"}
 KNOWLEDGE_KINDS = {"rationale", "constraint", "decision", "consensus", "invariant", "non_goal", "definition", "lesson", "assumption", "synthesis"}
 KNOWLEDGE_SCOPES = {"project", "subsystem", "task"}
 KNOWLEDGE_AUTHORITIES = {"user_explicit", "user_confirmed", "repository", "external_source", "agent_inference"}
+GLOBAL_COMMANDS = {"init", "apply", "lint", "dismiss", "defer", "list", "drafts", "route", "show", "ingest", "search", "migrate", "view"}
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 WORD = re.compile(r"[\w-]+", re.UNICODE)
 BOOTSTRAP_EXCLUDED = {".git", ".hypha", "node_modules", "dist", "build", "target", "vendor", "__pycache__", ".venv"}
 BOOTSTRAP_TEXT_SUFFIXES = {".md", ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".rs", ".go", ".java", ".kt", ".rb", ".php", ".cs", ".c", ".h", ".cpp", ".hpp"}
 BOOTSTRAP_BACKGROUND_NAMES = {"readme.md", "contributing.md", "architecture.md", "design.md", "spec.md"}
+ROUTE_TRIGGER_WEIGHT = 100
+ROUTE_TITLE_WEIGHT = 10
+ROUTE_OPEN_TASK_TIE_BREAK = 1
+
+
+def agent_follow_up(purpose: str, steps: list[str], context: list[str] | None = None) -> None:
+    """Print a stable hand-off for semantic work the deterministic CLI cannot do."""
+    print("AGENT FOLLOW-UP (semantic judgment required; do not treat candidates as facts)")
+    print(f"Purpose: {purpose}")
+    if context:
+        print("Context:")
+        for item in context:
+            print(f"- {item}")
+    print("Instructions:")
+    for index, step in enumerate(steps, 1):
+        print(f"{index}. {step}")
 
 
 def root(args: argparse.Namespace) -> Path:
@@ -698,6 +715,7 @@ def task_mutate(args):
             value = int(args.value)
             if not 0 <= value <= 100: raise ValueError("progress 必须为 0..100")
             node["progress"] = value
+            if value > 0 and node.get("status") == "todo": node["status"] = "in_progress"
             if value < 100 and node.get("status") == "done": node["status"] = "in_progress"
         elif args.command == "block": node["status"] = "blocked"; node["blocked_reason"] = args.value
         else:
@@ -715,34 +733,44 @@ def task_mutate(args):
         for changed_id in sorted(reopened | {args.id}): write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         sync(home, by="cli")
     print(f"已更新 {args.id}: {node['status']}")
+    if args.command == "progress" and int(args.value) == 100:
+        print(f"提示：100% 只表示叶子工作量完成；核实验收与证据后再运行 hypha done {args.id}。")
+
+
+def lint_findings(home: Path, tasks: dict, knowledge: dict, trigger_warn_ratio: float) -> tuple[list[str], list[str], list[str]]:
+    errors = validate(home, tasks, knowledge)
+    ignored = (home / ".gitignore").read_text(encoding="utf-8") if (home / ".gitignore").exists() else ""
+    if "lock" not in ignored: errors.append(".hypha/.gitignore 必须忽略 lock")
+    if ".drafts/" in ignored: errors.append(".hypha/.drafts/ 是跨机器恢复状态，不能被忽略")
+    if workspace_ignores_hypha(home.parent): errors.append("工作区 Git 忽略了 .hypha/")
+    return errors, trigger_warnings(knowledge, trigger_warn_ratio), unmanaged_fields(home, tasks, knowledge)
 
 
 def lint(args):
     home = root(args)
     with locked(home):
-        tasks, knowledge = prepare(home); errors = validate(home, tasks, knowledge)
-        ignored = (home / ".gitignore").read_text(encoding="utf-8") if (home / ".gitignore").exists() else ""
-        if "lock" not in ignored: errors.append(".hypha/.gitignore 必须忽略 lock")
-        if ".drafts/" in ignored: errors.append(".hypha/.drafts/ 是跨机器恢复状态，不能被忽略")
-        if workspace_ignores_hypha(home.parent): errors.append("工作区 Git 忽略了 .hypha/")
+        tasks, knowledge = prepare(home)
+        errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, args.trigger_warn_ratio)
         if args.audit: audit(home, tasks, knowledge)
-        errors.extend(trigger_errors(knowledge))
-        unmanaged = unmanaged_fields(home, tasks, knowledge)
         if unmanaged:
             print("提示：检测到未托管正式写入（已审计，建议下次使用草稿 + apply）：")
             for item in unmanaged[:12]: print("- " + item)
-        if args.fix and not errors: rebuild_index(home)
+        for warning in warnings: print("警告：" + warning)
     if errors:
         print("\n".join("错误：" + e for e in errors)); raise SystemExit(1)
     print("lint 通过")
 
 
-def trigger_errors(knowledge: dict) -> list[str]:
-    population = max(len(knowledge), 1); counts = defaultdict(int)
-    for node in knowledge.values():
-        if node.get("claim_kind") != "note":
-            for trigger in set(knowledge_triggers(node)): counts[trigger] += 1
-    return [f"trigger 过宽：{trigger} 命中 {count}/{population} 条知识" for trigger, count in counts.items() if count / population > .2 and count > 1]
+def trigger_warnings(knowledge: dict, ratio: float = .5) -> list[str]:
+    if not 0 < ratio <= 1:
+        raise ValueError("--trigger-warn-ratio 必须大于 0 且不超过 1")
+    active = [node for node in knowledge.values()
+              if node.get("claim_kind") != "note" and node.get("status", "active") == "active"]
+    population = max(len(active), 1); counts = defaultdict(int)
+    for node in active:
+        for trigger in set(knowledge_triggers(node)): counts[trigger] += 1
+    return [f"共享 trigger 候选：{trigger} 命中 {count}/{population} 条 active 知识；请由 agent 判断是否过宽"
+            for trigger, count in sorted(counts.items()) if count > 1 and count / population >= ratio]
 
 
 def workspace_ignores_hypha(workspace: Path) -> bool:
@@ -820,7 +848,8 @@ def audit(home: Path, tasks: dict, knowledge: dict) -> None:
     """Heuristic-only audit; it never changes nodes or task state."""
     print("audit（候选，需人工判断）：")
     resolutions = load_audit_resolutions(home)
-    unresolved = [candidate for candidate in audit_candidates(tasks, knowledge) if candidate_id(candidate) not in resolutions]
+    unresolved = [candidate for candidate in audit_candidates(tasks, knowledge)
+                  if resolutions.get(candidate_id(candidate)) != "unrelated"]
     for candidate in unresolved:
         if candidate["kind"] == "isolated-task":
             print(f"- [{candidate_id(candidate)}] {candidate['task']}: 孤立任务；请判断是否应设置 parent/needs，或保留为独立根任务")
@@ -833,23 +862,44 @@ def audit(home: Path, tasks: dict, knowledge: dict) -> None:
         if task.get("status") in {"todo", "in_progress", "blocked"}:
             candidates = route(tasks, knowledge, task["title"])
             print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or '无'}")
+    if unresolved:
+        agent_follow_up(
+            "Adjudicate heuristic graph candidates without inventing relationships.",
+            [
+                "Read each candidate task and knowledge node, including body, scope, evidence, and existing links.",
+                "For missing-relation candidates, decide whether the knowledge materially affects the task; if yes, publish the actual affects/wiki-link change before resolving it.",
+                "For isolated tasks, decide whether the task is a legitimate root, a child, or dependency-related; change the graph only with evidence or user confirmation.",
+                "Run lint --audit again. Use dismiss <id> only for confirmed false positives; use defer <id> when evidence is currently insufficient.",
+            ],
+            [f"unresolved candidates: {len(unresolved)}"],
+        )
 
 
-def resolve(args):
+def resolve_candidate(args, resolution: str):
     home = root(args)
     with locked(home):
-        prepare(home)
+        tasks, knowledge = prepare(home)
+        current = {candidate_id(candidate): candidate for candidate in audit_candidates(tasks, knowledge)}
+        if args.candidate not in current:
+            raise ValueError("candidate 不是当前 lint --audit 候选；请重新运行 lint --audit")
         path = home / "audit-resolutions.jsonl"
         record = {
             "candidate": args.candidate,
-            "resolution": args.resolution,
+            "resolution": resolution,
             "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-    print(f"已记录 {args.candidate}: {args.resolution}")
+    print(f"已记录 {args.candidate}: {resolution}")
+    if resolution == "deferred": print("提示：deferred 候选仍会在后续 audit 中显示。")
+
+
+def dismiss(args): resolve_candidate(args, "unrelated")
+
+
+def defer(args): resolve_candidate(args, "deferred")
 
 
 def needs(args):
@@ -893,6 +943,7 @@ def apply(args):
         if draft_kind in {"note", "handoff"}:
             raise ValueError(f"kind: {draft_kind} 是交接/笔记草稿，不能 apply 发布")
         if draft_kind == "task-update":
+            if args.global_store: raise ValueError("--global apply 只允许知识草稿，不能发布 task-update")
             if not node.get("id"):
                 raise ValueError("kind: task-update 必须提供 id")
             kind, ident = "intent", str(node["id"])
@@ -942,9 +993,14 @@ def route(tasks: dict, knowledge: dict, text: str) -> list[tuple[int, str, dict]
     for path, node in knowledge.items():
         if node.get("claim_kind") == "note" or node.get("status", "active") != "active": continue
         triggers = knowledge_triggers(node)
-        score = 5 * len(terms & {str(x).casefold() for x in triggers}) + 2 * len(terms & {x.casefold() for x in WORD.findall(node["title"])})
-        score += 2 * sum(str(x) in tasks and tasks[str(x)].get("status") in {"todo", "in_progress", "blocked"} for x in node.get("affects", []))
-        if score: scored.append((score, path, node))
+        trigger_hits = len(terms & {str(x).casefold() for x in triggers})
+        title_hits = len(terms & {x.casefold() for x in WORD.findall(node["title"])})
+        if not (trigger_hits or title_hits): continue
+        open_affects = sum(str(x) in tasks and tasks[str(x)].get("status") in {"todo", "in_progress", "blocked"}
+                           for x in node.get("affects", []))
+        score = (ROUTE_TRIGGER_WEIGHT * trigger_hits + ROUTE_TITLE_WEIGHT * title_hits
+                 + ROUTE_OPEN_TASK_TIE_BREAK * open_affects)
+        scored.append((score, path, node))
     return sorted(scored, key=lambda item: (-item[0], item[1]))
 
 
@@ -990,10 +1046,11 @@ def append_session_marker(home: Path, action: str) -> None:
 
 def previous_session_unclosed(home: Path) -> bool:
     events = read_events(home)
-    if not events:
-        return False
-    latest = events[-1]
-    return not (latest.get("kind") == "session" and latest.get("to") == "close")
+    lifecycle = [event for event in events
+                 if event.get("kind") == "session" and event.get("field") == "lifecycle"]
+    if not lifecycle:
+        return any(event.get("kind") in {"intent", "know"} for event in events)
+    return lifecycle[-1].get("to") == "open"
 
 
 def applied_draft_hashes(home: Path) -> dict[str, str]:
@@ -1056,11 +1113,14 @@ def section(body: str, name: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def done_today(home: Path) -> set[str]:
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    return {str(event["id"]) for event in read_events(home)
+def done_in_current_session(home: Path) -> set[str]:
+    events = read_events(home)
+    opens = [index for index, event in enumerate(events)
+             if event.get("kind") == "session" and event.get("field") == "lifecycle" and event.get("to") == "open"]
+    start = opens[-1] if opens else -1
+    return {str(event["id"]) for event in events[start + 1:]
             if event.get("kind") == "intent" and event.get("field") == "status"
-            and event.get("to") == "done" and str(event.get("recorded_at", "")).startswith(today)}
+            and event.get("to") == "done"}
 
 
 def git_changes(workspace: Path) -> list[str]:
@@ -1092,10 +1152,11 @@ def boot(args):
     redlinks = graph(tasks, knowledge)["redlinks"]
     if redlinks: print("红链：" + ", ".join(sorted(redlinks)))
     print_draft_summary(home)
-    print("下一步：hypha next")
+    print("选择候选后运行：hypha start <id>")
+    with locked(home): append_session_marker(home, "open")
 
 
-def next_task(args):
+def ready(args):
     home = root(args)
     with locked(home): tasks, _ = prepare(home)
     progresses = task_progresses(tasks)
@@ -1184,22 +1245,36 @@ def list_nodes(args):
         print("  ".join(row[index].ljust(widths[index]) for index in range(len(widths))) + "  " + row[-1])
 
 
-def why(args):
+def route_command(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
+    terms = {x.casefold() for x in WORD.findall(args.term)}
     for score, path, node in route(tasks, knowledge, args.term):
-        print(f"{path}\tscore={score}\twhen={node.get('when', '')}\ttriggers={','.join(knowledge_triggers(node))}")
+        trigger_hits = sorted(terms & {str(x).casefold() for x in knowledge_triggers(node)})
+        title_hits = sorted(terms & {x.casefold() for x in WORD.findall(node["title"])})
+        open_affects = [str(x) for x in node.get("affects", [])
+                        if str(x) in tasks and tasks[str(x)].get("status") in {"todo", "in_progress", "blocked"}]
+        print(f"{path}\tscore={score}\ttrigger_hits={','.join(trigger_hits) or '-'}"
+              f"\ttitle_hits={','.join(title_hits) or '-'}\topen_affects={','.join(open_affects) or '-'}"
+              f"\twhen={node.get('when', '')}")
 
 
 def close(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
+    errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, .5)
+    if errors:
+        raise ValueError("收尾前 lint 未通过：\n" + "\n".join(errors))
+    for warning in warnings: print("警告：" + warning)
+    if unmanaged:
+        print("提示：检测到未托管正式写入：")
+        for item in unmanaged[:12]: print("- " + item)
     print("运行中：" + ", ".join(k for k,v in tasks.items() if v.get("status") == "in_progress"))
     print("受阻：" + ", ".join(k for k,v in tasks.items() if v.get("status") == "blocked"))
     redlinks = graph(tasks, knowledge)["redlinks"]
     print("红链：" + ", ".join(sorted(redlinks)))
     audit(home, tasks, knowledge)
-    done = done_today(home)
+    done = done_in_current_session(home)
     for task_id in done:
         if task_id not in tasks: continue
         node = tasks[task_id]
@@ -1212,6 +1287,17 @@ def close(args):
         print("本轮文件：" + ", ".join(changes))
         print("建议提交：git add " + " ".join(changes) + " && git commit -m 'hypha: update state'")
     else: print("本轮没有未提交文件。")
+    agent_follow_up(
+        "Finish the governed session using semantic evidence, not status or Git activity alone.",
+        [
+            "Compare the user's requested outcome with each active task's acceptance criteria and the actual repository changes.",
+            "For every completion candidate, verify acceptance item by item and cite concrete tests, files, commands, or user confirmation; reopen tasks whose evidence is insufficient.",
+            "Identify durable rationale, constraints, decisions, consensus, lessons, assumptions, or deviations from this session; update existing knowledge before creating duplicates.",
+            "Propose task creation, done/drop, reparenting, or major knowledge changes to the user unless they directly requested that state change.",
+            "If this review causes further graph changes, run close once more; otherwise this command records the session close. Follow AGENTS.md for version-control actions.",
+        ],
+        [f"completion candidates since latest boot: {', '.join(sorted(done)) or 'none'}"],
+    )
     with locked(home):
         append_session_marker(home, "close")
 
@@ -1229,19 +1315,31 @@ def ingest(args):
     candidates = route(tasks, knowledge, source.stem)[:8]
     print(f"已复制来源：{destination.relative_to(home)}")
     print("候选旧知识：" + ", ".join(path for _, path, _ in candidates) if candidates else "候选旧知识：无")
-    print("下一步：在 .hypha/.drafts/ 写候选节点；判断关系后执行 hypha apply <draft>")
+    agent_follow_up(
+        "Turn the captured source into evidence-backed project knowledge.",
+        [
+            "Read the copied source and extract only durable claims relevant across sessions; preserve exact quotes and heading/file anchors.",
+            "Search existing knowledge with search using 3-8 literal keywords from the source, then inspect the listed candidates and backlinks.",
+            "For each durable claim, classify it as support, refinement, contradiction, or genuinely new knowledge relative to existing nodes.",
+            "Update or supersede existing knowledge instead of duplicating it. Create a sourced draft only when a distinct claim remains, with when, triggers, anchors, evidence, and affected tasks.",
+            "Do not infer task completion from the source. Ask for confirmation when scope, consensus, or a high-impact relationship is ambiguous.",
+            "Validate and publish confirmed drafts with hypha apply, then run lint --audit.",
+        ],
+        [f"captured source: {destination.relative_to(home)}",
+         f"route candidates: {', '.join(path for _, path, _ in candidates) or 'none'}"],
+    )
 
 
-def ask(args):
+def search(args):
     """Search knowledge or explicit source files using comma-separated literals."""
-    if args.limit < 1: raise ValueError("ask --limit 必须大于 0")
+    if args.limit < 1: raise ValueError("search --limit 必须大于 0")
     home = root(args)
     with locked(home): _tasks, knowledge = prepare(home)
     terms = []
     for term in args.keywords.replace("，", ",").split(","):
         normalized = term.strip().casefold()
         if normalized and normalized not in terms: terms.append(normalized)
-    if not terms: raise ValueError("ask 至少需要一个非空关键词")
+    if not terms: raise ValueError("search 至少需要一个非空关键词")
     candidates = []
     if args.file:
         workspace = home.parent.resolve()
@@ -1250,8 +1348,8 @@ def ask(args):
             requested = Path(value)
             target = requested.resolve() if requested.is_absolute() else (workspace / requested).resolve()
             try: target.relative_to(workspace)
-            except ValueError as exc: raise ValueError(f"ask --file 必须位于 workspace 内：{value}") from exc
-            if not target.exists(): raise ValueError(f"ask --file 不存在：{value}")
+            except ValueError as exc: raise ValueError(f"search --file 必须位于 workspace 内：{value}") from exc
+            if not target.exists(): raise ValueError(f"search --file 不存在：{value}")
             paths = [target] if target.is_file() else sorted(path for path in target.rglob("*") if path.is_file())
             for path in paths:
                 resolved = path.resolve()
@@ -1291,8 +1389,21 @@ def migrate(args):
         tasks, knowledge = prepare(home)
         errors = validate(home, tasks, knowledge)
         if errors: raise ValueError("\n".join(errors))
-        sync(home, by="migrate")
-    print("迁移检查完成；现有 markdown 保持不变。")
+        agreements = sorted((home / "agreements").glob("*.md"))
+    if not agreements:
+        print("没有检测到需要迁移的 legacy agreements；结构校验请使用 hypha lint。")
+        return
+    agent_follow_up(
+        "Migrate legacy agreements without losing rationale or duplicating always-on rules.",
+        [
+            "Read each legacy agreement and the nearest applicable AGENTS.md.",
+            "Move only concise always-on operational instructions into AGENTS.md; preserve rationale, history, scope, exceptions, evidence, and review conditions as Hypha knowledge drafts.",
+            "Ask the user before treating inferred consensus as confirmed agreement.",
+            "Publish validated knowledge drafts, verify AGENTS.md does not duplicate their explanatory text, then remove legacy files only after the migration is reviewed.",
+            "Run hypha lint --audit after the reviewed migration.",
+        ],
+        [f"legacy file: {path.relative_to(home)}" for path in agreements],
+    )
 
 
 def bootstrap(args):
@@ -1317,7 +1428,18 @@ def bootstrap(args):
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target, rendered)
     print(f"已生成 bootstrap plan：{target}")
-    print(f"检查并编辑后运行：hypha --workspace {workspace} bootstrap --apply {target}")
+    agent_follow_up(
+        "Convert repository observations into a truthful initial long-running task and knowledge graph.",
+        [
+            "Read the plan observations and relevant repository files; identify what work has actually happened, what remains, and the durable project background.",
+            "Replace the placeholder root goal and acceptance criteria with the user's real long-running outcome. Do not infer progress from file counts, tests, commits, or documentation volume.",
+            "Verify every checklist-derived task against its source and current repository state; correct status and leaf progress, and remove transient or already irrelevant items.",
+            "Review each background candidate against its exact quote. Rewrite it into a durable sourced claim, merge it with existing concepts, or delete it; do not publish generic summaries.",
+            "Set reviewed: true only after task meaning, acceptance, status, progress, evidence, knowledge scope, and relationships are justified.",
+            f"Apply the reviewed plan with hypha --workspace {workspace} bootstrap --apply {target}.",
+        ],
+        [f"bootstrap plan: {target}", f"observed files: {plan['inventory']['files']}"],
+    )
 
 
 def view(args):
@@ -1443,14 +1565,15 @@ def main():
     p = sub.add_parser("apply", help="校验并原子发布一份草稿")
     p.add_argument("draft", help=".hypha/.drafts/ 下的 Markdown 草稿路径")
     p = sub.add_parser("lint", help="检查结构、证据、链接和路由规则")
-    p.add_argument("--fix", action="store_true", help="重建派生索引（默认也会同步索引）")
     p.add_argument("--audit", action="store_true", help="额外列出可能缺失的关系和路由候选")
-    p = sub.add_parser("resolve", help="持久化一项 audit 候选的人工判定")
+    p.add_argument("--trigger-warn-ratio", type=float, default=.5, help="共享 trigger 警告比例（默认 0.5；仅警告）")
+    p = sub.add_parser("dismiss", help="确认 audit 候选无关并永久隐藏")
     p.add_argument("candidate", help="lint --audit 输出的候选 ID")
-    p.add_argument("resolution", choices=("related", "unrelated", "deferred"), help="人工判定结果")
+    p = sub.add_parser("defer", help="暂缓判断 audit 候选，并在后续继续显示")
+    p.add_argument("candidate", help="lint --audit 输出的候选 ID")
     p = sub.add_parser("boot", help="输出当前任务与相关知识的精简上下文")
     p.add_argument("term", nargs="*", default=[], help="当前任务或话题关键词")
-    sub.add_parser("next", help="列出运行中续接候选与依赖已满足的任务")
+    sub.add_parser("ready", help="列出运行中续接候选与依赖已满足的任务")
     p = sub.add_parser("list", help="列出所有任务和知识节点", description="输出紧凑表格，也可筛选、按任务层级展示或输出 JSON。")
     p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="节点类型（默认 all）")
     p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="按状态精确筛选")
@@ -1458,18 +1581,18 @@ def main():
     formats.add_argument("--tree", action="store_true", help="按 parent 层级展示任务，并单列知识节点")
     formats.add_argument("--json", action="store_true", help="输出稳定的机器可读 JSON")
     sub.add_parser("drafts", help="列出未 apply 草稿，供中断会话恢复")
-    p = sub.add_parser("why", help="解释关键词命中的知识路由候选")
+    p = sub.add_parser("route", help="解释当前话题召回了哪些知识及其评分")
     p.add_argument("term", help="要展开的关键词")
     p = sub.add_parser("show", help="显示节点及其派生关系")
     p.add_argument("target", help="任务 ID 或 know/... 路径")
     sub.add_parser("close", help="会话收尾：审计、完成证据与提交建议")
     p = sub.add_parser("ingest", help="复制一份外部来源，并列出旧知识候选")
     p.add_argument("file", help="要复制进 .hypha/src/ 的来源文件")
-    p = sub.add_parser("ask", help="用逗号分隔的字面关键词全文检索知识")
+    p = sub.add_parser("search", help="用逗号分隔的字面关键词全文检索知识")
     p.add_argument("keywords", help="逗号分隔关键词，例如 登录,认证,auth,session")
     p.add_argument("--file", action="append", help="只搜索 workspace 内指定文件或目录；可重复使用")
     p.add_argument("--limit", type=int, default=30, help="最多返回的匹配行数（默认 30）")
-    sub.add_parser("migrate", help="校验并同步现有 Hypha Markdown")
+    sub.add_parser("migrate", help="检查 legacy agreements 并输出语义迁移协议")
     p = sub.add_parser("bootstrap", help="扫描现有项目并生成可审阅的初始任务计划")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--dry-run", action="store_true", help="只把候选计划输出到 stdout")
@@ -1480,6 +1603,8 @@ def main():
     p.add_argument("--open", action="store_true", help="生成后用系统默认浏览器打开（Linux 使用 xdg-open）")
     args = parser.parse_args()
     try:
+        if args.global_store and args.command not in GLOBAL_COMMANDS:
+            raise ValueError(f"--global 不支持 {args.command}；任务治理必须使用 workspace-local .hypha")
         if args.command == "init": init(args)
         elif args.command == "add": add(args)
         elif args.command in {"start", "progress", "block", "done", "drop"}: task_mutate(args)
@@ -1487,16 +1612,17 @@ def main():
         elif args.command == "parent": set_parent(args)
         elif args.command == "apply": apply(args)
         elif args.command == "lint": lint(args)
-        elif args.command == "resolve": resolve(args)
+        elif args.command == "dismiss": dismiss(args)
+        elif args.command == "defer": defer(args)
         elif args.command == "boot": args.term = " ".join(args.term); boot(args)
-        elif args.command == "next": next_task(args)
+        elif args.command == "ready": ready(args)
         elif args.command == "list": list_nodes(args)
         elif args.command == "drafts": drafts_command(args)
-        elif args.command == "why": why(args)
+        elif args.command == "route": route_command(args)
         elif args.command == "show": show(args)
         elif args.command == "close": close(args)
         elif args.command == "ingest": ingest(args)
-        elif args.command == "ask": ask(args)
+        elif args.command == "search": search(args)
         elif args.command == "migrate": migrate(args)
         elif args.command == "bootstrap": bootstrap(args)
         else: view(args)

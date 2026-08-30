@@ -39,7 +39,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "second task", "--root")
         self.cli("needs", "0002", "0001")
         self.cli("done", "0001")
-        self.assertIn("0002 second task", self.cli("next").stdout)
+        self.assertIn("0002 second task", self.cli("ready").stdout)
         task = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("status: todo", "status: in_progress"), encoding="utf-8")
         self.assertIn("0002 [in_progress]", self.cli("boot").stdout)
@@ -157,6 +157,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         output = self.cli("bootstrap").stdout
         self.assertIn("bootstrap-plan.json", output)
+        self.assertIn("AGENT FOLLOW-UP", output)
         plan_path = self.workspace / ".hypha" / ".drafts" / "bootstrap-plan.json"
         self.assertTrue(plan_path.is_file())
         rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
@@ -198,10 +199,10 @@ class HyphaCliTest(unittest.TestCase):
         draft.write_text(draft.read_text(encoding="utf-8") + "\nchanged after publish\n", encoding="utf-8")
         self.assertIn("oauth.md", self.cli("drafts").stdout)
         self.assertIn("知识前提：know/oauth", self.cli("show", "0001").stdout)
-        self.assertIn("know/oauth", self.cli("why", "oauth").stdout)
+        self.assertIn("know/oauth", self.cli("route", "oauth").stdout)
         self.cli("lint")
 
-    def test_ask_searches_full_text_with_comma_keywords_and_file_scope(self):
+    def test_search_uses_comma_keywords_and_file_scope(self):
         self.cli("init")
         evidence = self.workspace / "auth-source.md"
         evidence.write_text("Session expiry can require authentication.\n", encoding="utf-8")
@@ -220,20 +221,20 @@ class HyphaCliTest(unittest.TestCase):
         note.write_text("---\nkind: know\nclaim_kind: note\n---\n# Note\n\n认证不应被默认搜索。\n", encoding="utf-8")
         self.cli("apply", str(note))
 
-        output = self.cli("ask", "登录失败,认证,会话").stdout
+        output = self.cli("search", "登录失败,认证,会话").stdout
         self.assertIn(".hypha/know/authentication-recovery.md", output)
         self.assertIn("会话失效时重新获取凭据", output)
         self.assertNotIn("private-note", output)
-        self.assertIn("authentication-recovery", self.cli("ask", "无命中，认证").stdout)
+        self.assertIn("authentication-recovery", self.cli("search", "无命中，认证").stdout)
 
         source = self.workspace / "docs" / "runbook.txt"
         source.parent.mkdir()
         source.write_text("Rotate the session cookie after authentication failure.\n", encoding="utf-8")
-        scoped = self.cli("ask", "登录失败,session", "--file", "docs", "--limit", "1").stdout
+        scoped = self.cli("search", "登录失败,session", "--file", "docs", "--limit", "1").stdout
         self.assertEqual("docs/runbook.txt:1: Rotate the session cookie after authentication failure.\n", scoped)
-        rejected = self.cli("ask", "session", "--file", "../outside", ok=False)
+        rejected = self.cli("search", "session", "--file", "../outside", ok=False)
         self.assertIn("必须位于 workspace 内", rejected.stderr)
-        empty = self.cli("ask", ",，,", ok=False)
+        empty = self.cli("search", ",，,", ok=False)
         self.assertIn("至少需要一个非空关键词", empty.stderr)
 
     def test_agreement_draft_publishes_without_duplicating_agents(self):
@@ -392,9 +393,9 @@ class HyphaCliTest(unittest.TestCase):
         boot = self.cli("boot", "oauth")
         self.assertIn("上次会话可能未收尾", boot.stdout)
         self.assertIn("未 apply 草稿：1 个", boot.stdout)
-        next_output = self.cli("next").stdout
-        self.assertIn("运行中（续接候选）", next_output)
-        self.assertIn("0001 40%", next_output)
+        ready_output = self.cli("ready").stdout
+        self.assertIn("运行中（续接候选）", ready_output)
+        self.assertIn("0001 40%", ready_output)
         self.assertIn("kind=handoff", self.cli("drafts").stdout)
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         lint = self.cli("lint", "--audit")
@@ -402,7 +403,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("close")
         self.assertNotIn("上次会话可能未收尾", self.cli("boot", "oauth").stdout)
 
-    def test_audit_resolution_suppresses_repeated_candidate(self):
+    def test_dismiss_suppresses_repeated_candidate(self):
         self.cli("init")
         self.cli("add", "OAuth provider")
         draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
@@ -411,8 +412,91 @@ class HyphaCliTest(unittest.TestCase):
         output = self.cli("lint", "--audit").stdout
         match = re.search(r"\[([0-9a-f]{12})\] 0001", output)
         self.assertIsNotNone(match)
-        self.cli("resolve", match.group(1), "unrelated")
+        self.cli("dismiss", match.group(1))
         self.assertNotIn(match.group(1), self.cli("lint", "--audit").stdout)
+
+    def test_semantic_follow_ups_and_resolution_guards(self):
+        self.cli("init")
+        self.cli("add", "OAuth provider")
+        source = self.workspace / "provider.md"
+        source.write_text("# Provider\n\nUse short-lived access tokens.\n", encoding="utf-8")
+        ingest = self.cli("ingest", str(source)).stdout
+        self.assertIn("AGENT FOLLOW-UP", ingest)
+        self.assertIn("support, refinement, contradiction", ingest)
+
+        draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: inference\nwhen: Choosing OAuth provider\n"
+            "anchors: [src/provider.md]\ninference: provider evidence\ntriggers: [oauth, provider]\n---\n"
+            "# OAuth provider decision\n",
+            encoding="utf-8",
+        )
+        self.cli("apply", str(draft))
+        audit = self.cli("lint", "--audit").stdout
+        self.assertIn("AGENT FOLLOW-UP", audit)
+        candidate = re.search(r"\[([0-9a-f]{12})\] 0001", audit).group(1)
+        deferred = self.cli("defer", candidate).stdout
+        self.assertIn("仍会在后续 audit 中显示", deferred)
+        self.assertIn(candidate, self.cli("lint", "--audit").stdout)
+        rejected = self.cli("dismiss", "deadbeefdead", ok=False)
+        self.assertIn("不是当前 lint --audit 候选", rejected.stderr)
+
+    def test_session_completion_scope_and_migrate_protocol(self):
+        self.cli("init")
+        self.cli("add", "deliver")
+        self.cli("boot")
+        self.cli("done", "0001")
+        close = self.cli("close").stdout
+        self.assertIn("completion candidates since latest boot: 0001", close)
+        self.assertIn("AGENT FOLLOW-UP", close)
+        self.assertNotIn("上次会话可能未收尾", self.cli("boot").stdout)
+        self.assertIn("没有检测到需要迁移", self.cli("migrate").stdout)
+
+        agreements = self.workspace / ".hypha" / "agreements"
+        agreements.mkdir()
+        (agreements / "legacy.md").write_text("# Legacy rule\n", encoding="utf-8")
+        migration = self.cli("migrate").stdout
+        self.assertIn("AGENT FOLLOW-UP", migration)
+        self.assertIn("legacy file: agreements/legacy.md", migration)
+
+    def test_route_explains_components_and_trigger_overlap_warns_only(self):
+        self.cli("init")
+        self.cli("add", "OAuth work")
+        for name in ("first", "second"):
+            draft = self.workspace / ".hypha" / ".drafts" / f"{name}.md"
+            draft.write_text(
+                f"---\nkind: know\nclaim_kind: inference\nwhen: OAuth fails\n"
+                f"anchors: [src/{name}.md]\ninference: x\ntriggers: [oauth]\n---\n# {name} OAuth\n",
+                encoding="utf-8",
+            )
+            (self.workspace / ".hypha" / "src" / f"{name}.md").write_text("evidence\n", encoding="utf-8")
+            self.cli("apply", str(draft))
+        routed = self.cli("route", "oauth").stdout
+        self.assertIn("trigger_hits=oauth", routed)
+        self.assertIn("title_hits=oauth", routed)
+        lint = self.cli("lint").stdout
+        self.assertIn("警告：共享 trigger 候选", lint)
+        self.assertIn("lint 通过", lint)
+
+    def test_command_surface_is_unambiguous_and_progress_starts_work(self):
+        self.cli("init")
+        self.cli("add", "implementation")
+        progress = self.cli("progress", "0001", "100").stdout
+        self.assertIn("已更新 0001: in_progress", progress)
+        self.assertIn("100% 只表示叶子工作量完成", progress)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+
+        help_text = self.cli("--help").stdout
+        for command in ("search", "route", "ready", "dismiss", "defer"):
+            self.assertIn(command, help_text)
+        for removed in ("ask", "why", "next", "resolve", "sync"):
+            self.assertNotRegex(help_text, rf"(?m)^    {removed}\s")
+        rejected = subprocess.run(
+            CLI + ["--workspace", str(self.workspace), "--global", "add", "global task"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("任务治理必须使用 workspace-local", rejected.stderr)
 
 if __name__ == "__main__":
     unittest.main()

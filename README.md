@@ -81,13 +81,12 @@ python3 "$HYPHA_CLI" --workspace "$PROJECT" add "Independent maintenance track" 
 
 Hypha intentionally rejects ambiguous new roots and duplicate active titles. Follow-up feedback, small fixes, and acceptance work should normally continue the current task instead of creating one node per conversation turn.
 
-### 4. Use this five-command session loop
+### 4. Use this session loop
 
 At the beginning of a session:
 
 ```bash
 python3 "$HYPHA_CLI" --workspace "$PROJECT" boot "what you are working on"
-python3 "$HYPHA_CLI" --workspace "$PROJECT" next
 python3 "$HYPHA_CLI" --workspace "$PROJECT" start 0001
 ```
 
@@ -105,9 +104,10 @@ When the acceptance criteria and evidence are real:
 
 ```bash
 python3 "$HYPHA_CLI" --workspace "$PROJECT" done 0001
-python3 "$HYPHA_CLI" --workspace "$PROJECT" lint --audit
 python3 "$HYPHA_CLI" --workspace "$PROJECT" close
 ```
+
+Some commands print an `AGENT FOLLOW-UP` block. This is a stable hand-off contract for work that requires semantic judgment. The calling agent must continue its instructions: read the cited nodes or sources, check evidence, ask for confirmation when required, and publish only validated changes. Keyword overlap does not prove a relationship, and task status or Git activity alone does not prove completion.
 
 `parent` means hierarchy; `needs` means execution dependency. Do not use chronology alone as a reason to create a dependency edge.
 
@@ -163,10 +163,10 @@ Inspect the draft and run `apply` only after its meaning and scope are confirmed
 Search active knowledge with comma-separated literal keywords selected by the agent:
 
 ```bash
-python3 "$HYPHA_CLI" --workspace "$PROJECT" ask "login failed,authentication,session,登录"
+python3 "$HYPHA_CLI" --workspace "$PROJECT" search "login failed,authentication,session,登录"
 ```
 
-`ask` is deterministic rg-style literal full-text search, not an embedded language model. The single query argument is split on English or Chinese commas. It searches active, routable knowledge pages by default and prints `path:line: snippet`, ranked by distinct keyword hits and occurrences. Repeat `--file` to search only selected workspace files or directories, and use `--limit` to bound output.
+`search` is deterministic rg-style literal full-text search, not an embedded language model. The single query argument is split on English or Chinese commas. It searches active, routable knowledge pages by default and prints `path:line: snippet`, ranked by distinct keyword hits and occurrences. Repeat `--file` to search only selected workspace files or directories, and use `--limit` to bound output. Use `route "terms"` instead when you want to explain topic-based knowledge recall rather than find literal text.
 
 ### 6. Open the visual map
 
@@ -180,20 +180,25 @@ The generated `.hypha/view.html` is read-only, self-contained, and works from `f
 
 | Goal | Command |
 |---|---|
-| Resume context | `boot "topic"`, then `next` |
+| Resume context | `boot "topic"`; use `ready` to refresh candidates later |
 | List every node | `list`, optionally `--type`, `--status`, `--tree`, or `--json` |
 | Inspect a node | `show 0001` or `show know/path` |
 | Create structure | `add`, `parent`, `needs` |
 | Bootstrap existing code | `bootstrap`, review JSON, then `bootstrap --apply` |
 | Update state | `start`, `progress`, `block`, `done`, `drop` |
 | Publish Markdown | `apply .hypha/.drafts/file.md` |
-| Check integrity | `lint --audit` |
-| Explain routing | `why "terms"` |
-| Search knowledge or sources | `ask "keyword1,keyword2" [--file path]` |
+| Explain topic recall | `route "terms"` |
+| Search knowledge or sources | `search "keyword1,keyword2" [--file path]` |
+| Recheck executable work | `ready` |
+| Validate graph structure | `lint [--audit]` |
+| Dismiss or postpone audit candidates | `dismiss <id>` or `defer <id>` |
+| Review legacy agreement migration | `migrate` |
 | Finish a session | `close` |
 | View the graph | `view --mode all --open` |
 
 Run `python3 "$HYPHA_CLI" --help` for the complete command list.
+
+`--global` is reserved for cross-repository knowledge operations. Repository task lifecycle commands such as `add`, `start`, `progress`, `done`, `boot`, `ready`, and `close` require the workspace-local `.hypha` store; global `apply` accepts knowledge drafts only.
 
 ## Developers taking over: fastest path to a safe change
 
@@ -265,13 +270,13 @@ pnpm test:e2e
 
 ### 4. Make a change safely
 
-1. Run `boot` and `next`; resume a relevant running task before creating another.
+1. Run `boot`; resume a relevant running task before creating another. Use `ready` only when candidates need refreshing later in the session.
 2. Add a child only when it is independently trackable and separately acceptable.
 3. Change CLI source or frontend source—not generated state by hand.
 4. Add regression coverage close to the changed behavior.
 5. Run CLI tests and the proportional frontend checks.
 6. For frontend changes, rebuild the template and inspect a mixed graph plus a selected-node state at 1920 × 1080.
-7. Run `lint --audit`, publish acceptance/evidence through a task-update draft, and run `close`.
+7. Publish acceptance/evidence through a task-update draft and run `close`, which performs lint and audit itself.
 8. Review `git diff --check` and commit code together with the corresponding `.hypha` state.
 
 ### 5. Test and release notes
