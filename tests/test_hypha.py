@@ -134,6 +134,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("0002: 孤立任务", output)
 
     def test_bootstrap_scans_project_writes_plan_and_applies_reviewed_tasks(self):
+        (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Always use Git.\n", encoding="utf-8")
         (self.workspace / "src").mkdir()
         (self.workspace / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
         (self.workspace / "tests").mkdir()
@@ -144,25 +145,45 @@ class HyphaCliTest(unittest.TestCase):
         plan = json.loads(self.cli("bootstrap", "--dry-run").stdout)
         self.assertFalse((self.workspace / ".hypha").exists())
         self.assertEqual("hypha-bootstrap-plan", plan["kind"])
-        self.assertEqual("low", plan["tasks"][0]["confidence"])
-        self.assertEqual({"area:docs", "area:src", "area:tests", "root"}, {task["key"] for task in plan["tasks"]})
-        docs = next(task for task in plan["tasks"] if task["key"] == "area:docs")
-        self.assertEqual(50, docs["progress"])
+        self.assertEqual(2, plan["schemaVersion"])
+        self.assertFalse(plan["reviewed"])
+        self.assertEqual(1, len(plan["observations"]["completed_items"]))
+        self.assertEqual(1, len(plan["observations"]["open_items"]))
+        self.assertEqual(["done", "todo"], [task["status"] for task in plan["tasks"][1:]])
+        self.assertEqual([100, 0], [task["progress"] for task in plan["tasks"][1:]])
+        self.assertEqual("docs/plan.md", plan["knowledge"][0]["source"])
+        self.assertNotIn("AGENTS.md", {entry["source"] for entry in plan["knowledge"]})
 
         self.cli("init")
         output = self.cli("bootstrap").stdout
         self.assertIn("bootstrap-plan.json", output)
         plan_path = self.workspace / ".hypha" / ".drafts" / "bootstrap-plan.json"
         self.assertTrue(plan_path.is_file())
+        rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("reviewed: true", rejected.stderr)
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        plan["reviewed"] = True
+        plan["tasks"][0]["title"] = "Ship the reviewed project"
+        plan["tasks"][0]["acceptance"] = ["All reviewed repository work is represented by evidence-backed leaves."]
+        plan["tasks"][0]["confidence"] = "reviewed"
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("knowledge 候选必须审阅", rejected.stderr)
+        plan["knowledge"][0]["confidence"] = "reviewed"
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         applied = self.cli("bootstrap", "--apply", str(plan_path)).stdout
-        self.assertIn("创建 4 个任务", applied)
-        self.assertIn("子任务：0002, 0003, 0004", self.cli("show", "0001").stdout)
+        self.assertIn("创建 4 个节点", applied)
+        self.assertIn("子任务：0002, 0003", self.cli("show", "0001").stdout)
+        self.assertIn("progress: 50", self.cli("show", "0001").stdout)
         root = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
         self.assertNotIn("progress:", root.read_text(encoding="utf-8"))
         child = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
-        self.assertIn("bootstrap_confidence: low", child.read_text(encoding="utf-8"))
+        self.assertIn("bootstrap_confidence: explicit-marker", child.read_text(encoding="utf-8"))
+        knowledge = next((self.workspace / ".hypha" / "know" / "bootstrap").glob("*.md"))
+        self.assertIn("claim_kind: sourced", knowledge.read_text(encoding="utf-8"))
+        self.assertTrue((self.workspace / ".hypha" / "src" / "bootstrap" / "docs" / "plan.md").is_file())
         rejected = self.cli("bootstrap", "--apply", str(plan_path), ok=False)
-        self.assertIn("仅支持空任务图", rejected.stderr)
+        self.assertIn("仅支持空任务与知识图", rejected.stderr)
 
     def test_apply_evidence_and_show(self):
         self.cli("init")
@@ -179,6 +200,74 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("知识前提：know/oauth", self.cli("show", "0001").stdout)
         self.assertIn("know/oauth", self.cli("why", "oauth").stdout)
         self.cli("lint")
+
+    def test_ask_searches_full_text_with_comma_keywords_and_file_scope(self):
+        self.cli("init")
+        evidence = self.workspace / "auth-source.md"
+        evidence.write_text("Session expiry can require authentication.\n", encoding="utf-8")
+        self.cli("ingest", str(evidence))
+        active = self.workspace / ".hypha" / ".drafts" / "auth.md"
+        active.write_text(
+            "---\nkind: know\nclaim_kind: inference\nstatus: active\n"
+            "when: 用户无法进入系统\ntriggers: [认证, login]\n"
+            "anchors: [src/auth-source.md]\n"
+            "inference: 会话失效可能需要重新认证\n---\n"
+            "# Authentication recovery\n\n会话失效时重新获取凭据。\n",
+            encoding="utf-8",
+        )
+        self.cli("apply", str(active))
+        note = self.workspace / ".hypha" / ".drafts" / "private-note.md"
+        note.write_text("---\nkind: know\nclaim_kind: note\n---\n# Note\n\n认证不应被默认搜索。\n", encoding="utf-8")
+        self.cli("apply", str(note))
+
+        output = self.cli("ask", "登录失败,认证,会话").stdout
+        self.assertIn(".hypha/know/authentication-recovery.md", output)
+        self.assertIn("会话失效时重新获取凭据", output)
+        self.assertNotIn("private-note", output)
+        self.assertIn("authentication-recovery", self.cli("ask", "无命中，认证").stdout)
+
+        source = self.workspace / "docs" / "runbook.txt"
+        source.parent.mkdir()
+        source.write_text("Rotate the session cookie after authentication failure.\n", encoding="utf-8")
+        scoped = self.cli("ask", "登录失败,session", "--file", "docs", "--limit", "1").stdout
+        self.assertEqual("docs/runbook.txt:1: Rotate the session cookie after authentication failure.\n", scoped)
+        rejected = self.cli("ask", "session", "--file", "../outside", ok=False)
+        self.assertIn("必须位于 workspace 内", rejected.stderr)
+        empty = self.cli("ask", ",，,", ok=False)
+        self.assertIn("至少需要一个非空关键词", empty.stderr)
+
+    def test_agreement_draft_publishes_without_duplicating_agents(self):
+        self.cli("init")
+        self.assertFalse((self.workspace / ".hypha" / "agreements").exists())
+        self.cli("add", "Long migration")
+        draft = self.workspace / ".hypha" / ".drafts" / "offline-rationale.md"
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: rationale\nscope: project\n"
+            "authority: user_explicit\nstatus: active\nwhen: Changing deployment or runtime architecture\n"
+            "triggers: [offline, deployment]\nagreement_quote: The product must work without network access.\n"
+            "affects: [0001]\nreview_when: The supported environment gains guaranteed network access\n---\n"
+            "# Offline architecture rationale\n\nOffline operation is a product boundary, not merely a deployment convenience.\n",
+            encoding="utf-8",
+        )
+        text = draft.read_text(encoding="utf-8")
+        self.assertIn("claim_kind: agreement", text)
+        self.assertIn("knowledge_kind: rationale", text)
+        self.assertEqual(0, json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)["counts"]["knowledge"])
+        self.cli("apply", str(draft))
+        payload = json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)
+        self.assertEqual("user_explicit", payload["nodes"][0]["authority"])
+        self.assertEqual("project", payload["nodes"][0]["scope"])
+
+        (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Use Git for commits.\n", encoding="utf-8")
+        duplicate = self.workspace / ".hypha" / ".drafts" / "git-rule.md"
+        duplicate.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: constraint\nscope: project\n"
+            "authority: user_confirmed\nwhen: Committing\ntriggers: [git]\n"
+            "agreement_quote: Use Git for commits.\n---\n# Git rule\n\nDuplicate operating rule.\n",
+            encoding="utf-8",
+        )
+        rejected = self.cli("apply", str(duplicate), ok=False)
+        self.assertIn("已存在于 AGENTS.md", rejected.stderr)
 
     def test_invalid_task_body_intent_link_is_rejected(self):
         self.cli("init")

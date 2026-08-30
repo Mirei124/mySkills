@@ -48,13 +48,17 @@ For an existing codebase, generate a reviewable bootstrap plan first:
 python3 "$HYPHA_CLI" --workspace "$PROJECT" bootstrap
 ```
 
-Hypha writes `.hypha/.drafts/bootstrap-plan.json`. It inventories Git-tracked and local files, groups top-level areas, counts tests, documentation, checklist completion, and TODO/FIXME markers, then proposes a low-confidence maturity estimate. Review titles, boundaries, parent links, and progress before applying it:
+Hypha writes `.hypha/.drafts/bootstrap-plan.json`. It collects recent Git work, explicit completed/open checklist items, comment-form TODO/FIXME markers, and high-signal background documents. It does not infer maturity from file, test, or documentation counts. The plan starts with `reviewed: false`: an agent must use the repository evidence and current conversation to rewrite the actual long-running goal, acceptance criteria, status, leaf progress, and background knowledge candidates before setting it to `true`:
 
 ```bash
 python3 "$HYPHA_CLI" --workspace "$PROJECT" bootstrap --apply "$PROJECT/.hypha/.drafts/bootstrap-plan.json"
 ```
 
 Use `bootstrap --dry-run` to print the plan without writing a file, or `bootstrap --output path/to/plan.json` to choose its location. Applying a plan is allowed only when the task graph is empty, so it cannot silently mix inferred tasks into an active graph.
+
+Use `.hypha-bootstrapignore` for reference implementations, fixtures, archives, or other material that should not contribute task or background candidates. On apply, reviewed background candidates are copied under `.hypha/src/bootstrap/` and published as sourced knowledge with exact quotes. Git history remains observation evidence rather than becoming one task per commit.
+
+The review boundary and schema rationale are documented in [`design_docs/bootstrap.md`](design_docs/bootstrap.md).
 
 For a new project, create the first task manually:
 
@@ -133,6 +137,37 @@ python3 "$HYPHA_CLI" --workspace "$PROJECT" apply "$PROJECT/.hypha/.drafts/auth-
 
 Use `claim_kind: sourced` for claims copied from a source and provide `anchors` plus exact evidence quotes. Use `claim_kind: inference` for conclusions and state their premises. Plain `note` pages stay out of automatic boot routing.
 
+`AGENTS.md` and Hypha have different jobs. Put concise, always-on operating instructions—commands, coding conventions, safety restrictions, and version-control rules—in the nearest applicable `AGENTS.md`. Put the rationale, scope, decision history, rejected alternatives, evidence, exceptions, review conditions, and links to long-running work in Hypha. Do not maintain two copies of the same rule.
+
+For durable rationale, constraints, decisions, consensus, invariants, non-goals, definitions, lessons, assumptions, or synthesis explicitly stated or confirmed by the user, write a reviewable agreement under `.hypha/.drafts/`:
+
+```markdown
+---
+kind: know
+claim_kind: agreement
+knowledge_kind: rationale
+scope: project
+authority: user_explicit
+when: Changing deployment architecture
+triggers: [offline, deployment]
+agreement_quote: The product must work without network access.
+affects: [0001]
+---
+# Offline architecture rationale
+
+Offline operation is a product boundary, not deployment convenience.
+```
+
+Inspect the draft and run `apply` only after its meaning and scope are confirmed. `apply` rejects an agreement quote that duplicates an `AGENTS.md` rule. Inferred tacit consensus requires user confirmation before publication.
+
+Search active knowledge with comma-separated literal keywords selected by the agent:
+
+```bash
+python3 "$HYPHA_CLI" --workspace "$PROJECT" ask "login failed,authentication,session,登录"
+```
+
+`ask` is deterministic rg-style literal full-text search, not an embedded language model. The single query argument is split on English or Chinese commas. It searches active, routable knowledge pages by default and prints `path:line: snippet`, ranked by distinct keyword hits and occurrences. Repeat `--file` to search only selected workspace files or directories, and use `--limit` to bound output.
+
 ### 6. Open the visual map
 
 ```bash
@@ -154,6 +189,7 @@ The generated `.hypha/view.html` is read-only, self-contained, and works from `f
 | Publish Markdown | `apply .hypha/.drafts/file.md` |
 | Check integrity | `lint --audit` |
 | Explain routing | `why "terms"` |
+| Search knowledge or sources | `ask "keyword1,keyword2" [--file path]` |
 | Finish a session | `close` |
 | View the graph | `view --mode all --open` |
 
@@ -248,3 +284,7 @@ pnpm test:e2e
 ## Scope and non-goals
 
 Hypha is local-first and single-agent. It is not a multi-writer coordination service, hosted project manager, vector database, or automatic Git committer. It keeps deterministic structure in the CLI and leaves semantic decisions—what is related, what counts as evidence, and whether work is genuinely complete—to the agent and user.
+
+Hypha task governance is reserved for persistent work—multi-session efforts, very large context, explicit task maintenance, or projects where forgetting and drift are material risks. Ordinary fixes, short reviews, and one-session implementation tasks should not create task nodes or run lifecycle commands. Knowledge capture is an independent trigger: even a short task may produce durable project rationale, constraints, decisions, consensus, lessons, or synthesis worth preserving when losing it would cause future mistakes or substantial rework.
+
+Runtime plans and goals remain execution controls, not repository truth: a plan tracks immediate steps, a goal keeps one explicitly requested thread objective active, and Hypha stores only durable task boundaries and knowledge. Do not mirror every plan step or goal status into Hypha. See [`design_docs/runtime-coordination.md`](design_docs/runtime-coordination.md).

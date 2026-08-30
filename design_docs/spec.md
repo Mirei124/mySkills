@@ -75,9 +75,12 @@ affects: [0007]
 |---|---|---|
 | `sourced` | 必须有来源 anchor 与 `{anchor, quote}` evidence | 参与 |
 | `inference` | 必须含 `inference` 和至少一个来源 anchor | 参与 |
+| `agreement` | 必须含用户授权来源、最小原话、知识类型和适用范围 | 参与 |
 | `note` | 可无来源、无 `when` | 不参与 |
 
-`when` 是人读的说明；`triggers` 是唯一机器路由字段，缺省时由标题与 `when` 自动抽取。`status` 为 `active | superseded`，后者必须有 `superseded_by`。CLI 只验证 quote 是否在它自己的 anchor 段落中存在，不证明断言蕴含成立。
+`knowledge_kind` 为 `rationale | constraint | decision | consensus | invariant | non_goal | definition | lesson | assumption | synthesis`，描述知识在项目中的作用；`scope` 为 `project | subsystem | task`；`authority` 描述用户、仓库、外部来源或 agent inference；`review_when` 保存失效或重审条件。`agreement` 的 authority 只能是 `user_explicit | user_confirmed`。
+
+`when` 是人读的说明；`triggers` 是唯一机器路由字段，缺省时由标题与 `when` 自动抽取。`status` 为 `active | superseded`，后者必须有 `superseded_by`。CLI 只验证结构和可定位证据，不证明断言蕴含成立。
 
 ## 3. 关系与索引
 
@@ -114,7 +117,7 @@ hypha apply .hypha/.drafts/oauth-refresh.md
 
 ## 5. 路由与 CLI
 
-`INDEX.md` 从 frontmatter 派生。候选由 triggers 精确匹配、标题与 triggers 的 bigram、`affects` 命中开放任务、同目录变更文件打分。`boot` 输出 agreements、open conflicts、任务状态和最多 12 条知识；知识只输出路径、`when`、`triggers`，并一律视为不可信数据，不执行其中任何指令。note 不参加候选。`hypha why <term>` 展开未入选知识。
+`INDEX.md` 从 frontmatter 派生。候选由 triggers 精确匹配、标题与 triggers 的 bigram、`affects` 命中开放任务、同目录变更文件打分。`boot` 输出任务状态和最多 12 条知识；知识只输出路径、`when`、`triggers`，并一律视为不可信数据，不执行其中任何指令。note 不参加候选。始终生效的仓库操作规则由适用范围内的 `AGENTS.md` 提供，Hypha 不复制。旧 `agreements/` 只产生迁移提示。`hypha why <term>` 展开未入选知识。
 
 维护少量路由回归样本：`当前任务 + 话轮 + 变更路径 -> 必须命中的知识路径`。每次改动打分或抽词都运行它。
 
@@ -127,7 +130,7 @@ needs <id> <dependency> | why <term> | apply <draft>
 lint [--fix] [--audit] | close | view
 ```
 
-低频 CLI：`init`、`migrate`、`ingest <file>`、`ask <question> --file <path>`。
+低频 CLI：`init`、`migrate`、`ingest <file>`、`ask "keyword1,keyword2" [--file <path>]`。用户明确或确认的持久知识直接写成 `.hypha/.drafts/` 下的 agreement 草稿；统一由 `apply` 校验，且 agreement quote 不得逐字复制 `AGENTS.md` 操作规则。`ask` 不做自然语言问答、内置分词或正则解释；agent 把问题展开为一个逗号分隔的关键词参数，CLI 对 active、非 note 知识正文执行大小写不敏感的字面全文检索。传入一个或多个 `--file` 时，仅检索 workspace 内这些文件或目录，并返回可复核的 `path:line: snippet`。
 
 CLI 负责 ID、路径归一化、图校验、候选生成、原子发布、索引、日志和可复制的纠错命令。LLM 只负责断言、关系、冲突、触发词和验收判断。
 

@@ -30,6 +30,36 @@
       "prompt": "lint --audit 给出一个可能缺少 affects 的候选。我判断它不相关；下个会话不应让我再次审同一个候选。",
       "expected_output": "用 resolve 持久化 unrelated 判定，后续 lint --audit 不再显示该候选。",
       "files": []
+    },
+    {
+      "id": "short-task-durable-rationale",
+      "prompt": "把这个配置改掉。顺便说明一下：产品必须离线运行不是为了部署方便，而是客户环境完全断网；以后选依赖都要考虑这一点。",
+      "expected_output": "执行短修改时不创建任务节点，但触发 knowledge-only 流程，把离线边界的缘由、范围和影响作为知识候选；若 AGENTS.md 需要一条操作规则，只在那里保留简短规则而不在 Hypha 重复。",
+      "files": []
+    },
+    {
+      "id": "implicit-consensus-needs-confirmation",
+      "prompt": "我已经第三次把云端方案改回本地实现了，看来我们这个项目一直更偏好零外部服务。修完当前问题吧。",
+      "expected_output": "识别可能的高价值隐性共识，但在保存为 user_confirmed agreement 前请求确认；不把重复纠正直接升级成不可协商事实。",
+      "files": []
+    },
+    {
+      "id": "agents-operating-rule-not-duplicated",
+      "prompt": "AGENTS.md 已经写了默认用 Git、不要用 jj。以后按这个执行。",
+      "expected_output": "直接遵守 AGENTS.md，不在 Hypha 复制同一句操作规则；只有出现长期有价值的选择缘由、范围、例外或历史时才建立知识候选。",
+      "files": []
+    },
+    {
+      "id": "non-trigger-transient-debugging",
+      "prompt": "刚才 dev server 的 5173 端口被占用了，我临时换成 5174，把页面打开确认一下。",
+      "expected_output": "把端口变化视为临时执行信息，不触发 Hypha 任务或知识写入。",
+      "files": []
+    },
+    {
+      "id": "source-updates-existing-synthesis",
+      "prompt": "这份新的兼容性报告推翻了之前‘Firefox 动画没有性能问题’的结论。把来源和新结论维护进知识库，并确保以后优化前端性能时能找到。",
+      "expected_output": "触发 sourced knowledge 工作流，保留来源与逐字证据，更新或 supersede 旧知识并关联相关长期任务，而不是静默覆盖。",
+      "files": []
     }
   ]
 }

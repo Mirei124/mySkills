@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import fnmatch
 import hashlib
 import json
 import os
@@ -25,11 +26,15 @@ except ImportError:  # pragma: no cover - Windows has no advisory flock.
 
 TASK_STATUSES = {"todo", "in_progress", "blocked", "done", "dropped"}
 KNOWLEDGE_STATUSES = {"active", "superseded"}
-CLAIM_KINDS = {"sourced", "inference", "note"}
+CLAIM_KINDS = {"sourced", "inference", "agreement", "note"}
+KNOWLEDGE_KINDS = {"rationale", "constraint", "decision", "consensus", "invariant", "non_goal", "definition", "lesson", "assumption", "synthesis"}
+KNOWLEDGE_SCOPES = {"project", "subsystem", "task"}
+KNOWLEDGE_AUTHORITIES = {"user_explicit", "user_confirmed", "repository", "external_source", "agent_inference"}
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 WORD = re.compile(r"[\w-]+", re.UNICODE)
 BOOTSTRAP_EXCLUDED = {".git", ".hypha", "node_modules", "dist", "build", "target", "vendor", "__pycache__", ".venv"}
 BOOTSTRAP_TEXT_SUFFIXES = {".md", ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".rs", ".go", ".java", ".kt", ".rb", ".php", ".cs", ".c", ".h", ".cpp", ".hpp"}
+BOOTSTRAP_BACKGROUND_NAMES = {"readme.md", "contributing.md", "architecture.md", "design.md", "spec.md"}
 
 
 def root(args: argparse.Namespace) -> Path:
@@ -285,7 +290,7 @@ def cycle_errors(tasks: dict) -> list[str]:
 
 
 def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
-    errors = []
+    errors, agents_text = [], None
     for task_id, node in tasks.items():
         if not node.get("id") or not node.get("status"): errors.append(f"{task_id}: 缺 id 或 status")
         if node.get("status") not in TASK_STATUSES: errors.append(f"{task_id}: 无效状态")
@@ -306,6 +311,26 @@ def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
         anchors = node.get("anchors", [])
         if kind == "sourced" and (not anchors or not node.get("evidence")): errors.append(f"{path}: sourced 缺 anchor 或 evidence")
         if kind == "inference" and (not anchors or not node.get("inference")): errors.append(f"{path}: inference 缺 inference 或来源 anchor")
+        if kind == "agreement":
+            if node.get("authority") not in {"user_explicit", "user_confirmed"}: errors.append(f"{path}: agreement 必须标明 user_explicit 或 user_confirmed authority")
+            if not node.get("agreement_quote"): errors.append(f"{path}: agreement 缺 agreement_quote")
+            if node.get("knowledge_kind") not in KNOWLEDGE_KINDS: errors.append(f"{path}: agreement 缺有效 knowledge_kind")
+            if node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: agreement 缺有效 scope")
+            if node.get("agreement_quote"):
+                if agents_text is None:
+                    documents = []
+                    for directory, names, files in os.walk(home.parent):
+                        names[:] = [name for name in names if name not in BOOTSTRAP_EXCLUDED and not name.startswith(".")]
+                        if "AGENTS.md" in files:
+                            try: documents.append((Path(directory) / "AGENTS.md").read_text(encoding="utf-8"))
+                            except OSError: pass
+                    agents_text = "\n".join(documents)
+                if str(node["agreement_quote"]).strip() in agents_text:
+                    errors.append(f"{path}: agreement_quote 已存在于 AGENTS.md；Hypha 只保存缘由、范围、历史或失效条件")
+        if node.get("knowledge_kind") is not None and node.get("knowledge_kind") not in KNOWLEDGE_KINDS:
+            errors.append(f"{path}: 无效 knowledge_kind")
+        if node.get("scope") is not None and node.get("scope") not in KNOWLEDGE_SCOPES: errors.append(f"{path}: 无效 scope")
+        if node.get("authority") is not None and node.get("authority") not in KNOWLEDGE_AUTHORITIES: errors.append(f"{path}: 无效 authority")
         if kind != "note" and not node.get("when"): errors.append(f"{path}: 缺 when")
         for evidence in node.get("evidence", []):
             if not isinstance(evidence, dict) or not evidence.get("anchor") or not evidence.get("quote"):
@@ -318,9 +343,21 @@ def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
     return errors
 
 
+def bootstrap_ignore_patterns(workspace: Path) -> list[str]:
+    path = workspace / ".hypha-bootstrapignore"
+    if not path.is_file(): return []
+    return [line.strip().removesuffix("/") for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
+
+def bootstrap_ignored(path: Path, patterns: list[str]) -> bool:
+    text = path.as_posix()
+    return any(text == pattern or text.startswith(pattern + "/") or fnmatch.fnmatch(text, pattern) for pattern in patterns)
+
+
 def workspace_files(workspace: Path) -> list[Path]:
     """Return a bounded, deterministic inventory without relying on Git alone."""
-    found = set()
+    found, patterns = set(), bootstrap_ignore_patterns(workspace)
     try:
         result = subprocess.run(["git", "-C", str(workspace), "ls-files"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
@@ -332,15 +369,16 @@ def workspace_files(workspace: Path) -> list[Path]:
         base = Path(directory)
         for name in sorted(files):
             relative = (base / name).relative_to(workspace)
-            if not any(part in BOOTSTRAP_EXCLUDED for part in relative.parts): found.add(relative)
+            if not any(part in BOOTSTRAP_EXCLUDED for part in relative.parts) and not bootstrap_ignored(relative, patterns): found.add(relative)
             if len(found) >= 5000: break
         if len(found) >= 5000: break
     return sorted(path for path in found
-                  if not any(part in BOOTSTRAP_EXCLUDED or (part.startswith(".") and part != ".github") for part in path.parts))[:5000]
+                  if not bootstrap_ignored(path, patterns)
+                  and not any(part in BOOTSTRAP_EXCLUDED or (part.startswith(".") and part != ".github") for part in path.parts))[:5000]
 
 
 def bootstrap_signals(workspace: Path, paths: list[Path]) -> dict:
-    checked = unchecked = todos = 0
+    completed, open_items, todos = [], [], []
     markdown = tests = 0
     for relative in paths:
         name = relative.name.casefold()
@@ -353,59 +391,95 @@ def bootstrap_signals(workspace: Path, paths: list[Path]) -> dict:
             text = absolute.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        checked += len(re.findall(r"(?im)^\s*[-*]\s*\[[xX]\]", text))
-        unchecked += len(re.findall(r"(?im)^\s*[-*]\s*\[ \]", text))
-        todos += len(re.findall(r"(?i)\b(?:TODO|FIXME)\b", text))
-    return {"files": len(paths), "tests": tests, "markdown": markdown, "checked": checked, "unchecked": unchecked, "todos": todos}
+        for line_no, line in enumerate(text.splitlines(), 1):
+            checked = re.match(r"^\s*[-*]\s*\[[xX]\]\s+(.+?)\s*$", line)
+            unchecked = re.match(r"^\s*[-*]\s*\[ \]\s+(.+?)\s*$", line)
+            todo = re.match(r"^\s*(?://|#|/\*|\*|<!--)\s*(?:TODO|FIXME)\b[:\s-]*(.+?)\s*(?:\*/|-->)?\s*$", line, re.IGNORECASE)
+            item = {"path": relative.as_posix(), "line": line_no}
+            if checked: completed.append({**item, "text": checked.group(1)})
+            if unchecked: open_items.append({**item, "text": unchecked.group(1)})
+            if todo and todo.group(1).strip(): todos.append({**item, "text": todo.group(1).strip()})
+    return {"files": len(paths), "tests": tests, "markdown": markdown,
+            "completed_items": completed[:100], "open_items": open_items[:100], "todo_items": todos[:100]}
 
 
-def estimated_progress(signals: dict) -> tuple[int, list[str]]:
-    checklist_total = signals["checked"] + signals["unchecked"]
-    evidence = [f"{signals['files']} files"]
-    if checklist_total:
-        progress = round(100 * signals["checked"] / checklist_total)
-        evidence.append(f"checklist {signals['checked']}/{checklist_total} complete")
-    else:
-        progress = 35
-        if signals["tests"]:
-            progress += 20; evidence.append(f"{signals['tests']} test/spec files")
-        if signals["markdown"]:
-            progress += 10; evidence.append(f"{signals['markdown']} documentation files")
-    if signals["todos"]:
-        progress -= min(20, signals["todos"] * 2); evidence.append(f"{signals['todos']} TODO/FIXME markers")
-    return max(0, min(100, progress)), evidence
+def recent_git_work(workspace: Path, limit: int = 20) -> list[dict]:
+    try:
+        result = subprocess.run(["git", "-C", str(workspace), "log", f"-{limit}", "--format=%H%x09%s"],
+                                capture_output=True, text=True, check=False)
+    except OSError: return []
+    if result.returncode: return []
+    work = []
+    for line in result.stdout.splitlines():
+        commit, separator, subject = line.partition("\t")
+        if separator and subject.strip(): work.append({"commit": commit[:12], "subject": subject.strip()})
+    return work
+
+
+def heading_slug(title: str) -> str:
+    return re.sub(r"[^\w\s-]", "", title.casefold()).replace(" ", "-")
+
+
+def background_candidates(workspace: Path, paths: list[Path]) -> list[dict]:
+    candidates = []
+    ranked = sorted((path for path in paths if path.suffix.casefold() == ".md" and
+                     (path.name.casefold() in BOOTSTRAP_BACKGROUND_NAMES or any(part.casefold() in {"docs", "design_docs"} for part in path.parts))),
+                    key=lambda path: (path.name.casefold() != "readme.md", len(path.parts), path.as_posix()))
+    for relative in ranked:
+        try: text = (workspace / relative).read_text(encoding="utf-8")
+        except OSError: continue
+        heading_match = re.search(r"(?m)^#\s+(.+?)\s*$", text)
+        title = heading_match.group(1).strip() if heading_match else relative.stem.replace("-", " ").replace("_", " ").title()
+        start = heading_match.end() if heading_match else 0
+        paragraph = next((part.strip() for part in re.split(r"\n\s*\n", text[start:])
+                          if part.strip() and not part.lstrip().startswith(("#", "```", "<!--"))), "")
+        quote = paragraph[:280]
+        if not quote: continue
+        triggers = sorted({word.casefold() for word in WORD.findall(title) if len(word) > 2})[:8]
+        candidates.append({"key": f"background:{len(candidates) + 1}", "title": title, "source": relative.as_posix(),
+                           "heading": title if heading_match else None, "quote": quote,
+                           "summary": f"Repository background captured from {relative.as_posix()}.",
+                           "when": f"Working on topics described by {title}", "triggers": triggers or [relative.stem.casefold()],
+                           "affects": ["root"], "confidence": "unreviewed"})
+        if len(candidates) >= 8: break
+    return candidates
 
 
 def build_bootstrap_plan(workspace: Path) -> dict:
     paths = workspace_files(workspace)
-    groups = defaultdict(list)
-    for path in paths:
-        if len(path.parts) > 1: groups[path.parts[0]].append(path)
-    areas = []
-    for name, area_paths in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))[:12]:
-        signals = bootstrap_signals(workspace, area_paths)
-        progress, evidence = estimated_progress(signals)
-        areas.append({"key": f"area:{name}", "title": f"Review and maintain {name}", "parent": "root",
-                      "status": "done" if progress == 100 else "in_progress", "progress": progress,
-                      "confidence": "low", "evidence": evidence, "signals": signals, "paths": [name]})
-    all_signals = bootstrap_signals(workspace, paths)
-    root_progress = round(sum(item["progress"] * max(1, item["signals"]["files"]) for item in areas)
-                          / max(1, sum(item["signals"]["files"] for item in areas))) if areas else estimated_progress(all_signals)[0]
-    root_task = {"key": "root", "title": f"Adopt and maintain {workspace.name}", "parent": None,
-                 "status": "done" if root_progress == 100 else "in_progress", "progress": root_progress,
-                 "confidence": "low", "evidence": [f"inventory covers {all_signals['files']} files", f"{len(areas)} top-level areas"], "paths": ["."]}
-    return {"schemaVersion": 1, "kind": "hypha-bootstrap-plan", "workspace": workspace.name,
-            "warning": "Progress is a low-confidence maturity estimate; review every task before apply.",
-            "inventory": all_signals, "tasks": [root_task, *areas]}
+    signals = bootstrap_signals(workspace, paths)
+    git_work = recent_git_work(workspace)
+    explicit = [(item, "done", 100) for item in signals["completed_items"]]
+    explicit += [(item, "todo", 0) for item in [*signals["open_items"], *signals["todo_items"]]]
+    tasks = [{"key": "root", "title": f"Continue {workspace.name}", "parent": None, "status": "todo",
+              "confidence": "unreviewed", "acceptance": ["Replace with the repository's actual long-running goal and acceptance criteria."],
+              "evidence": [f"inventory: {signals['files']} files", f"recent Git commits: {len(git_work)}"]}]
+    for index, (item, status, progress) in enumerate(explicit[:24], 1):
+        location = f"{item['path']}:{item['line']}"
+        tasks.append({"key": f"explicit:{index}", "title": item["text"], "parent": "root", "status": status,
+                      "progress": progress, "confidence": "explicit-marker",
+                      "acceptance": [f"Confirm the explicit repository item at {location}."],
+                      "evidence": [f"{location}: {item['text']}"]})
+    return {"schemaVersion": 2, "kind": "hypha-bootstrap-plan", "workspace": workspace.name, "reviewed": False,
+            "warning": "Evidence bundle only. An agent must review task meaning, status, acceptance, progress, and knowledge before apply.",
+            "inventory": {key: signals[key] for key in ("files", "tests", "markdown")},
+            "observations": {"recent_git_work": git_work,
+                             "completed_items": signals["completed_items"], "open_items": signals["open_items"],
+                             "todo_items": signals["todo_items"]},
+            "tasks": tasks, "knowledge": background_candidates(workspace, paths)}
 
 
 def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
-    if plan.get("schemaVersion") != 1 or plan.get("kind") != "hypha-bootstrap-plan":
+    if plan.get("schemaVersion") != 2 or plan.get("kind") != "hypha-bootstrap-plan":
         raise ValueError("无效 bootstrap plan schema")
+    if plan.get("reviewed") is not True:
+        raise ValueError("bootstrap plan 必须由 agent 审阅并显式设置 reviewed: true")
     entries = plan.get("tasks")
     if not isinstance(entries, list) or not entries: raise ValueError("bootstrap plan 缺少 tasks")
+    knowledge_entries = plan.get("knowledge", [])
+    if not isinstance(knowledge_entries, list): raise TypeError("bootstrap plan knowledge 必须为数组")
     tasks, knowledge = prepare(home)
-    if tasks: raise ValueError("bootstrap --apply 仅支持空任务图；已有任务请使用 add/parent")
+    if tasks or knowledge: raise ValueError("bootstrap --apply 仅支持空任务与知识图；已有节点请使用 add/apply")
     keys = [entry.get("key") for entry in entries if isinstance(entry, dict)]
     if len(keys) != len(entries) or len(set(keys)) != len(keys) or any(not key for key in keys):
         raise ValueError("bootstrap plan task key 必须唯一且非空")
@@ -414,29 +488,72 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
     proposed = {}
     paths = []
     for entry in entries:
-        progress = entry.get("progress")
-        if not isinstance(progress, int) or not 0 <= progress <= 100: raise ValueError("bootstrap progress 必须为 0..100 整数")
-        status = entry.get("status", "in_progress")
-        if status == "done" and progress != 100: raise ValueError("bootstrap done 任务的 progress 必须为 100")
+        status = entry.get("status", "todo")
+        if status not in TASK_STATUSES: raise ValueError(f"bootstrap status 无效：{status}")
         parent_key = entry.get("parent")
         if parent_key is not None and parent_key not in ids: raise ValueError(f"bootstrap parent 不存在：{parent_key}")
         task_id = ids[entry["key"]]
         title = str(entry.get("title", "")).strip()
         if not title: raise ValueError("bootstrap task title 不能为空")
+        acceptance = [str(item).strip() for item in entry.get("acceptance", []) if str(item).strip()]
+        evidence = [str(item).strip() for item in entry.get("evidence", []) if str(item).strip()]
+        if not acceptance or any(item.startswith("Replace with ") for item in acceptance):
+            raise ValueError(f"bootstrap task {entry['key']} 必须有已审阅的具体验收条件")
+        if not evidence: raise ValueError(f"bootstrap task {entry['key']} 必须有证据")
         slug = re.sub(r"[^\w\-]+", "-", title.lower()).strip("-") or task_id
         path = home / "intent" / f"{task_id}-{slug[:40]}.md"
-        evidence = [str(item) for item in entry.get("evidence", [])]
-        body = "\n# " + title + "\n\n## 验收\n\n- Review this bootstrap candidate against the repository's actual goals.\n\n## 证据\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
-        node = {"id": task_id, "status": status, "bootstrap_confidence": entry.get("confidence", "low"),
-                "bootstrap_paths": [str(item) for item in entry.get("paths", [])], "_body": body, "_path": path, "title": title}
-        if entry["key"] not in parent_keys: node["progress"] = progress
+        body = "\n# " + title + "\n\n## 验收\n\n" + "\n".join(f"- {item}" for item in acceptance)
+        body += "\n\n## 证据\n\n" + "\n".join(f"- {item}" for item in evidence) + "\n"
+        node = {"id": task_id, "status": status, "bootstrap_confidence": entry.get("confidence", "reviewed"),
+                "_body": body, "_path": path, "title": title}
+        if entry["key"] not in parent_keys:
+            progress = entry.get("progress", 0)
+            if not isinstance(progress, int) or not 0 <= progress <= 100: raise ValueError("bootstrap leaf progress 必须为 0..100 整数")
+            if status == "done" and progress != 100: raise ValueError("bootstrap done 叶子任务的 progress 必须为 100")
+            node["progress"] = progress
         if parent_key is not None: node["parent"] = ids[parent_key]
         proposed[task_id] = node; paths.append(path)
     reopen_incomplete_done_tasks(proposed)
-    errors = validate(home, proposed, knowledge)
+    proposed_knowledge, source_copies = {}, []
+    workspace = home.parent
+    for index, entry in enumerate(knowledge_entries, 1):
+        if not isinstance(entry, dict): raise TypeError("bootstrap knowledge 条目必须是对象")
+        if entry.get("confidence") == "unreviewed":
+            raise ValueError("bootstrap knowledge 候选必须审阅、删除或把 confidence 改为 reviewed")
+        title, source, quote = (str(entry.get(field, "")).strip() for field in ("title", "source", "quote"))
+        if not title or not source or not quote: raise ValueError("bootstrap knowledge 必须有 title、source、quote")
+        source_path = (workspace / source).resolve()
+        try: relative = source_path.relative_to(workspace.resolve())
+        except ValueError as exc: raise ValueError(f"bootstrap knowledge source 越界：{source}") from exc
+        if not source_path.is_file() or ".hypha" in relative.parts: raise ValueError(f"bootstrap knowledge source 无效：{source}")
+        captured = Path("src") / "bootstrap" / relative
+        anchor = captured.as_posix()
+        if entry.get("heading"): anchor += "#" + heading_slug(str(entry["heading"]))
+        affects = []
+        for key in entry.get("affects", []):
+            if key not in ids: raise ValueError(f"bootstrap knowledge affects 不存在：{key}")
+            affects.append(ids[key])
+        triggers = [str(item).casefold() for item in entry.get("triggers", []) if str(item).strip()]
+        if not triggers: raise ValueError(f"bootstrap knowledge {title} 缺 triggers")
+        slug = re.sub(r"[^\w-]+", "-", title.lower()).strip("-") or f"background-{index}"
+        ident = f"know/bootstrap/{slug[:48]}"
+        if ident in proposed_knowledge: ident += f"-{index}"
+        target = home / (ident + ".md")
+        node = {"claim_kind": "sourced", "status": "active", "when": str(entry.get("when", "")).strip() or f"Working on {title}",
+                "triggers": triggers, "anchors": [anchor], "evidence": [{"anchor": anchor, "quote": quote}],
+                "affects": affects, "_body": f"\n# {title}\n\n{str(entry.get('summary', '')).strip()}\n", "_path": target, "title": title}
+        proposed_knowledge[ident] = node; paths.append(target); source_copies.append((source_path, captured))
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation_home = Path(temp_dir)
+        for source_path, captured in source_copies:
+            destination = validation_home / captured; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source_path, destination)
+        errors = validate(validation_home, proposed, proposed_knowledge)
     if errors: raise ValueError("\n".join(errors))
     (home / "intent").mkdir(parents=True, exist_ok=True)
+    for source_path, captured in source_copies:
+        destination = home / captured; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source_path, destination)
     for task_id, node in proposed.items(): write_node(node["_path"], node, atomic=True)
+    for node in proposed_knowledge.values(): write_node(node["_path"], node, atomic=True)
     sync(home, by="bootstrap")
     return [str(path.relative_to(home)) for path in paths]
 
@@ -444,7 +561,7 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
 def init(args):
     home = root(args)
     with locked(home):
-        for name in ("src", "intent", "know", ".drafts", "snapshots", "agreements"):
+        for name in ("src", "intent", "know", ".drafts", "snapshots"):
             (home / name).mkdir(parents=True, exist_ok=True)
         atomic_write(home / ".gitignore", "lock\nview.html\n")
         atomic_write(home / ".gitattributes", "snapshots/*.jsonl merge=union\naudit-resolutions.jsonl merge=union\n")
@@ -476,7 +593,8 @@ def normalize(value):
 def audit_projection(node: dict) -> dict:
     """The audit log intentionally excludes body text; git owns body history."""
     fields = ("id", "status", "progress", "parent", "depends_on", "affects", "blocked_reason",
-              "superseded_by", "claim_kind", "anchors", "evidence", "inference", "when", "triggers")
+              "superseded_by", "claim_kind", "knowledge_kind", "scope", "authority", "review_when",
+              "agreement_quote", "anchors", "evidence", "inference", "when", "triggers")
     result = {field: normalize(node[field]) for field in fields if field in node}
     result["body_hash"] = hashlib.sha256(node.get("_body", "").encode("utf-8")).hexdigest()
     return result
@@ -960,8 +1078,8 @@ def boot(args):
         print(f"提示：上次会话可能未收尾；运行中任务：{running}")
     agreements = sorted((home / "agreements").glob("*.md"))
     if agreements:
-        print("不可协商：")
-        for path in agreements: print(f"- agreements/{path.name}")
+        print("迁移提示：agreements/ 已弃用；操作规则移入适用范围内的 AGENTS.md，缘由与历史移入 know/。")
+        for path in agreements: print(f"- legacy agreements/{path.name}")
     print("任务：")
     for task_id, node in sorted(tasks.items()):
         ready = node.get("status") == "todo" and all(tasks[str(dep)].get("status") == "done" for dep in node.get("depends_on", []))
@@ -1019,7 +1137,9 @@ def list_nodes(args):
                 continue
             rows.append({
                 "id": path, "type": "knowledge", "title": node["title"], "status": status,
-                "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
+                "claim_kind": node.get("claim_kind"), "knowledge_kind": node.get("knowledge_kind"),
+                "scope": node.get("scope"), "authority": node.get("authority"),
+                "path": str(node["_path"].relative_to(home)),
                 **observation_times.get(("know", path), {}),
             })
     if args.json:
@@ -1113,13 +1233,56 @@ def ingest(args):
 
 
 def ask(args):
-    """Expose deterministic local context; assertion generation remains agent work."""
+    """Search knowledge or explicit source files using comma-separated literals."""
+    if args.limit < 1: raise ValueError("ask --limit 必须大于 0")
     home = root(args)
     with locked(home): _tasks, knowledge = prepare(home)
-    terms = {x.casefold() for x in WORD.findall(args.question)}
-    for path, node in sorted(knowledge.items()):
-        text = node["title"] + " " + " ".join(map(str, knowledge_triggers(node)))
-        if terms & {x.casefold() for x in WORD.findall(text)}: print(path)
+    terms = []
+    for term in args.keywords.replace("，", ",").split(","):
+        normalized = term.strip().casefold()
+        if normalized and normalized not in terms: terms.append(normalized)
+    if not terms: raise ValueError("ask 至少需要一个非空关键词")
+    candidates = []
+    if args.file:
+        workspace = home.parent.resolve()
+        seen = set()
+        for value in args.file:
+            requested = Path(value)
+            target = requested.resolve() if requested.is_absolute() else (workspace / requested).resolve()
+            try: target.relative_to(workspace)
+            except ValueError as exc: raise ValueError(f"ask --file 必须位于 workspace 内：{value}") from exc
+            if not target.exists(): raise ValueError(f"ask --file 不存在：{value}")
+            paths = [target] if target.is_file() else sorted(path for path in target.rglob("*") if path.is_file())
+            for path in paths:
+                resolved = path.resolve()
+                try: resolved.relative_to(workspace)
+                except ValueError: continue
+                try: eligible = resolved not in seen and resolved.stat().st_size <= 1_000_000
+                except OSError: continue
+                if eligible:
+                    seen.add(resolved); candidates.append(resolved)
+    else:
+        candidates = [node["_path"] for node in knowledge.values()
+                      if node.get("status", "active") == "active" and node.get("claim_kind") != "note"]
+    matches = []
+    for path in candidates:
+        try: lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError: continue
+        for line_no, line in enumerate(lines, 1):
+            folded = line.casefold()
+            hit_terms = [term for term in terms if term in folded]
+            if not hit_terms: continue
+            occurrences = sum(folded.count(term) for term in hit_terms)
+            try: display = path.relative_to(home.parent).as_posix()
+            except ValueError: display = str(path)
+            snippet = re.sub(r"\s+", " ", line).strip()
+            matches.append((len(hit_terms), occurrences, display, line_no, snippet))
+    matches.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
+    if not matches:
+        print("No matches.")
+        return
+    for _, _, path, line_no, snippet in matches[:args.limit]:
+        print(f"{path}:{line_no}: {snippet}")
 
 
 def migrate(args):
@@ -1140,7 +1303,7 @@ def bootstrap(args):
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
         if not home.is_dir(): raise ValueError("尚未 init；请先运行 hypha init")
         with locked(home): created = apply_bootstrap_plan(home, plan)
-        print(f"已从 bootstrap plan 创建 {len(created)} 个任务")
+        print(f"已从 bootstrap plan 创建 {len(created)} 个节点")
         for path in created: print("- " + path)
         return
     plan = build_bootstrap_plan(workspace)
@@ -1195,7 +1358,7 @@ def view(args):
                 "title": node["title"], "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
                 **observation_times.get(("know", key), {}),
                 "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
-                "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors") if field in node},
+                "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors", "knowledge_kind", "scope", "authority", "review_when") if field in node},
             } for key, node in knowledge.items()
         },
         "edges": edges,
@@ -1237,7 +1400,7 @@ def show(args):
     n = tasks.get(args.target) or knowledge.get(args.target.removesuffix(".md"))
     if not n: raise ValueError(f"不存在节点 {args.target}")
     print(n["_path"].relative_to(root(args))); print(n["title"])
-    for key in ("status", "parent", "depends_on", "affects", "when"):
+    for key in ("status", "parent", "depends_on", "affects", "when", "claim_kind", "knowledge_kind", "scope", "authority", "review_when"):
         if key in n: print(f"{key}: {n[key]}")
     relations = graph(tasks, knowledge)
     if args.target in tasks:
@@ -1302,9 +1465,10 @@ def main():
     sub.add_parser("close", help="会话收尾：审计、完成证据与提交建议")
     p = sub.add_parser("ingest", help="复制一份外部来源，并列出旧知识候选")
     p.add_argument("file", help="要复制进 .hypha/src/ 的来源文件")
-    p = sub.add_parser("ask", help="按问题关键词查找已有知识")
-    p.add_argument("question", help="要查找的问题")
-    p.add_argument("--file", help="可选的来源文件范围（供后续问答工作流使用）")
+    p = sub.add_parser("ask", help="用逗号分隔的字面关键词全文检索知识")
+    p.add_argument("keywords", help="逗号分隔关键词，例如 登录,认证,auth,session")
+    p.add_argument("--file", action="append", help="只搜索 workspace 内指定文件或目录；可重复使用")
+    p.add_argument("--limit", type=int, default=30, help="最多返回的匹配行数（默认 30）")
     sub.add_parser("migrate", help="校验并同步现有 Hypha Markdown")
     p = sub.add_parser("bootstrap", help="扫描现有项目并生成可审阅的初始任务计划")
     group = p.add_mutually_exclusive_group()
@@ -1336,7 +1500,7 @@ def main():
         elif args.command == "migrate": migrate(args)
         elif args.command == "bootstrap": bootstrap(args)
         else: view(args)
-    except (ValueError, OSError) as exc:
+    except (TypeError, ValueError, OSError) as exc:
         print(f"错误：{exc}", file=sys.stderr); raise SystemExit(2)
 
 
