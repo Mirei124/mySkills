@@ -7,6 +7,26 @@ description: "Use a repo-local Hypha graph as low-frequency memory for work that
 
 Hypha sits above a runtime plan: plans coordinate the current execution; Hypha preserves outcomes and knowledge when that plan will not fit safely in one session or context. Its value is observable only when it restores context, changes a decision, catches drift, or improves a handoff.
 
+## Run The Bundled CLI
+
+Use Python 3.10+ and `scripts/hypha.py` beside this `SKILL.md`. Resolve the skill directory from the actual skill path supplied by the environment, including a symlinked installation. Substitute the two absolute paths below; keep the user's project separate from the skill's installation directory:
+
+```sh
+HYPHA_CLI='/absolute/path/to/hypha-governance/scripts/hypha.py'
+HYPHA_WORKSPACE='/absolute/path/to/the/users/project'
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" --help
+```
+
+Use that invocation prefix for the commands below. A global `hypha` executable, package installation, connector, and network access are unnecessary. Check the sibling script before searching PATH or declaring the CLI unavailable. If the supplied path is stale, resolve its symlink or inspect the known skill checkout; do not scan unrelated home directories. Stop only if the script or a compatible interpreter is actually unavailable after these checks.
+
+An explicit request to initialize means run `init` and verify its result. It does not require inventing tasks, installing software, or asking for permission again. A `.hypha/lock` file alone does not establish that initialization is complete.
+
+## Publish Changes Through Drafts
+
+For both tasks and knowledge, edit drafts under `.hypha/.drafts/` and publish with `apply`; never directly edit formal `intent/` or `know/` files. Use lifecycle commands for status and relationships. Before writing a draft, read the relevant example in [Draft formats](references/drafts.md): task-update, knowledge, or handoff. The examples are copyable and explain replacement semantics; CLI source inspection is not a normal setup step.
+
+For an existing task, read its full Markdown, copy the complete body into a `kind: task-update` draft with its `id`, and edit only the intended sections. `apply` replaces the whole body; it preserves omitted task metadata. Preserve existing constraints, evidence, remaining work, and links. A `kind: handoff` draft is recovery data and must not be applied as knowledge. Applied drafts are already hidden by `drafts`; leave them in place instead of manually editing the publication ledger or deleting them to make output look clean.
+
 ## Separate AGENTS.md From Hypha
 
 - Put concise rules that must be followed on every relevant task in the nearest `AGENTS.md`: version-control policy, test commands, code style, safety prohibitions, and directory conventions. Do not duplicate them in Hypha.
@@ -25,6 +45,8 @@ Use task governance at these checkpoints:
 - Before handoff or context exhaustion, record the next concrete step and unresolved risks.
 
 An explicit request to initialize, inspect, update, summarize, resume, or close Hypha triggers the relevant operation, but does not make a short task long-lived. For an explicitly governed short task, create at most one outcome node unless later work becomes independently schedulable across sessions. Do not create or update task nodes for ordinary implementation steps, every tool call, every compile, small percentage changes, or each conversation turn. A Hypha command completing is never by itself a reason to report, wait, or end the turn.
+
+Low frequency still requires meaningful checkpoints. Importing each record needs no update; completing and verifying a batch while work remains warrants one milestone update on the existing task. Before handing that work to another context, preserve the remaining acceptance, next concrete step, and risks even when no new design decision occurred. If publication is not yet justified, save a handoff draft. Do not leave the only recovery record in a conversational summary. Ordinary user turns and commits do not by themselves require `close`.
 
 ### Knowledge accumulation
 
@@ -57,7 +79,7 @@ Do not store one-off output, temporary debugging steps, facts cheap to recover f
 
 ## Default Task Workflow
 
-1. **Resume once.** At a new-session boundary, run `boot "<task and keywords>"`. Inspect the relevant task and recalled knowledge only as needed to recover the goal, constraints, verified evidence, remaining acceptance, next step, and risks. Do not repeat `boot` in every turn.
+1. **Resume once.** At a new-session boundary, run `boot "<task and keywords>"`. Read the selected task and relevant knowledge with `show <id-or-path> --body`, plus relevant handoff drafts. Recovery is complete only when the goal, applicable constraints, verified evidence, remaining acceptance, next step, and risks are known or explicitly identified as missing. An index or a successful `boot` alone is insufficient. With empty or unmatched keywords, inspect the bounded linked-task candidates; if context is still missing, use a few literal keywords with `search` and, if needed, `list --type knowledge`. Do not treat fallback candidates as proven relevance or repeat `boot` in every turn. Resume an in-progress task without calling `start` again.
 2. **Execute continuously.** Return to the user's primary work. Do not mirror a runtime plan in Hypha, record routine activity, or stop after a governance command.
 3. **Checkpoint only material change.** Reuse the current task. Update status/structure when scope, dependencies, blockers, or direction change; publish one evidence update for an independently acceptable milestone. Prefer statuses and acceptance evidence over invented precision. Use numeric leaf progress only when it can be explained by explicit acceptance items; parents remain derived.
 4. **Handoff once.** When the user requests handoff/close or context is genuinely ending, record the next concrete step and unresolved risks, then run `close`. Do not use `close` between ordinary turns or while execution is expected to continue.
@@ -67,6 +89,12 @@ Use `init` once for a new graph. For a brownfield repository, `bootstrap` is an 
 Before adding a child, ask whether it could be independently accepted, handed off, deferred, or scheduled while its siblings proceed separately. If not, it is an acceptance item or runtime-plan step, not a Hypha node. Several steps performed consecutively in the same turn to produce one deliverable belong in one task.
 
 `Acceptance` defines the observable outcome and must be present before completion. `Evidence` records why completion is trustworthy and must cite concrete tests, files, commands, or user confirmation. Keep both concise. `todo` may begin without them, but `done` may not; never mark work done merely because code was written or a Git change exists.
+
+## Migrate Existing Task Records
+
+When moving from another task system, read [Migration review](references/migration.md) before publishing. Preserve the original records and account for every unfinished task, blocker, dependency, and outstanding todo. Completed history can be summarized. Unfinished work needs an explicit destination: a live Hypha task, a specific remaining acceptance item, or an evidence-backed cancellation/supersession. An entry in a historical table alone is not a destination. Reuse task boundaries when appropriate; do not copy every historical step into a new node.
+
+Treat old percentages as historical reported values. Set current numeric progress only when current acceptance items justify it. Verify migration coverage separately from `lint`: structural validation cannot prove that the source's unfinished scope survived.
 
 ## Knowledge Workflow
 
@@ -83,7 +111,7 @@ Before adding a child, ask whether it could be independently accepted, handed of
 
 The normal path is deliberately short: `boot` once, ordinary implementation, a material state/evidence update when warranted, and `close` only for real handoff.
 
-- `show <id-or-path>`: node, backlinks, premises, child tasks, unlocks, and redlinks.
+- `show <id-or-path> --body`: node metadata, relationships, and full body, including acceptance, evidence, and recovery sections. Omit `--body` only for a compact relationship check.
 - `list [--type task|knowledge] [--status ...] [--tree|--json]`: complete node overview.
 - `search "keyword1,keyword2,keyword3" [--file <path>]`: literal full-text search in knowledge or sources.
 - `route <terms>`: topic recall candidates and score components. Use `show` when the node is known.
@@ -114,6 +142,8 @@ Exhaust safe, authorized work before asking for confirmation. Ask only when a mi
 ## Handle CLI Rejections Without Stalling
 
 A nonzero CLI exit is a validation result, not proof that the user's work is blocked. Read the error, inspect current nodes, and perform every safe deterministic correction available. For example, update leaves before completing a parent, choose `parent` versus `needs` from established task semantics, or keep an uncertain node as a draft. Ask the user only when the remaining choice is materially ambiguous and would change formal state. Do not mark a runtime goal blocked merely because `add`, `apply`, `done`, `lint`, or `close` rejected invalid state.
+
+An unmanaged-write notice with successful lint is historical audit information, not a validation failure. Inspect relevant content when needed and continue the primary task. To acknowledge reviewed content, apply a draft containing the same body and the metadata fields actually reviewed. Even with unchanged content, `apply` appends a review event for those fields while preserving the original direct-write history; omitted metadata is not acknowledged. Do not add/remove whitespace, repeatedly lint, rewrite audit logs, or delete drafts solely to clear a notice. CLI validation does not replace semantic review.
 
 ## Boundaries
 

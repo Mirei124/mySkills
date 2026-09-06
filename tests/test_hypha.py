@@ -60,6 +60,157 @@ class HyphaCliTest(unittest.TestCase):
         self.assertTrue(events)
         self.assertNotIn(".observed.json", {path.name for path in (self.workspace / ".hypha" / "snapshots").iterdir()})
 
+    def test_bundled_cli_runs_through_symlink_in_other_workspace(self):
+        installed = self.workspace / "installed-skill"
+        installed.symlink_to(ROOT / "skills" / "hypha-governance", target_is_directory=True)
+        project = self.workspace / "project with spaces"
+        project.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(installed / "scripts" / "hypha.py"), "--workspace", str(project), "init"],
+            cwd=self.workspace, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((project / ".hypha" / "intent").is_dir())
+        self.assertFalse((self.workspace / ".hypha").exists())
+
+    def test_unchanged_apply_reviews_only_supplied_fields_and_preserves_history(self):
+        self.cli("init")
+        self.cli("add", "reviewed task")
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        text = task.read_text().replace("status: todo", "status: in_progress")
+        text += "\n## Next Step\n\nVerify the second source.\n"
+        task.write_text(text)
+        notice = self.cli("lint")
+        self.assertEqual(0, notice.returncode)
+        self.assertIn("not a validation failure", notice.stdout)
+        snapshots = next((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
+        original_events = snapshots.read_text()
+        body = text.split("---\n", 2)[2]
+        draft = self.workspace / ".hypha" / ".drafts" / "review.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\n---\n" + body)
+        self.cli("apply", str(draft))
+        self.assertEqual(text, task.read_text())
+        self.assertTrue(snapshots.read_text().startswith(original_events))
+        notice = self.cli("lint").stdout
+        self.assertNotIn("intent:0001 body_hash", notice)
+        self.assertIn("intent:0001 status", notice)
+        events = [json.loads(line) for line in snapshots.read_text().splitlines()]
+        reviews = [event for event in events if event.get("reviewed")]
+        self.assertEqual(["body_hash"], [event["field"] for event in reviews])
+        self.assertEqual(reviews[0]["from"], reviews[0]["to"])
+        before_repeat = snapshots.read_text()
+        self.cli("apply", str(draft))
+        self.assertEqual(before_repeat, snapshots.read_text())
+        draft.write_text("---\nkind: task-update\nid: 0001\nstatus: in_progress\n---\n" + body)
+        self.cli("apply", str(draft))
+        self.assertNotIn("unmanaged writes", self.cli("lint").stdout)
+        task.write_text(task.read_text() + "\nNew unreviewed change.\n")
+        self.assertIn("intent:0001 body_hash", self.cli("lint").stdout)
+
+    def test_rejected_apply_does_not_acknowledge_direct_writes(self):
+        self.cli("init")
+        self.cli("add", "unfinished")
+        self.document_task("0001")
+        self.cli("lint")
+        draft = self.workspace / ".hypha" / ".drafts" / "bad-review.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\nstatus: invalid\n---\n# Rejected\n")
+        self.assertNotEqual(0, self.cli("apply", str(draft), ok=False).returncode)
+        self.assertIn("intent:0001 body_hash", self.cli("lint").stdout)
+
+    def test_boot_recalls_linked_knowledge_and_show_exposes_recovery_body(self):
+        self.cli("init")
+        self.cli("add", "batch import")
+        self.document_task("0001", "Verify both sources.", "First source passed checks.")
+        self.cli("start", "0001")
+        drafts = self.workspace / ".hypha" / ".drafts"
+        for title, status, claim in (("Source policy", "active", "agreement"),
+                                     ("Old policy", "superseded", "agreement"),
+                                     ("Scratch note", "active", "note")):
+            draft = drafts / (title + ".md")
+            draft.write_text(
+                f"---\nkind: know\nclaim_kind: {claim}\nstatus: {status}\n"
+                + ("superseded_by: know/source-policy\n" if status == "superseded" else "")
+                + "knowledge_kind: constraint\nscope: project\n"
+                "authority: user_explicit\nagreement_quote: Use official sources.\n"
+                "affects: [0001]\ntriggers: [policy]\nwhen: Selecting sources\n---\n"
+                f"# {title}\n\nUse official sources.\n"
+            )
+            self.cli("apply", str(draft))
+        for terms in ((), ("unmatched",), ("policy",)):
+            output = self.cli("boot", *terms).stdout
+            self.assertIn("know/source-policy", output)
+            self.assertNotIn("know/old-policy", output)
+            self.assertNotIn("know/scratch-note", output)
+            self.assertIn("Recovery is not complete", output)
+            self.assertIn("show <id-or-path> --body", output)
+        body = self.cli("show", "0001", "--body").stdout
+        self.assertIn("Verify both sources.", body)
+        self.assertIn("First source passed checks.", body)
+        self.assertIn("untrusted data", body)
+        self.assertNotIn("First source passed checks.", self.cli("show", "0001").stdout)
+        self.assertIn("Use official sources.", self.cli("show", "know/source-policy", "--body").stdout)
+
+    def test_boot_no_candidates_explains_recovery_gap(self):
+        self.cli("init")
+        self.assertIn("No topic keywords supplied", self.cli("boot").stdout)
+        output = self.cli("boot", "missing").stdout
+        self.assertIn("No literal topic matches", output)
+        self.assertIn("No knowledge candidates found", output)
+        self.assertIn("list --type knowledge", output)
+
+    def test_boot_limits_candidates_without_losing_expansion_path(self):
+        self.cli("init")
+        self.cli("add", "import")
+        for index in range(14):
+            draft = self.workspace / ".hypha" / ".drafts" / f"policy-{index}.md"
+            draft.write_text(
+                "---\nkind: know\nclaim_kind: inference\nanchors: [src/policy.md]\n"
+                "inference: Derived from the source policy.\nwhen: Importing\n"
+                f"affects: [0001]\ntriggers: [policy{index}]\n---\n# Policy {index}\n"
+            )
+            self.cli("apply", str(draft))
+        output = self.cli("boot").stdout
+        self.assertEqual(12, len(re.findall(r"(?m)^- know/", output)))
+        self.assertIn("Showing 12 of 14 candidates", output)
+        self.assertIn("know/policy-13", self.cli("show", "0001").stdout)
+
+    def test_nested_drafts_are_visible_until_applied(self):
+        self.cli("init")
+        nested = self.workspace / ".hypha" / ".drafts" / "know"
+        nested.mkdir()
+        draft = nested / "publication.md"
+        draft.write_text("---\nkind: know\nclaim_kind: note\n---\n# Publication\n")
+        handoff = nested / "handoff.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Pending work\n\nResume the second source.\n")
+        output = self.cli("drafts").stdout
+        self.assertIn(".drafts/know/publication.md", output)
+        self.assertIn(".drafts/know/handoff.md", output)
+        self.cli("apply", str(draft))
+        output = self.cli("drafts").stdout
+        self.assertNotIn("publication.md", output)
+        self.assertIn("handoff.md", output)
+        self.assertIn(".drafts/know/handoff.md", self.cli("boot").stdout)
+        self.assertTrue(draft.is_file())
+
+    def test_documented_draft_examples_publish_or_remain_handoffs(self):
+        self.cli("init")
+        self.cli("add", "example task")
+        source = self.workspace / "architecture.md"
+        source.write_text("# Deployment\n\nThe customer environment has no network access.\n")
+        self.cli("ingest", str(source))
+        reference = ROOT / "skills" / "hypha-governance" / "references" / "drafts.md"
+        examples = re.findall(r"```markdown\n(.*?)\n```", reference.read_text(), re.DOTALL)
+        self.assertEqual(4, len(examples))
+        for index, example in enumerate(examples):
+            draft = self.workspace / ".hypha" / ".drafts" / f"example-{index}.md"
+            draft.write_text(example + "\n")
+            if "kind: handoff" in example:
+                self.assertIn("cannot be published", self.cli("apply", str(draft), ok=False).stderr)
+                self.assertIn(draft.name, self.cli("drafts").stdout)
+            else:
+                self.cli("apply", str(draft))
+        self.cli("lint")
+
     def test_completion_requires_acceptance_and_evidence(self):
         self.cli("init")
         self.cli("add", "verified outcome")

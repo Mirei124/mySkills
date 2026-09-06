@@ -1,0 +1,11 @@
+{
+  "tasks": [
+    {"id": "OLD-1", "title": "Import both sources", "status": "in_progress", "reported_progress": 90, "acceptance": ["Source A imported and verified", "Source B pagination verified and all records imported"]},
+    {"id": "OLD-2", "parent": "OLD-1", "title": "Verify source B pagination", "status": "in_progress", "reported_progress": 95, "remaining": "Check page two; cursor is page=2"},
+    {"id": "OLD-3", "title": "Publish reconciled report", "status": "blocked", "depends_on": ["OLD-2"], "blocker": "Source B pagination must be verified before reporting totals"},
+    {"id": "OLD-4", "parent": "OLD-1", "title": "Import source A", "status": "done", "evidence": "Source A: 20 rows imported; duplicate check passed (historical report, not independently rerun during migration)"}
+  ],
+  "todos": [{"id": "TODO-1", "task": "OLD-2", "text": "Verify source B page two is not a repeat of page one"}],
+  "constraints": [{"quote": "Use only official source endpoints.", "source": "User-approved collection policy"}],
+  "verification": "Source A: 20 rows imported; duplicate check passed. Source B remains unverified."
+}

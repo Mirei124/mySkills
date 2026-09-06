@@ -4,61 +4,103 @@
     {
       "id": "cross-directory-handoff",
       "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
-      "expected_output": "初始化或启动 Hypha，路由相关上下文，并以显式任务、lint --audit 与 close 完成交接。",
+      "expected_output": "Boot once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, and record the requested handoff. Use lint --audit only for needed semantic relationship review, and close only for the actual handoff.",
       "files": []
     },
     {
       "id": "evidence-backed-decision",
       "prompt": "We need to retain the OAuth provider decision with a quote from its documentation and link it to the migration task so later agents can find it.",
-      "expected_output": "使用来源快照，起草并发布带证据的知识节点，再关联任务；不把语义判断伪装成自动校验。",
+      "expected_output": "Ingest a source snapshot, publish a sourced draft with exact evidence and recall terms, and link the existing task with affects. Do not confuse structural validation with semantic review.",
       "files": []
     },
     {
       "id": "non-trigger-simple-edit",
       "prompt": "Rename this one local variable and run the unit test.",
-      "expected_output": "不为自包含的简单编辑触发 Hypha 治理。",
+      "expected_output": "Complete the self-contained edit without triggering Hypha task governance.",
       "files": []
     },
     {
       "id": "context-exhaustion-recovery",
-      "prompt": "上一会话中断，0002 仍是 in_progress，.hypha/.drafts/ 里留有 handoff。恢复后继续实现，不能误把 handoff 发布为知识。",
-      "expected_output": "boot/next 主动提示中断、运行中任务与草稿；读取 drafts，并保留 handoff 为不可发布恢复记录。",
+      "prompt": "The previous context ended with task 0002 still in_progress and a handoff in .hypha/.drafts/recovery/handoff.md. Resume implementation; the handoff is not publishable knowledge.",
+      "expected_output": "Boot once, locate the nested draft, read it and relevant task/knowledge bodies, and continue from the saved next step. Do not apply the handoff or restart an in-progress task.",
       "files": []
     },
     {
       "id": "audit-resolution-memory",
-      "prompt": "lint --audit 给出一个可能缺少 affects 的候选。我判断它不相关；下个会话不应让我再次审同一个候选。",
-      "expected_output": "用 resolve 持久化 unrelated 判定，后续 lint --audit 不再显示该候选。",
+      "prompt": "lint --audit lists a potentially missing affects relationship. I have confirmed it is unrelated; the next session should not ask me to review the same candidate.",
+      "expected_output": "Persist the unrelated judgment with dismiss <candidate-id>; a subsequent audit does not list that candidate.",
       "files": []
     },
     {
       "id": "short-task-durable-rationale",
-      "prompt": "把这个配置改掉。顺便说明一下：产品必须离线运行不是为了部署方便，而是客户环境完全断网；以后选依赖都要考虑这一点。",
-      "expected_output": "执行短修改时不创建任务节点，但触发 knowledge-only 流程，把离线边界的缘由、范围和影响作为知识候选；若 AGENTS.md 需要一条操作规则，只在那里保留简短规则而不在 Hypha 重复。",
+      "prompt": "Change this configuration. The product has to work offline because customer environments have no network access; remember this when choosing dependencies.",
+      "expected_output": "Complete the small change without a task node. Capture the authorized durable rationale through knowledge-only drafts and apply; keep any concise operating rule in AGENTS.md without duplicating it.",
       "files": []
     },
     {
       "id": "implicit-consensus-needs-confirmation",
-      "prompt": "我已经第三次把云端方案改回本地实现了，看来我们这个项目一直更偏好零外部服务。修完当前问题吧。",
-      "expected_output": "识别可能的高价值隐性共识，但在保存为 user_confirmed agreement 前请求确认；不把重复纠正直接升级成不可协商事实。",
+      "prompt": "This is the third time I have changed the cloud solution back to a local implementation. It seems our project prefers no external services. Finish fixing the current issue.",
+      "expected_output": "Finish the primary fix. Do not publish an inferred preference as user_confirmed agreement without confirmation; retain a draft or defer optional capture instead of blocking the fix.",
       "files": []
     },
     {
       "id": "agents-operating-rule-not-duplicated",
-      "prompt": "AGENTS.md 已经写了默认用 Git、不要用 jj。以后按这个执行。",
-      "expected_output": "直接遵守 AGENTS.md，不在 Hypha 复制同一句操作规则；只有出现长期有价值的选择缘由、范围、例外或历史时才建立知识候选。",
+      "prompt": "AGENTS.md already says to use Git and not jj. Follow that rule from now on.",
+      "expected_output": "Follow the operating rule without duplicate Hypha knowledge. Capture only additional durable rationale or history if present.",
       "files": []
     },
     {
       "id": "non-trigger-transient-debugging",
-      "prompt": "刚才 dev server 的 5173 端口被占用了，我临时换成 5174，把页面打开确认一下。",
-      "expected_output": "把端口变化视为临时执行信息，不触发 Hypha 任务或知识写入。",
+      "prompt": "The dev server port 5173 was occupied, so I temporarily switched to 5174. Open the page and check it.",
+      "expected_output": "Treat the temporary port as execution context, without a Hypha task or knowledge write.",
       "files": []
     },
     {
       "id": "source-updates-existing-synthesis",
-      "prompt": "这份新的兼容性报告推翻了之前‘Firefox 动画没有性能问题’的结论。把来源和新结论维护进知识库，并确保以后优化前端性能时能找到。",
-      "expected_output": "触发 sourced knowledge 工作流，保留来源与逐字证据，更新或 supersede 旧知识并关联相关长期任务，而不是静默覆盖。",
+      "prompt": "This compatibility report contradicts our earlier conclusion that Firefox animation has no performance issues. Maintain the source and conclusion so future frontend performance work finds it.",
+      "expected_output": "Ingest the report, preserve exact evidence, update or supersede the old conclusion while retaining history, and connect relevant long-running work.",
+      "files": []
+    },
+    {
+      "id": "bundled-cli-discovery",
+      "prompt": "Initialize Hypha in this project. The installed skill directory is a symlink, the project path contains spaces, and command -v hypha finds nothing.",
+      "expected_output": "Resolve scripts/hypha.py beside the supplied skill path and invoke it with Python and an explicitly quoted project workspace. Initialize without asking to install or connect a service; do not create unrelated tasks.",
+      "assertions": ["Uses the bundled script before broad executable searches.", "Initializes the user project rather than the skill checkout.", "Does not request installation permission when the bundled script is usable."],
+      "files": []
+    },
+    {
+      "id": "task-body-publication",
+      "prompt": "Task 0001 already has constraints, evidence, and remaining acceptance. Add the verified first-batch result and the next source cursor without losing existing content.",
+      "expected_output": "Read the existing body, preserve its sections in a kind: task-update draft, and apply it. Do not directly patch intent/ or replace the body with only the new note.",
+      "assertions": ["Writes formal task content only through apply.", "Preserves existing constraints, evidence, and unfinished acceptance."],
+      "files": []
+    },
+    {
+      "id": "unmanaged-notice-review",
+      "prompt": "lint exits successfully but reports a direct body write to task 0001. I have checked that the current body is correct. Record that review without changing content or erasing history, then continue the main work.",
+      "expected_output": "Publish a reviewed task-update draft with the identical body. Append-only review acknowledges the direct body write while original events remain. No whitespace round trip, ledger edits, repeated lint loop, or task blockage.",
+      "assertions": ["Leaves task body bytes unchanged.", "Preserves original direct-write events.", "Does not treat a successful lint notice as a blocker."],
+      "files": []
+    },
+    {
+      "id": "empty-recall-is-not-recovery",
+      "prompt": "Resume the import task. The topic phrase does not match knowledge triggers, but a source-selection constraint is linked to the in-progress task. Recover the actual constraints and remaining work before continuing.",
+      "expected_output": "Inspect linked-task fallback candidates and read task and applicable knowledge bodies. Explicitly identify missing recovery fields; do not claim an index alone restored context.",
+      "assertions": ["Reads the linked constraint body.", "Identifies remaining acceptance and a concrete next step.", "Does not claim that boot success alone completes recovery."],
+      "files": []
+    },
+    {
+      "id": "migration-preserves-unfinished-scope",
+      "prompt": "Move old task records to Hypha. The root is reported 90% complete, a child is still in_progress at 95%, another task is blocked on that child, and a pagination todo remains. Completed steps can be summarized. Preserve unfinished scope without copying the whole tree.",
+      "expected_output": "Map every unfinished task and todo, preserving dependencies and blockers through live tasks or explicit remaining acceptance. Retain history and old percentages as historical values, not newly verified progress. Check coverage separately from lint.",
+      "assertions": ["Every unfinished item has an actionable destination or evidence-backed disposition.", "Preserves the pagination todo and blocked task dependency.", "Does not copy 90 or 95 into current progress without acceptance-based justification."],
+      "files": ["evals/files/legacy-import.json"]
+    },
+    {
+      "id": "milestone-before-context-handoff",
+      "prompt": "The first import batch is verified, another source remains, and we are handing off to a new context now. Save enough to continue. Do not create a task for each imported record.",
+      "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with close after reviewing state; do not leave recovery solely in chat.",
+      "assertions": ["Persists recovery information in Hypha rather than only the final response.", "Does not create per-record task nodes.", "Keeps unfinished scope open."],
       "files": []
     }
   ]
