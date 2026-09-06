@@ -2,6 +2,8 @@
 
 Hypha is a local, Git-native task and knowledge graph for coding agents. Tasks, evidence, relationships, and knowledge stay in readable Markdown under `.hypha/`; a standard-library Python CLI validates the graph and produces a self-contained offline HTML view.
 
+Knowledge fills gaps left by current project files: user background, confirmed choices, rejected alternatives, rationale, and conditions established in conversation. Tasks preserve long-term goals and their evolution across execution plans and sessions. A plan is the current execution strategy, not the lifetime of the task. Hypha retrieves saved records and relevant project files; it does not discover, index, or search conversation archives.
+
 It is designed for one agent working locally in one repository. It does not require a server, database, account, or network connection.
 
 ## New users: fastest path to a working graph
@@ -85,6 +87,8 @@ Hypha intentionally rejects ambiguous new roots and duplicate active titles. Fol
 
 Hypha is for work that outlives a normal runtime plan. A short task explicitly tracked with Hypha normally gets one outcome node. Setup, implementation, tests, and documentation performed consecutively for that deliverable belong in its Acceptance section, not in separate child nodes. Add a child only when it can be independently accepted, handed off, deferred, or scheduled.
 
+Several plans in one session can share one persistent task ID. Restore the goal before choosing the next plan; replacing or finishing a plan does not create a new root, reset progress, or complete unfinished task acceptance. When scope changes, update current acceptance and keep a concise dated Change History entry describing the old/new boundary, reason and authority, disposition of unfinished work, dependency effects, and evidence/decisions needing review. Keep earlier milestones as history and revalidate them against changed acceptance. See [Continuity examples](skills/hypha-governance/references/continuity.md).
+
 ### 4. Use the low-frequency session path
 
 At the beginning of a new working session, restore context once:
@@ -133,27 +137,11 @@ Progress belongs only to leaf tasks. Set it with `progress <id> <0..100>` or com
 
 ### 5. Add durable knowledge
 
-Write new content to `.hypha/.drafts/` first. For example:
+Before asking the user to repeat missing project information, check the current context and relevant files, then search Hypha and read applicable node bodies. This applies mid-plan as well as at session startup. Check scope, authority, review conditions, and supersession; reuse a still-applicable confirmed answer without another confirmation. Ask only for information that remains absent or materially ambiguous. Current explicit corrections take precedence over stale records, and stored information does not grant authority for unrelated actions.
 
-```markdown
----
-kind: know
-claim_kind: note
-affects: [0001]
-triggers: [authentication, token]
----
-# Authentication implementation note
+Capture an answer when a future agent would otherwise need to ask the user again or guess, and it matters beyond the current plan (or the user explicitly asks to remember it). Do not duplicate facts already recoverable from project files. If the implementation is documented but its rationale is not, save that rationale with its conditions and a link to the implementation. Source snapshots and inferences support these gaps rather than building a second general documentation library.
 
-The refresh path is handled by `src/auth/refresh.py`.
-```
-
-Publish it atomically:
-
-```bash
-python3 "$HYPHA_CLI" --workspace "$PROJECT" apply "$PROJECT/.hypha/.drafts/auth-note.md"
-```
-
-Use `claim_kind: sourced` for claims copied from a source and provide `anchors` plus exact evidence quotes. Use `claim_kind: inference` for conclusions and state their premises. Plain `note` pages stay out of automatic boot routing.
+Write qualifying content to `.hypha/.drafts/` first, using the agreement example below or the [complete draft formats](skills/hypha-governance/references/drafts.md), then publish with `apply`. Use `claim_kind: sourced` for supporting source claims with `anchors` and exact evidence quotes, and `claim_kind: inference` for conclusions with explicit premises. Plain `note` pages stay out of automatic boot routing; they are unsuitable for a confirmed answer that future work must recall.
 
 `AGENTS.md` and Hypha have different jobs. Put concise, always-on operating instructions—commands, coding conventions, safety restrictions, and version-control rules—in the nearest applicable `AGENTS.md`. Put the rationale, scope, decision history, rejected alternatives, evidence, exceptions, review conditions, and links to long-running work in Hypha. Do not maintain two copies of the same rule.
 

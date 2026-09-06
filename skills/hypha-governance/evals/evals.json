@@ -102,6 +102,37 @@
       "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with close after reviewing state; do not leave recovery solely in chat.",
       "assertions": ["Persists recovery information in Hypha rather than only the final response.", "Does not create per-record task nodes.", "Keeps unfinished scope open."],
       "files": []
+    },
+    {
+      "id": "recall-before-repeat-question",
+      "prompt": "Continue planning the ingestion pilot. Explain where processing runs, the allowed transfer mechanism, batch limit, verified work, and what remains. If a required fact is genuinely missing, ask only for that fact. Use only the current project and its saved Hypha context.",
+      "expected_output": "Check project files and saved knowledge bodies before asking. Recover applicable user-confirmed decisions without re-confirming them; distinguish missing information from known choices. Do not read conversation archives.",
+      "assertions": ["Reads saved knowledge bodies before any question about prior choices.", "Asks only about information absent from the project and applicable Hypha records.", "Does not search raw conversation logs."],
+      "setup": "Coordinator runs the isolated capture/recall protocol in evals/README.md; the recall agent receives only the saved project and recall prompt.",
+      "files": []
+    },
+    {
+      "id": "capture-conversation-information-gap",
+      "prompt": "Our pilot customer prohibits records leaving its isolated machine; this is why we rejected hosted processing. Batches are capped at 64 MiB due to its device memory. The repository already describes how to run CSV checks. Keep the pilot goal across plans: CSV checks passed, JSON and recovery remain. End this plan and hand off.",
+      "expected_output": "Save the missing customer rationale and batch boundary with explicit origin and scope, without repeating repository build/test facts as knowledge. Preserve one long-term task with a CSV milestone and JSON/recovery still open. Do not request a second confirmation of explicit statements.",
+      "assertions": ["Captures rationale and batch boundary unavailable in project files.", "Avoids duplicating the documented check command as knowledge.", "Keeps the task open after the first plan finishes."],
+      "setup": "Coordinator initializes project_files from the continuity scenario, then supplies only capture_prompt to the capture agent.",
+      "files": []
+    },
+    {
+      "id": "scope-evolution-across-plans",
+      "prompt": "The same ingestion pilot now needs XML instead of JSON because the customer changed its export system. Cancel only JSON support. Retain verified CSV behavior, the existing batch limit and processing constraints, and the recovery requirement. Update the long-term goal and next plan; implementation is still pending.",
+      "expected_output": "Reuse the existing task ID, revise current acceptance to CSV/XML/recovery, preserve CSV evidence, and record the reason, old/new boundary, explicit JSON cancellation, remaining work and decision/dependency effects. Do not mark the long-term task done or create one root per plan.",
+      "assertions": ["Preserves the original task identity across the plan replacement.", "Records why JSON was replaced and where every unfinished item went.", "Leaves XML and recovery unverified and open.", "Does not ask again for still-applicable saved constraints.", "Refreshes any pending handoff that would otherwise restore cancelled scope."],
+      "setup": "Coordinator supplies evolution_prompt after recall, using the same persisted project; earlier prompts and grading assertions are withheld.",
+      "files": []
+    },
+    {
+      "id": "recall-stale-scope-and-missing-answer",
+      "prompt": "Plan the ingestion pilot for a different customer. The stored offline-only decision explicitly applied to the previous customer. This customer has internet access, but we have not decided whether its records may leave the device. Use saved context where applicable and identify the remaining decision.",
+      "expected_output": "Read and respect the old decision's scope; do not assume either that the old restriction universally applies or that internet access authorizes hosted processing. Ask only about the unresolved data-transfer decision and continue independent work.",
+      "assertions": ["Does not treat a previous customer's scoped decision as universal.", "Does not infer data-transfer authorization from internet access.", "Asks a focused question about the unresolved decision."],
+      "files": []
     }
   ]
 }

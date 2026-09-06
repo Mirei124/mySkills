@@ -1,0 +1,19 @@
+{
+  "name": "conversation-context-and-task-continuity",
+  "isolation": "Run capture first. Give a fresh recall agent only the resulting project including .hypha, its installed skill, and the recall prompt. Do not provide capture prompts, reports, transcripts, this scenario file, or grader assertions to recall. Run evolution after recall with the same persisted project. Use separate projects for old/new skill comparisons. Never read real session archives.",
+  "project_files": {
+    "README.md": "# Ingestion pilot\n\nThe CSV check command is documented in csv-check.txt. Processing currently runs in a local process.\n",
+    "csv-check.txt": "Command: python3 verify_csv.py\nResult: CSV fixture checks passed.\n"
+  },
+  "capture_prompt": "Use Hypha to manage this pilot across plans. Our pilot customer prohibits records leaving its isolated machine; this is why hosted processing was rejected. The batch cap is 64 MiB because of device memory. CSV checks passed as shown in csv-check.txt. The long-term goal still needs JSON ingestion and failure recovery. This execution plan is ending; preserve the milestone and hand off. Do not implement code or contact any service.",
+  "recall_prompt": "Continue planning the ingestion pilot using current project files and saved Hypha context. Describe where processing runs and why, whether hosted processing is allowed, the batch cap, verified work, remaining acceptance, and the next plan. We also need the scheduled customer demo date; if a required fact is genuinely missing, ask only about it. Do not implement code or contact services.",
+  "evolution_prompt": "Keep the same ingestion pilot goal, but the customer changed its export system: XML replaces JSON. Cancel only JSON support. CSV evidence remains valid, and the existing processing constraint, batch cap, and recovery requirement still apply. Update the long-term task and next plan; XML implementation and recovery are still pending. Do not implement code or contact services.",
+  "assertions": [
+    "Capture saves user rationale and 64 MiB boundary without duplicating the check command as knowledge.",
+    "Fresh recall retrieves isolated-machine rationale, hosted-processing exclusion, and 64 MiB cap from saved knowledge.",
+    "Recall asks for the absent demo date without asking the user to repeat recorded choices.",
+    "The same long-term task ID survives capture, recall, and evolution; ending a plan does not complete it.",
+    "Evolution preserves CSV evidence, records the export-system reason and JSON cancellation, and leaves XML plus recovery open.",
+    "No phase reads conversation archives or hidden prior-phase context."
+  ]
+}

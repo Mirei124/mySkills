@@ -1,6 +1,7 @@
 import json
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,65 @@ class HyphaCliTest(unittest.TestCase):
             else:
                 self.cli("apply", str(draft))
         self.cli("lint")
+
+    def test_saved_context_and_task_evolution_survive_workspace_handoff(self):
+        self.cli("init")
+        self.cli("add", "Deliver ingestion pilot")
+        self.cli("start", "0001")
+        first_body = (
+            "# Deliver ingestion pilot\n\n## Acceptance\n\n- CSV, JSON, and recovery work.\n"
+            "\n## Evidence\n\n- Plan A: CSV fixture checks passed.\n"
+            "\n## Remaining Acceptance\n\n- JSON ingestion and failure recovery.\n"
+            "\n## Next Step\n\n- Plan B implements JSON and recovery.\n"
+            "\n## Change History\n\n- Plan A milestone: CSV verified; the full goal remains open.\n"
+        )
+        draft = self.workspace / ".hypha" / ".drafts" / "task.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\n---\n" + first_body)
+        self.cli("apply", str(draft))
+        knowledge = self.workspace / ".hypha" / ".drafts" / "customer.md"
+        knowledge.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: rationale\n"
+            "scope: task\nauthority: user_explicit\naffects: [0001]\n"
+            "agreement_quote: Customer records cannot leave the isolated machine.\n"
+            "when: Choosing pilot processing and batch size\ntriggers: [hosting,customer,batch]\n"
+            "review_when: The target customer or device memory changes.\n---\n"
+            "# Pilot customer rationale\n\nCustomer records cannot leave the isolated machine.\n"
+            "Hosted processing was rejected. The batch cap is 64 MiB because of device memory.\n"
+        )
+        self.cli("apply", str(knowledge))
+        self.cli("close")
+        old_workspace = self.workspace
+        with tempfile.TemporaryDirectory() as next_context:
+            self.workspace = Path(next_context)
+            try:
+                shutil.copytree(old_workspace / ".hypha", self.workspace / ".hypha")
+                self.assertEqual([".hypha"], sorted(path.name for path in self.workspace.iterdir()))
+                self.assertIn("know/pilot-customer-rationale", self.cli("boot", "pilot").stdout)
+                self.assertIn("64 MiB", self.cli("search", "batch,hosting").stdout)
+                recovered = self.cli("show", "know/pilot-customer-rationale", "--body").stdout
+                self.assertIn("Hosted processing was rejected", recovered)
+                self.assertIn("review_when: The target customer", recovered)
+                self.assertEqual("No matches.\n", self.cli("search", "demo date").stdout)
+                updated_body = first_body.replace("CSV, JSON, and recovery", "CSV, XML, and recovery")
+                updated_body = updated_body.replace("JSON ingestion", "XML ingestion").replace("implements JSON", "implements XML")
+                updated_body += (
+                    "- Scope correction: CSV+JSON+recovery becomes CSV+XML+recovery because the user says "
+                    "the customer changed its export system. JSON alone is cancelled. CSV evidence remains valid. "
+                    "XML and recovery stay on 0001; no dependencies or other scope are removed.\n"
+                )
+                update = self.workspace / ".hypha" / ".drafts" / "evolution.md"
+                update.write_text("---\nkind: task-update\nid: 0001\n---\n" + updated_body)
+                self.cli("apply", str(update))
+                shown = self.cli("show", "0001", "--body").stdout
+                self.assertIn("status: in_progress", shown)
+                self.assertIn("Plan A: CSV fixture checks passed", shown)
+                self.assertIn("JSON alone is cancelled", shown)
+                self.assertIn("XML ingestion and failure recovery", shown)
+                payload = json.loads(self.cli("list", "--type", "task", "--json").stdout)
+                self.assertEqual(["0001"], [node["id"] for node in payload["nodes"]])
+                self.cli("lint")
+            finally:
+                self.workspace = old_workspace
 
     def test_completion_requires_acceptance_and_evidence(self):
         self.cli("init")

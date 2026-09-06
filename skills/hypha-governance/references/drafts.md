@@ -33,9 +33,15 @@ id: 0001
 ## Risks
 
 - Source pagination has not yet been verified for the second source.
+
+## Change History
+
+- For a material scope change, preserve earlier entries and record the actual date, previous and current boundaries, reason and authority, unfinished-item dispositions, affected dependencies, and evidence or decisions requiring review. Omit this section when no material change occurred.
 ```
 
 The example headings are illustrative, not new mandatory parser fields. `Acceptance` and `Evidence` must be non-empty before completion. `apply` merges supplied task metadata into the existing node but **replaces its entire body**, including the title. Omitting a body section deletes that section; omitting metadata preserves it. Keep lifecycle changes in the normal status/relationship commands. Do not paste the displayed metadata or CLI labels from `show --body` into the body.
+
+The task survives successive runtime plans. A plan completion updates the relevant evidence and remaining acceptance; it does not complete the task unless all current acceptance is verified. For a changed scope, update current acceptance and append the reason/dispositions to Change History in the same draft. Historical evidence remains attributed to the boundary it verified.
 
 ```sh
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" apply "$HYPHA_WORKSPACE/.hypha/.drafts/task-update.md"
@@ -65,9 +71,11 @@ affects: [0001]
 The customer environment has no network access, so dependency choices must support offline operation.
 ```
 
-Use the user's actual smallest sufficient quote; remove `affects` if no related task exists. Do not invent a task just to publish knowledge. Keep short operating rules in AGENTS.md and avoid duplicating them here.
+Use the user's actual smallest sufficient quote; remove `affects` if no related task exists. Save the answer, reason, scope, and review conditions missing from current project files. Explicit statements meeting that test need no second confirmation; ambiguous interpretations remain drafts. Do not invent a task just to publish knowledge. Keep short operating rules in AGENTS.md and avoid duplicating them here. Use `review_when` or a body section to name conditions that would require reconsideration.
 
 For repository or external facts, run `ingest`, then use a complete sourced draft such as:
+
+This illustrates syntax for source-backed missing context or an explicit request to retain evidence. If the current project document already fully answers the question, cite that document directly instead of publishing a duplicate knowledge node.
 
 ```markdown
 ---
@@ -141,3 +149,5 @@ id: 0001
 ```
 
 This is recovery-only data, not a published knowledge claim. Read it on resume and do not run `apply` on `kind: handoff` or `kind: note` drafts. Omit `id` if there is no task. Do not copy full transcripts or secrets. `drafts` and `boot` expose pending drafts including nested paths; already applied task/knowledge drafts are hidden automatically and need no cleanup.
+
+If current task scope changes, refresh the relevant pending handoff's remaining acceptance and next step; preserve the reason and old boundary in the task's Change History. On recovery, a stale handoff must not override a newer documented task decision or cause a repeat question whose answer is already recorded.
