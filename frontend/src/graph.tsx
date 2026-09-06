@@ -39,7 +39,7 @@ function TaskNode({ data, selected }: NodeProps<HyphaFlowNode>) {
     <div className="node-id">T · {node.id}</div>
     <h3>{node.title}</h3>
     <div className="node-status"><span />{statusLabel[node.status || "todo"] || node.status}</div>
-    <div className="node-footer"><span>{node.progress == null ? "No progress" : `${progress}%`}</span><span className="node-progress"><i style={{ width: `${progress}%` }} /></span></div>
+    <div className="node-footer"><span>{node.progress == null ? "Unknown progress" : `${progress}%`}</span><span className="node-progress"><i style={{ width: `${progress}%` }} /></span></div>
   </article>;
 }
 

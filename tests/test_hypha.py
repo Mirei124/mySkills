@@ -33,14 +33,84 @@ class HyphaCliTest(unittest.TestCase):
         text = text.replace("## Evidence\n", f"## Evidence\n\n- {evidence}\n", 1)
         task.write_text(text, encoding="utf-8")
 
+    def test_generated_drafts_preserve_sections_and_reject_stale_source(self):
+        self.cli("init")
+        self.cli("add", "Pipeline")
+        self.document_task("0001", "[ ] XML works", "CSV passed")
+        draft = Path(self.cli("edit", "0001", "--section", "Evidence").stdout.splitlines()[0])
+        draft.write_text(draft.read_text().replace("CSV passed", "CSV and XML passed"))
+        self.cli("apply", str(draft))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("CSV and XML passed", shown)
+        self.assertIn("Remaining: XML works", shown)
+        self.assertNotIn("base_revision:", shown)
+        draft = Path(self.cli("edit", "0001").stdout.splitlines()[0])
+        self.cli("start", "0001")
+        failed = self.cli("apply", str(draft), ok=False)
+        self.assertNotEqual(0, failed.returncode)
+        self.assertIn("revision changed", failed.stderr)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+
+    def test_section_drafts_reject_extra_sections_and_preserve_knowledge_evidence(self):
+        self.cli("init")
+        self.cli("add", "Pipeline")
+        draft = Path(self.cli("edit", "0001", "--section", "Risks").stdout.splitlines()[0])
+        draft.write_text(draft.read_text() + "\n## Acceptance\nInjected replacement\n")
+        self.assertNotEqual(0, self.cli("apply", str(draft), ok=False).returncode)
+        self.assertNotIn("Injected replacement", self.cli("show", "0001").stdout)
+        draft = Path(self.cli("edit", "0001", "--section", "Risks").stdout.splitlines()[0])
+        self.cli("apply", str(draft))
+        self.assertIn("## Risks", self.cli("show", "0001").stdout)
+        knowledge = self.workspace / ".hypha/.drafts/fact.md"
+        knowledge.write_text("---\nkind: know\nauthority: user_explicit\nagreement_quote: Vega only.\nwhen: Vega deployment\n---\n# Vega\n\n## Context\nOld context.\n")
+        self.cli("apply", str(knowledge))
+        draft = Path(self.cli("edit", "know/vega", "--section", "Context").stdout.splitlines()[0])
+        draft.write_text(draft.read_text().replace("Old context.", "New context."))
+        self.cli("apply", str(draft))
+        shown = self.cli("show", "know/vega").stdout
+        self.assertIn("agreement_quote: Vega only.", shown)
+        self.assertIn("New context.", shown)
+        view = Path(self.cli("view").stdout.strip()).read_text()
+        self.assertIn('"agreement_quote": "Vega only."', view)
+
+    def test_minimal_knowledge_and_stable_title_edit(self):
+        self.cli("init")
+        draft = self.workspace / ".hypha/.drafts/fact.md"
+        draft.write_text("---\nkind: know\nauthority: user_explicit\nagreement_quote: Vega records cannot leave its network.\nwhen: Deploying for Vega\nreview_when: Vega changes policy\n---\n# Vega policy\n")
+        self.cli("apply", str(draft))
+        shown = self.cli("show", "know/vega-policy").stdout
+        self.assertIn("agreement_quote: Vega records", shown)
+        self.assertIn("claim_kind: agreement", shown)
+        edited = Path(self.cli("edit", "know/vega-policy").stdout.splitlines()[0])
+        edited.write_text(edited.read_text().replace("# Vega policy", "# Vega network policy"))
+        self.cli("apply", str(edited))
+        self.assertEqual(1, len(list((self.workspace / ".hypha/know").glob("*.md"))))
+        self.assertIn("Vega network policy", self.cli("show", "know/vega-policy").stdout)
+        draft.write_text("---\nkind: know\nauthority: repository\nwhen: Reviewing policy\nevidence:\n  - anchor: src/policy.md\n    quote: Private deployment only.\n---\n# Sourced policy\n")
+        (self.workspace / ".hypha/src/policy.md").write_text("Private deployment only.")
+        self.cli("apply", str(draft))
+        self.assertIn("anchors: ['src/policy.md']", self.cli("show", "know/sourced-policy").stdout)
+        draft.write_text(draft.read_text().replace("authority: repository", "authority: user_explicit\nclaim_kind: sourced"))
+        self.assertNotEqual(0, self.cli("apply", str(draft), ok=False).returncode)
+
+    def test_unknown_progress_is_not_zero(self):
+        self.cli("init")
+        self.cli("add", "Parent")
+        self.cli("add", "Child", "0001")
+        self.assertIn("progress: —", self.cli("show", "0001").stdout)
+        self.cli("progress", "0002", "40")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        self.cli("progress", "0002", "unknown")
+        self.assertIn("progress: —", self.cli("show", "0001").stdout)
+
     def test_help_explains_workflow(self):
         help_text = self.cli("--help").stdout
         self.assertIn("Low-frequency memory for long-running tasks", help_text)
         self.assertIn("Restore task and knowledge context once", help_text)
         self.assertIn("List all task and knowledge nodes", help_text)
         self.assertIn("Generate a draggable, zoomable task/knowledge canvas", help_text)
-        self.assertIn("boot once at a new-session boundary", help_text)
-        self.assertIn("close only for a real handoff", help_text)
+        self.assertIn("Daily: boot, search, show, edit, apply", help_text)
+        self.assertIn("Handoff: close only", help_text)
         commands = re.search(r"\{([^}]+)\}", help_text).group(1).split(",")
         for command in commands:
             command_help = self.cli(command, "--help").stdout
@@ -148,7 +218,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("Verify both sources.", body)
         self.assertIn("First source passed checks.", body)
         self.assertIn("untrusted data", body)
-        self.assertNotIn("First source passed checks.", self.cli("show", "0001").stdout)
+        self.assertNotIn("First source passed checks.", self.cli("show", "0001", "--summary").stdout)
         self.assertIn("Use official sources.", self.cli("show", "know/source-policy", "--body").stdout)
 
     def test_boot_no_candidates_explains_recovery_gap(self):
@@ -197,12 +267,18 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         self.cli("add", "example task")
         source = self.workspace / "architecture.md"
-        source.write_text("# Deployment\n\nThe customer environment has no network access.\n")
+        source.write_text("# Deployment\n\nCustomer environments have no network access.\n")
         self.cli("ingest", str(source))
         reference = ROOT / "skills" / "hypha-governance" / "references" / "drafts.md"
         examples = re.findall(r"```markdown\n(.*?)\n```", reference.read_text(), re.DOTALL)
         self.assertEqual(4, len(examples))
         for index, example in enumerate(examples):
+            if not example.startswith("---\n"):
+                generated = Path(self.cli("edit", "0001").stdout.splitlines()[0])
+                front = generated.read_text().split("---\n", 2)[1]
+                generated.write_text("---\n" + front + "---\n# example task\n\n" + example + "\n")
+                self.cli("apply", str(generated))
+                continue
             draft = self.workspace / ".hypha" / ".drafts" / f"example-{index}.md"
             draft.write_text(example + "\n")
             if "kind: handoff" in example:
@@ -572,7 +648,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn('"schemaVersion": 1', html)
         self.assertIn('"diagnostics": {"redlinks"', html)
         self.assertIn('"kind": "parent"', html)
-        self.assertIn('"progress": 0', html)
+        self.assertIn('"progress": null', html)
         self.assertIn('"status": "in_progress"', html)
         self.assertIn('"path": "intent/', html)
         self.assertIn('"summary":', html)

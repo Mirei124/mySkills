@@ -65,49 +65,78 @@
       "id": "bundled-cli-discovery",
       "prompt": "Initialize Hypha in this project. The installed skill directory is a symlink, the project path contains spaces, and command -v hypha finds nothing.",
       "expected_output": "Resolve scripts/hypha.py beside the supplied skill path and invoke it with Python and an explicitly quoted project workspace. Initialize without asking to install or connect a service; do not create unrelated tasks.",
-      "assertions": ["Uses the bundled script before broad executable searches.", "Initializes the user project rather than the skill checkout.", "Does not request installation permission when the bundled script is usable."],
+      "assertions": [
+        "Uses the bundled script before broad executable searches.",
+        "Initializes the user project rather than the skill checkout.",
+        "Does not request installation permission when the bundled script is usable."
+      ],
       "files": []
     },
     {
       "id": "task-body-publication",
       "prompt": "Task 0001 already has constraints, evidence, and remaining acceptance. Add the verified first-batch result and the next source cursor without losing existing content.",
       "expected_output": "Read the existing body, preserve its sections in a kind: task-update draft, and apply it. Do not directly patch intent/ or replace the body with only the new note.",
-      "assertions": ["Writes formal task content only through apply.", "Preserves existing constraints, evidence, and unfinished acceptance."],
+      "assertions": [
+        "Writes formal task content only through apply.",
+        "Preserves existing constraints, evidence, and unfinished acceptance."
+      ],
       "files": []
     },
     {
       "id": "unmanaged-notice-review",
       "prompt": "lint exits successfully but reports a direct body write to task 0001. I have checked that the current body is correct. Record that review without changing content or erasing history, then continue the main work.",
       "expected_output": "Publish a reviewed task-update draft with the identical body. Append-only review acknowledges the direct body write while original events remain. No whitespace round trip, ledger edits, repeated lint loop, or task blockage.",
-      "assertions": ["Leaves task body bytes unchanged.", "Preserves original direct-write events.", "Does not treat a successful lint notice as a blocker."],
+      "assertions": [
+        "Leaves task body bytes unchanged.",
+        "Preserves original direct-write events.",
+        "Does not treat a successful lint notice as a blocker."
+      ],
       "files": []
     },
     {
       "id": "empty-recall-is-not-recovery",
       "prompt": "Resume the import task. The topic phrase does not match knowledge triggers, but a source-selection constraint is linked to the in-progress task. Recover the actual constraints and remaining work before continuing.",
       "expected_output": "Inspect linked-task fallback candidates and read task and applicable knowledge bodies. Explicitly identify missing recovery fields; do not claim an index alone restored context.",
-      "assertions": ["Reads the linked constraint body.", "Identifies remaining acceptance and a concrete next step.", "Does not claim that boot success alone completes recovery."],
+      "assertions": [
+        "Reads the linked constraint body.",
+        "Identifies remaining acceptance and a concrete next step.",
+        "Does not claim that boot success alone completes recovery."
+      ],
       "files": []
     },
     {
       "id": "migration-preserves-unfinished-scope",
       "prompt": "Move old task records to Hypha. The root is reported 90% complete, a child is still in_progress at 95%, another task is blocked on that child, and a pagination todo remains. Completed steps can be summarized. Preserve unfinished scope without copying the whole tree.",
       "expected_output": "Map every unfinished task and todo, preserving dependencies and blockers through live tasks or explicit remaining acceptance. Retain history and old percentages as historical values, not newly verified progress. Check coverage separately from lint.",
-      "assertions": ["Every unfinished item has an actionable destination or evidence-backed disposition.", "Preserves the pagination todo and blocked task dependency.", "Does not copy 90 or 95 into current progress without acceptance-based justification."],
-      "files": ["evals/files/legacy-import.json"]
+      "assertions": [
+        "Every unfinished item has an actionable destination or evidence-backed disposition.",
+        "Preserves the pagination todo and blocked task dependency.",
+        "Does not copy 90 or 95 into current progress without acceptance-based justification."
+      ],
+      "files": [
+        "evals/files/legacy-import.json"
+      ]
     },
     {
       "id": "milestone-before-context-handoff",
       "prompt": "The first import batch is verified, another source remains, and we are handing off to a new context now. Save enough to continue. Do not create a task for each imported record.",
       "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with close after reviewing state; do not leave recovery solely in chat.",
-      "assertions": ["Persists recovery information in Hypha rather than only the final response.", "Does not create per-record task nodes.", "Keeps unfinished scope open."],
+      "assertions": [
+        "Persists recovery information in Hypha rather than only the final response.",
+        "Does not create per-record task nodes.",
+        "Keeps unfinished scope open."
+      ],
       "files": []
     },
     {
       "id": "recall-before-repeat-question",
       "prompt": "Continue planning the ingestion pilot. Explain where processing runs, the allowed transfer mechanism, batch limit, verified work, and what remains. If a required fact is genuinely missing, ask only for that fact. Use only the current project and its saved Hypha context.",
       "expected_output": "Check project files and saved knowledge bodies before asking. Recover applicable user-confirmed decisions without re-confirming them; distinguish missing information from known choices. Do not read conversation archives.",
-      "assertions": ["Reads saved knowledge bodies before any question about prior choices.", "Asks only about information absent from the project and applicable Hypha records.", "Does not search raw conversation logs."],
+      "assertions": [
+        "Reads saved knowledge bodies before any question about prior choices.",
+        "Asks only about information absent from the project and applicable Hypha records.",
+        "Does not search raw conversation logs."
+      ],
       "setup": "Coordinator runs the isolated capture/recall protocol in evals/README.md; the recall agent receives only the saved project and recall prompt.",
       "files": []
     },
@@ -115,7 +144,11 @@
       "id": "capture-conversation-information-gap",
       "prompt": "Our pilot customer prohibits records leaving its isolated machine; this is why we rejected hosted processing. Batches are capped at 64 MiB due to its device memory. The repository already describes how to run CSV checks. Keep the pilot goal across plans: CSV checks passed, JSON and recovery remain. End this plan and hand off.",
       "expected_output": "Save the missing customer rationale and batch boundary with explicit origin and scope, without repeating repository build/test facts as knowledge. Preserve one long-term task with a CSV milestone and JSON/recovery still open. Do not request a second confirmation of explicit statements.",
-      "assertions": ["Captures rationale and batch boundary unavailable in project files.", "Avoids duplicating the documented check command as knowledge.", "Keeps the task open after the first plan finishes."],
+      "assertions": [
+        "Captures rationale and batch boundary unavailable in project files.",
+        "Avoids duplicating the documented check command as knowledge.",
+        "Keeps the task open after the first plan finishes."
+      ],
       "setup": "Coordinator initializes project_files from the continuity scenario, then supplies only capture_prompt to the capture agent.",
       "files": []
     },
@@ -123,7 +156,13 @@
       "id": "scope-evolution-across-plans",
       "prompt": "The same ingestion pilot now needs XML instead of JSON because the customer changed its export system. Cancel only JSON support. Retain verified CSV behavior, the existing batch limit and processing constraints, and the recovery requirement. Update the long-term goal and next plan; implementation is still pending.",
       "expected_output": "Reuse the existing task ID, revise current acceptance to CSV/XML/recovery, preserve CSV evidence, and record the reason, old/new boundary, explicit JSON cancellation, remaining work and decision/dependency effects. Do not mark the long-term task done or create one root per plan.",
-      "assertions": ["Preserves the original task identity across the plan replacement.", "Records why JSON was replaced and where every unfinished item went.", "Leaves XML and recovery unverified and open.", "Does not ask again for still-applicable saved constraints.", "Refreshes any pending handoff that would otherwise restore cancelled scope."],
+      "assertions": [
+        "Preserves the original task identity across the plan replacement.",
+        "Records why JSON was replaced and where every unfinished item went.",
+        "Leaves XML and recovery unverified and open.",
+        "Does not ask again for still-applicable saved constraints.",
+        "Refreshes any pending handoff that would otherwise restore cancelled scope."
+      ],
       "setup": "Coordinator supplies evolution_prompt after recall, using the same persisted project; earlier prompts and grading assertions are withheld.",
       "files": []
     },
@@ -131,7 +170,24 @@
       "id": "recall-stale-scope-and-missing-answer",
       "prompt": "Plan the ingestion pilot for a different customer. The stored offline-only decision explicitly applied to the previous customer. This customer has internet access, but we have not decided whether its records may leave the device. Use saved context where applicable and identify the remaining decision.",
       "expected_output": "Read and respect the old decision's scope; do not assume either that the old restriction universally applies or that internet access authorizes hosted processing. Ask only about the unresolved data-transfer decision and continue independent work.",
-      "assertions": ["Does not treat a previous customer's scoped decision as universal.", "Does not infer data-transfer authorization from internet access.", "Asks a focused question about the unresolved decision."],
+      "assertions": [
+        "Does not treat a previous customer's scoped decision as universal.",
+        "Does not infer data-transfer authorization from internet access.",
+        "Asks a focused question about the unresolved decision."
+      ],
+      "files": []
+    },
+    {
+      "id": "minimal-capture-and-handoff",
+      "prompt": "Remember that customer Vega prohibits data leaving its private network until its data-transfer policy changes. Track CSV and XML ingestion plus recovery as one long-term goal. CSV checks passed (user-confirmed); XML and recovery remain. Save for another session without inventing percentages. Then replace XML with TSV because Vega changed its export format, preserving CSV evidence and the same goal.",
+      "expected_output": "Minimal scoped knowledge with provenance; one persistent task with current acceptance and history, no duplicated handoff state, unknown progress. Use guarded drafts for updates.",
+      "assertions": [
+        "Preserves Vega-only scope, source authority, and review condition.",
+        "Retains one task ID and attributed CSV evidence.",
+        "Cancels XML explicitly while TSV and recovery remain open.",
+        "Does not invent a percentage.",
+        "Uses one authoritative current acceptance record; handoff adds only missing recovery details."
+      ],
       "files": []
     }
   ]

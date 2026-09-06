@@ -1,153 +1,102 @@
 # Draft Formats
 
-Use the CLI prefix established in SKILL.md. Replace illustrative IDs and statements with verified project content. Keep all drafts inside the target workspace's `.hypha/.drafts/`; subdirectories are supported and included in recovery listings. Hypha uses a small YAML subset: scalar fields, inline lists, and lists of mappings. Avoid block scalars and arbitrary nested YAML.
+Use the CLI prefix from SKILL.md. Drafts live under the target workspace's `.hypha/.drafts/`; nested paths are supported. The small YAML subset supports scalars, inline lists, and lists of mappings, not block scalars or arbitrary nesting.
 
-## Task Update
+## Update Existing Nodes
 
-Read the existing `.hypha/intent/<id>-<slug>.md` first. Copy its complete body, preserving sections and links, then update the intended content. Save as `.hypha/.drafts/task-update.md`:
+Choose one:
+```sh
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit 0001
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit 0001 --section Evidence
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit know/offline-deployment
+```
 
+Edit the returned draft file, then `apply <draft-path>`. Full drafts preserve all fields and the body automatically. Section drafts replace only the named level-two section. Use a full draft for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields unchanged. If the source changed, regenerate and reconcile; do not remove the revision guard. Knowledge edits retain their path even when the title changes.
+
+Keep one authoritative Acceptance checklist:
 ```markdown
----
-kind: task-update
-id: 0001
----
-# Existing task title
-
 ## Acceptance
 
-- Imported records are deduplicated and verified.
-- The remaining source is imported and checked.
+- [x] CSV import passes fixture checks.
+- [ ] XML import passes fixture checks.
+- [ ] Interrupted imports resume without duplicates.
 
 ## Evidence
 
-- First batch verified by the project's import verification command; cite its actual result and artifact here.
-
-## Remaining Acceptance
-
-- The second source still needs import and verification.
-
-## Next Step
-
-- Resume at the saved source cursor; cite the actual file and cursor.
-
-## Risks
-
-- Source pagination has not yet been verified for the second source.
+- CSV checks passed; cite the actual command and artifact.
 
 ## Change History
 
-- For a material scope change, preserve earlier entries and record the actual date, previous and current boundaries, reason and authority, unfinished-item dispositions, affected dependencies, and evidence or decisions requiring review. Omit this section when no material change occurred.
+- Record the actual date: the user replaced JSON with XML because the customer's export format changed. JSON is cancelled; CSV evidence remains applicable; recovery remains required.
 ```
 
-The example headings are illustrative, not new mandatory parser fields. `Acceptance` and `Evidence` must be non-empty before completion. `apply` merges supplied task metadata into the existing node but **replaces its entire body**, including the title. Omitting a body section deletes that section; omitting metadata preserves it. Keep lifecycle changes in the normal status/relationship commands. Do not paste the displayed metadata or CLI labels from `show --body` into the body.
+`show` derives remaining unchecked items. Counts are not work percentages or evidence. Plain legacy acceptance text remains supported. Acceptance and Evidence must be non-empty before completion; the agent verifies meaning. Optional Next Step and Risks sections should add useful information, not filler.
 
-The task survives successive runtime plans. A plan completion updates the relevant evidence and remaining acceptance; it does not complete the task unless all current acceptance is verified. For a changed scope, update current acceptance and append the reason/dispositions to Change History in the same draft. Historical evidence remains attributed to the boundary it verified.
+Legacy handwritten `kind: task-update` drafts with `id` remain supported: omitted metadata is preserved, but the entire body is replaced. Prefer generated guarded drafts. Applying unchanged reviewed content acknowledges direct-write history for supplied fields without erasing history.
 
-```sh
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" apply "$HYPHA_WORKSPACE/.hypha/.drafts/task-update.md"
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" show 0001 --body
-```
-
-Publishing an unchanged reviewed body acknowledges a previous direct body write without altering its text. Only explicitly supplied metadata fields are also acknowledged; historical direct-write events remain in snapshots.
-
-## Knowledge Publication
-
-Save a user-authorized statement as `.hypha/.drafts/knowledge.md`:
+## Minimal User Knowledge
 
 ```markdown
 ---
 kind: know
-claim_kind: agreement
-knowledge_kind: rationale
-scope: project
 authority: user_explicit
-agreement_quote: The customer environment has no network access.
-when: Choosing deployment architecture or dependencies
-triggers: [offline, deployment, dependencies]
-affects: [0001]
+agreement_quote: Customer Orion's records must not leave its isolated network.
+when: Choosing deployment for customer Orion
+review_when: Orion changes its data-transfer policy
 ---
-# Offline deployment rationale
-
-The customer environment has no network access, so dependency choices must support offline operation.
+# Orion deployment constraint
 ```
 
-Use the user's actual smallest sufficient quote; remove `affects` if no related task exists. Save the answer, reason, scope, and review conditions missing from current project files. Explicit statements meeting that test need no second confirmation; ambiguous interpretations remain drafts. Do not invent a task just to publish knowledge. Keep short operating rules in AGENTS.md and avoid duplicating them here. Use `review_when` or a body section to name conditions that would require reconsideration.
+Use the actual smallest sufficient quote. The quote already supplies the answer; body prose adds only missing rationale, exclusions, or context. Explicit statements need no second confirmation; ambiguous interpretations remain drafts until confirmed.
 
-For repository or external facts, run `ingest`, then use a complete sourced draft such as:
+Supply origin and evidence, concrete applicability (`when`), and a title. The CLI derives claim_kind from authority when omitted. Optional knowledge_kind and coarse scope classifications do not replace concrete applicability. Optional `affects: [0001]` links existing tasks; do not invent a task. Optional triggers add useful aliases to automatically derived literal keywords. Preserve meaningful review_when conditions when known.
 
-This illustrates syntax for source-backed missing context or an explicit request to retain evidence. If the current project document already fully answers the question, cite that document directly instead of publishing a duplicate knowledge node.
+| Authority | Derived claim kind |
+| --- | --- |
+| user_explicit | agreement |
+| user_confirmed | agreement |
+| repository | sourced |
+| external_source | sourced |
+| agent_inference | inference |
+
+Legacy explicit claim_kind remains supported; it must not contradict the authority. Agreement requires a user authority and agreement_quote. Inference requires anchors and an inference statement explaining premises and conclusion; do not promote it to user agreement.
+
+## Source Evidence
+
+Use ingest to retain relevant sources when needed. Do not duplicate facts already fully answered by current project files unless explicitly requested.
 
 ```markdown
 ---
 kind: know
-claim_kind: sourced
-knowledge_kind: constraint
-scope: project
 authority: repository
-when: Choosing deployment architecture or dependencies
-triggers: [offline, deployment, dependencies]
-affects: [0001]
-anchors: [src/architecture.md#deployment]
+when: Reviewing the historical Orion deployment choice
 evidence:
   - anchor: src/architecture.md#deployment
-    quote: The customer environment has no network access.
+    quote: Customer environments have no network access.
 ---
-# Documented deployment constraint
-
-The deployment document records that customer environments have no network access.
+# Historical deployment evidence
 ```
 
-Use actual snapshot paths and exact source quotes. `authority` accepts only the following values; put source-specific descriptions in the body or evidence instead of inventing new authority strings:
+Use actual snapshot paths and exact quotes. Anchors are derived from evidence when omitted; inference still needs explicit premise anchors. Status defaults to active. Superseded knowledge requires status: superseded and superseded_by; preserve conflicting history rather than silently overwriting it.
 
-| Value | Origin |
-| --- | --- |
-| `user_explicit` | The user directly stated or authorized this claim. |
-| `user_confirmed` | The user confirmed a proposed interpretation. |
-| `repository` | Repository documents or retained project records support the claim. |
-| `external_source` | An external source supports the claim. |
-| `agent_inference` | The agent derives a conclusion from stated premises. |
+New knowledge uses its title to choose a path. Use edit for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
 
-`agreement` requires `user_explicit` or `user_confirmed`. For a derived conclusion, use `claim_kind: inference`, `authority: agent_inference`, source `anchors`, and an `inference` field describing premises and conclusion; state invalidation conditions in the body. Summarizing a source is not by itself a reason to label its facts as inference.
+## Minimal Handoff
 
-```sh
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" apply "$HYPHA_WORKSPACE/.hypha/.drafts/knowledge.md"
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" lint
-```
-
-Knowledge publication uses the title to determine its path and replaces the existing node at that path. Read existing content before updating; keep the title stable when updating that node. Preserve conflicting history with supersession instead of silently overwriting it.
-
-## Handoff Draft
-
-Save as `.hypha/.drafts/handoff.md` when context is ending and a recovery record is needed:
+When the task covers recovery, no extra summary is needed. Otherwise save only missing temporary information:
 
 ```markdown
 ---
 kind: handoff
 id: 0001
 ---
-# Resume the existing import task
+# Resume task 0001
 
-## Goal and Constraints
+Read task 0001 for current scope, acceptance, evidence, and knowledge links.
 
-- Cite the task and applicable knowledge; preserve constraints needed for the next action.
+## Recovery Detail
 
-## Verified Results
-
-- Cite completed checks and saved artifacts, separating verified results from unverified reports.
-
-## Remaining Acceptance
-
-- State the unfinished observable outcomes.
-
-## Next Step
-
-- Give one concrete action and the file, cursor, or command needed to resume.
-
-## Risks
-
-- Record unresolved risks, or explicitly state that none are known.
+- Cite the actual cursor/artifact path and whether it was verified.
 ```
 
-This is recovery-only data, not a published knowledge claim. Read it on resume and do not run `apply` on `kind: handoff` or `kind: note` drafts. Omit `id` if there is no task. Do not copy full transcripts or secrets. `drafts` and `boot` expose pending drafts including nested paths; already applied task/knowledge drafts are hidden automatically and need no cleanup.
-
-If current task scope changes, refresh the relevant pending handoff's remaining acceptance and next step; preserve the reason and old boundary in the task's Change History. On recovery, a stale handoff must not override a newer documented task decision or cause a repeat question whose answer is already recorded.
+Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are recovery data and cannot be applied as knowledge. Pending drafts appear in drafts and boot; applied drafts are hidden automatically. Current task decisions override legacy handoff summaries. Keep history in the task and reconcile only temporary instructions that became stale.

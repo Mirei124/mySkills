@@ -32,7 +32,7 @@ An independently schedulable analytics report can be a linked child or another a
 
 ## Material Change Record
 
-Use a dated entry under `Change History` in the existing task body. Include the following fields in concise prose or bullets:
+Use a dated entry under `Change History` in the existing task body. Record only affected aspects in concise prose; the following is an illustrative change, not mandatory fields:
 
 - **Previous boundary:** CSV and JSON import with recovery.
 - **Current boundary:** CSV and XML import with recovery.
@@ -42,4 +42,4 @@ Use a dated entry under `Change History` in the existing task body. Include the 
 
 The record describes a semantic change, not every edit. The current task body should be enough to understand what remains and why the goal evolved without reading old plans, session transcripts, or Git history.
 
-If a pending handoff still says "implement JSON," refresh it to XML and point to the task's recorded correction. Its old next step is not a new conflict requiring user confirmation. Preserve the history in the task rather than letting contradictory recovery summaries accumulate.
+Keep current acceptance in one task checklist. A handoff normally references that task and adds only temporary recovery details. If a legacy handoff says "implement JSON," replace its duplicate scope summary with a task pointer and reconcile any stale temporary instruction. The recorded correction settles the issue without another user question.
