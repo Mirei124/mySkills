@@ -11,7 +11,7 @@ python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit 0001 --section Evidence
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit know/offline-deployment
 ```
 
-Edit the returned draft file, then `apply <draft-path>`. Full drafts preserve all fields and the body automatically. Section drafts replace only the named level-two section. Use a full draft for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields unchanged. If the source changed, regenerate and reconcile; do not remove the revision guard. Knowledge edits retain their path even when the title changes.
+Edit the returned draft file, then run `advanced publish <draft-path>`. Full drafts preserve all fields and the body automatically. Section drafts replace only the named level-two section. Use a full draft for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields unchanged. If the source changed, regenerate and reconcile; do not remove the revision guard. Knowledge edits retain their path even when the title changes.
 
 Keep one authoritative Acceptance checklist:
 ```markdown

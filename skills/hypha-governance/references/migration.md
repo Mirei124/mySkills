@@ -1,11 +1,11 @@
 # Migration Review
 
-Use this protocol when the user authorizes moving existing task records into Hypha. `migrate` handles legacy Hypha agreements; it is not an importer for arbitrary task systems. `bootstrap` examines repository evidence and is not a substitute for preserving a source task graph.
+Use this protocol when the user authorizes moving existing task records into Hypha. `advanced migrate` handles legacy Hypha agreements; it is not an importer for arbitrary task systems. `advanced bootstrap` examines repository evidence and is not a substitute for preserving a source task graph.
 
 1. Inspect source tasks, outstanding todos, dependencies, blockers, deviations, and handoff records. Keep the originals as history. Identify the source's statuses and what they mean before mapping them.
 2. Prepare a coverage table before publishing. Each unfinished source item needs one explicit disposition and supporting evidence. Preserve acceptance boundaries, not just titles or percentages.
 3. Reuse existing Hypha tasks. Create a child only for independently acceptable or schedulable work. Merge smaller unfinished items into named remaining acceptance items on a live destination task.
-4. Publish through reviewed drafts, then check the destination bodies and task relationships against the coverage table. Check every unfinished source ID and outstanding todo; `lint` proves structural validity only.
+4. Publish through reviewed drafts, then check the destination bodies and task relationships against the coverage table. Check every unfinished source ID and outstanding todo; `check` proves structural validity only.
 5. Retain the coverage table as migration evidence with source paths and destination links. State unresolved mappings explicitly; leave uncertain items pending rather than silently archiving or cancelling them. Finish all unambiguous migration work before asking about a material scope decision.
 
 ## Coverage Example

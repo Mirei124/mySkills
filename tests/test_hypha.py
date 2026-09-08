@@ -21,6 +21,28 @@ class HyphaCliTest(unittest.TestCase):
         self.temp.cleanup()
 
     def cli(self, *args, ok=True):
+        legacy = {
+            "add": ("task", "create"), "start": ("task", "start"), "progress": ("task", "progress"),
+            "block": ("task", "block"), "done": ("task", "done"), "drop": ("task", "drop"),
+            "needs": ("task", "needs"), "parent": ("task", "parent"), "apply": ("advanced", "publish"),
+            "lint": ("check",), "dismiss": ("advanced", "dismiss"), "defer": ("advanced", "defer"),
+            "boot": ("context", "resume"), "drafts": ("advanced", "drafts"),
+            "route": ("advanced", "explain"), "close": ("context", "close"),
+            "ingest": ("advanced", "import"), "migrate": ("advanced", "migrate"),
+            "bootstrap": ("advanced", "bootstrap"),
+        }
+        args = list(args)
+        if args and args[0] == "edit":
+            target, rest = args[1], args[2:]
+            args = ["task" if str(target).isdigit() else "knowledge", "edit", target, *rest, "--draft"]
+        elif args and args[0] == "ready":
+            args = ["list", "--type", "task", "--ready", *args[1:]]
+        elif args and args[0] in legacy:
+            command = legacy[args[0]]
+            if args[0] == "add" and len(args) > 2 and not str(args[2]).startswith("-"):
+                args = [*command, args[1], "--parent", args[2], *args[3:]]
+            else:
+                args = [*command, *args[1:]]
         result = subprocess.run(CLI + ["--workspace", str(self.workspace), *args], text=True, capture_output=True, check=False)
         if ok and result.returncode:
             self.fail(result.stderr + result.stdout)
@@ -105,14 +127,13 @@ class HyphaCliTest(unittest.TestCase):
 
     def test_help_explains_workflow(self):
         help_text = self.cli("--help").stdout
-        self.assertIn("Low-frequency memory for long-running tasks", help_text)
-        self.assertIn("Restore task and knowledge context once", help_text)
-        self.assertIn("List all task and knowledge nodes", help_text)
-        self.assertIn("Generate a draggable, zoomable task/knowledge canvas", help_text)
-        self.assertIn("Daily: boot, search, show, edit, apply", help_text)
-        self.assertIn("Handoff: close only", help_text)
-        commands = re.search(r"\{([^}]+)\}", help_text).group(1).split(",")
-        for command in commands:
+        self.assertIn("Local task and durable knowledge CLI", help_text)
+        self.assertIn("task create", help_text)
+        self.assertIn("knowledge create", help_text)
+        self.assertIn("context resume", help_text)
+        self.assertIn("list --type task --ready", help_text)
+        self.assertIn("Advanced:", help_text)
+        for command in ("task", "knowledge", "context", "list", "show", "search", "view", "check", "advanced"):
             command_help = self.cli(command, "--help").stdout
             self.assertIsNone(re.search(r"[\u3400-\u9fff]", command_help), command_help)
 
@@ -123,7 +144,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("needs", "0002", "0001")
         self.document_task("0001")
         self.cli("done", "0001")
-        self.assertIn("0002 second task", self.cli("ready").stdout)
+        self.assertRegex(self.cli("ready").stdout, r"0002\s+todo.*second task")
         task = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
         task.write_text(task.read_text(encoding="utf-8").replace("status: todo", "status: in_progress"), encoding="utf-8")
         self.assertIn("0002 [in_progress]", self.cli("boot").stdout)
@@ -342,7 +363,7 @@ class HyphaCliTest(unittest.TestCase):
                 self.assertIn("JSON alone is cancelled", shown)
                 self.assertIn("XML ingestion and failure recovery", shown)
                 payload = json.loads(self.cli("list", "--type", "task", "--json").stdout)
-                self.assertEqual(["0001"], [node["id"] for node in payload["nodes"]])
+                self.assertEqual(["0001"], [node["id"] for node in payload["result"]["nodes"]])
                 self.cli("lint")
             finally:
                 self.workspace = old_workspace
@@ -389,8 +410,9 @@ class HyphaCliTest(unittest.TestCase):
         tree = self.cli("list", "--tree").stdout
         self.assertRegex(tree, r"(?m)^0001 \[todo\].*umbrella\n  0002 \[in_progress\].*child work$")
         payload = json.loads(self.cli("list", "--json").stdout)
-        self.assertEqual({"total": 3, "task": 2, "knowledge": 1}, payload["counts"])
-        child = next(node for node in payload["nodes"] if node["id"] == "0002")
+        self.assertTrue(payload["ok"])
+        self.assertEqual({"total": 3, "task": 2, "knowledge": 1}, payload["result"]["counts"])
+        child = next(node for node in payload["result"]["nodes"] if node["id"] == "0002")
         self.assertEqual("0001", child["parent"])
         self.assertIn("created_at", child)
         self.assertIn("updated_at", child)
@@ -400,7 +422,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("init")
         self.cli("add", "umbrella")
         result = self.cli("add", "independent", ok=False)
-        self.assertIn("specify a parent task ID or use --root", result.stderr)
+        self.assertIn("specify --parent ID or --root", result.stderr)
         duplicate = self.cli("add", "umbrella", "--root", ok=False)
         self.assertIn("active task with this title already exists: 0001", duplicate.stderr)
         self.cli("add", "independent", "--root")
@@ -433,7 +455,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("done", "0001")
         self.assertIn("progress: 100", self.cli("show", "0001").stdout)
         payload = json.loads(self.cli("list", "--json").stdout)
-        root = next(node for node in payload["nodes"] if node["id"] == "0001")
+        root = next(node for node in payload["result"]["nodes"] if node["id"] == "0001")
         self.assertEqual(100, root["progress"])
 
     def test_progress_average_is_independent_of_intermediate_grouping(self):
@@ -578,11 +600,11 @@ class HyphaCliTest(unittest.TestCase):
         text = draft.read_text(encoding="utf-8")
         self.assertIn("claim_kind: agreement", text)
         self.assertIn("knowledge_kind: rationale", text)
-        self.assertEqual(0, json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)["counts"]["knowledge"])
+        self.assertEqual(0, json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)["result"]["counts"]["knowledge"])
         self.cli("apply", str(draft))
         payload = json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)
-        self.assertEqual("user_explicit", payload["nodes"][0]["authority"])
-        self.assertEqual("project", payload["nodes"][0]["scope"])
+        self.assertEqual("user_explicit", payload["result"]["nodes"][0]["authority"])
+        self.assertEqual("project", payload["result"]["nodes"][0]["scope"])
 
         (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Use Git for commits.\n", encoding="utf-8")
         duplicate = self.workspace / ".hypha" / ".drafts" / "git-rule.md"
@@ -723,8 +745,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("previous session may not have been closed", boot.stdout)
         self.assertIn("Unapplied drafts: 1", boot.stdout)
         ready_output = self.cli("ready").stdout
-        self.assertIn("In progress (resume candidates)", ready_output)
-        self.assertIn("0001 40%", ready_output)
+        self.assertEqual("No nodes match the filters.\n", ready_output)
         self.assertIn("kind=handoff", self.cli("drafts").stdout)
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         lint = self.cli("lint", "--audit")
@@ -749,10 +770,8 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "OAuth provider")
         source = self.workspace / "provider.md"
         source.write_text("# Provider\n\nUse short-lived access tokens.\n", encoding="utf-8")
-        ingest = self.cli("ingest", str(source)).stdout
-        self.assertIn("AGENT FOLLOW-UP", ingest)
-        self.assertIn("do not stop or mark work blocked", ingest)
-        self.assertIn("support, refinement, contradiction", ingest)
+        imported = self.cli("ingest", str(source)).stdout
+        self.assertIn("No knowledge was created", imported)
 
         draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
         draft.write_text(
@@ -772,7 +791,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("[deferred]", deferred_audit)
         self.assertNotIn("AGENT FOLLOW-UP", deferred_audit)
         rejected = self.cli("dismiss", "deadbeefdead", ok=False)
-        self.assertIn("not present in the current lint --audit output", rejected.stderr)
+        self.assertIn("not present in the current check --audit output", rejected.stderr)
 
     def test_session_completion_scope_and_migrate_protocol(self):
         self.cli("init")
@@ -824,7 +843,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
 
         help_text = self.cli("--help").stdout
-        for command in ("search", "route", "ready", "dismiss", "defer"):
+        for command in ("search", "advanced", "list --type task --ready", "context resume"):
             self.assertIn(command, help_text)
         for removed in ("ask", "why", "next", "resolve", "sync"):
             self.assertNotRegex(help_text, rf"(?m)^    {removed}\s")
@@ -833,7 +852,73 @@ class HyphaCliTest(unittest.TestCase):
             text=True, capture_output=True, check=False,
         )
         self.assertNotEqual(0, rejected.returncode)
-        self.assertIn("task governance must use workspace-local", rejected.stderr)
+        self.assertIn("hypha task create", rejected.stderr)
+
+    def test_new_direct_creation_edit_and_source_rollback(self):
+        self.cli("init")
+        created = self.cli("task", "create", "Offline delivery", "--acceptance", "Works offline").stdout
+        self.assertIn("Created task 0001", created)
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        self.assertIn("- [ ] Works offline", task.read_text(encoding="utf-8"))
+        evidence = self.workspace / "evidence.md"
+        evidence.write_text("- `python3 verify.py` passed.\n", encoding="utf-8")
+        self.cli("task", "edit", "0001", "--section", "Evidence", "--body-file", str(evidence))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("Works offline", shown)
+        self.assertIn("python3 verify.py", shown)
+
+        source = self.workspace / "requirements.md"
+        source.write_text("The product must work without network access.\n", encoding="utf-8")
+        failed = self.cli("knowledge", "create", "Offline policy", "--origin", "repository",
+                          "--source", str(source), "--quote", "Missing quote", "--when", "Deploying", ok=False)
+        self.assertIn("quote is not present", failed.stderr)
+        self.assertEqual([], list((self.workspace / ".hypha/know").glob("*.md")))
+        self.assertEqual([], list((self.workspace / ".hypha/src").glob("*.md")))
+        self.assertTrue(list((self.workspace / ".hypha/.drafts").glob("knowledge-*.md")))
+        self.cli("knowledge", "create", "Offline policy", "--origin", "repository", "--source", str(source),
+                 "--quote", "The product must work without network access.", "--when", "Deploying")
+        duplicate = self.cli("knowledge", "create", "Offline policy", "--origin", "user",
+                             "--quote", "Keep it offline.", "--when", "Deploying", ok=False)
+        self.assertIn("knowledge edit know/offline-policy", duplicate.stderr)
+
+    def test_workspace_discovery_json_import_and_legacy_hints(self):
+        self.cli("init")
+        self.cli("task", "create", "Root")
+        nested = self.workspace / "a/b"
+        nested.mkdir(parents=True)
+        discovered = subprocess.run(CLI + ["list", "--type", "task"], cwd=nested, text=True, capture_output=True, check=False)
+        self.assertEqual(0, discovered.returncode, discovered.stderr)
+        self.assertIn("Root", discovered.stdout)
+        payload = json.loads(subprocess.run(CLI + ["show", "0001", "--json"], cwd=nested,
+                                            text=True, capture_output=True, check=False).stdout)
+        self.assertTrue(payload["ok"])
+        missing = json.loads(subprocess.run(CLI + ["show", "9999", "--json"], cwd=nested,
+                                            text=True, capture_output=True, check=False).stdout)
+        self.assertEqual("invalid_request", missing["error"]["code"])
+        material = self.workspace / "contract.md"
+        material.write_text("Contract material.\n", encoding="utf-8")
+        imported = self.cli("advanced", "import", str(material)).stdout
+        self.assertIn("No knowledge was created", imported)
+        legacy = subprocess.run(CLI + ["--workspace", str(self.workspace), "ready"], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, legacy.returncode)
+        self.assertIn("list --type task --ready", legacy.stderr)
+
+    def test_launcher_installs_and_runs_across_directories(self):
+        install_dir = self.workspace / "bin"
+        installer = ROOT / "skills/hypha-governance/install.sh"
+        result = subprocess.run([str(installer), str(install_dir)], text=True, capture_output=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        project = self.workspace / "project"
+        project.mkdir()
+        initialized = subprocess.run([str(install_dir / "hypha"), "init"], cwd=project, text=True, capture_output=True, check=False)
+        self.assertEqual(0, initialized.returncode, initialized.stderr)
+        self.assertTrue((project / ".hypha").is_dir())
+        collision = install_dir / "other"
+        collision.mkdir()
+        (collision / "hypha").write_text("different", encoding="utf-8")
+        refused = subprocess.run([str(installer), str(collision)], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, refused.returncode)
+        self.assertEqual("different", (collision / "hypha").read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     unittest.main()

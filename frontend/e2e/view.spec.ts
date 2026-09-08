@@ -1,24 +1,30 @@
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+let server: ChildProcess | undefined;
+test.afterEach(() => server?.kill());
 
 test("generated view is offline and supports graph interaction", async ({ page }) => {
   const workspace = mkdtempSync(join(tmpdir(), "hypha-view-"));
   const cli = resolve("../skills/hypha-governance/scripts/hypha.py");
   const run = (...args: string[]) => execFileSync("python3", [cli, "--workspace", workspace, ...args]);
-  run("init"); run("add", "Implement canvas"); run("add", "Review canvas", "0001");
+  run("init"); run("task", "create", "Implement canvas"); run("task", "create", "Review canvas", "--parent", "0001");
   const draft = join(workspace, ".hypha", ".drafts", "knowledge.md");
   writeFileSync(draft, "---\nkind: know\nclaim_kind: note\naffects: [0001]\ntriggers: [canvas]\n---\n# Canvas evidence\n\n[[know/other]]\n");
-  run("apply", draft);
+  run("advanced", "publish", draft);
   writeFileSync(join(workspace, ".hypha", "know", "other.md"), "---\nclaim_kind: note\n---\n# Other evidence\n\n[[know/knowledge]]\n");
   run("view");
   const html = readFileSync(join(workspace, ".hypha", "view.html"), "utf8");
   expect(html).toContain("data:,");
   const requests: string[] = []; page.on("request", (request) => requests.push(request.url()));
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto(`file://${join(workspace, ".hypha", "view.html")}`);
+  const port = 18000 + process.pid % 10000;
+  server = spawn("python3", ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", join(workspace, ".hypha")]);
+  await expect.poll(async () => fetch(`http://127.0.0.1:${port}/view.html`).then((response) => response.status).catch(() => 0)).toBe(200);
+  await page.goto(`http://127.0.0.1:${port}/view.html`);
   await expect(page.getByText("Hypha Task Map")).toBeVisible();
   await expect(page.locator("canvas")).toHaveCount(0);
   await expect(page.locator(".react-flow__node")).toHaveCount(4);
@@ -57,6 +63,7 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await expect(page.getByRole("complementary").locator("time")).toHaveCount(2);
   await expect(page.getByRole("complementary")).toContainText("Markdown content");
   await expect(page.getByRole("complementary")).toContainText("[[know/other]]");
+  await expect(page.getByRole("button", { name: "Copy edit command" })).toBeVisible();
   const previousNode = page.getByRole("button", { name: "Previous node" });
   const nextNode = page.getByRole("button", { name: "Next node" });
   await expect(previousNode).toBeDisabled();
@@ -71,9 +78,13 @@ test("generated view is offline and supports graph interaction", async ({ page }
   await expect(page.getByRole("complementary")).toContainText("Implement canvas");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("complementary")).toContainText("Node details");
+  await page.getByRole("list", { name: "Node list" }).getByRole("button", { name: /0001 Implement canvas/ }).focus();
+  await expect(page.getByRole("list", { name: "Node list" }).getByRole("button", { name: /0001 Implement canvas/ })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[aria-live=polite]").last()).toContainText("Selected Implement canvas");
   const graph = page.getByLabel("Interactive Hypha relationship graph");
   const box = await graph.boundingBox(); if (!box) throw new Error("graph missing");
   await graph.hover({ position: { x: box.width / 2, y: box.height / 2 } }); await page.mouse.wheel(0, -180); await page.mouse.move(box.x + 120, box.y + 120); await page.mouse.down(); await page.mouse.move(box.x + 170, box.y + 150); await page.mouse.up();
   await page.screenshot({ path: "test-results/mycelial-canvas.png", fullPage: true });
-  expect(requests.every((url) => url.startsWith("file:") || url.startsWith("data:"))).toBeTruthy();
+  expect(requests.every((url) => url.startsWith(`http://127.0.0.1:${port}/`) || url.startsWith("data:"))).toBeTruthy();
 });

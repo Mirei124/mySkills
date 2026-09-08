@@ -27,6 +27,7 @@ export function Inspector({ node, nodes, edges, onFocus, onSelectNode, canGoBack
   const extraMetadata = Object.entries(metadata).filter(([key]) => !hiddenKeys.has(key));
   const progress = Math.max(0, Math.min(100, node.progress ?? 0));
   const summary = node.summary?.replace(/^#.*$/m, "").trim();
+  const editCommand = `hypha ${node.type === "task" ? "task" : "knowledge"} edit ${node.id} --editor`;
 
   return <>
     <div className="inspector-title"><div className="inspector-titlebar"><span className={`type-chip ${node.type}`}>{node.type === "task" ? "Task" : node.claim_kind || "Knowledge"}</span><div className="node-history" aria-label="Node navigation"><button aria-label="Previous node" title="Previous node" disabled={!canGoBack} onClick={onBack}>←</button><button aria-label="Next node" title="Next node" disabled={!canGoForward} onClick={onForward}>→</button></div></div><h2>{node.title}</h2><p>{summary || "No summary available."}</p></div>
@@ -41,7 +42,7 @@ export function Inspector({ node, nodes, edges, onFocus, onSelectNode, canGoBack
       {(metadata.when || metadata.triggers) && <section className="routing-card"><h3>Routing context</h3>{Boolean(metadata.when) && <p><span>When</span>{String(metadata.when)}</p>}{Boolean(metadata.triggers) && <p><span>Triggers</span>{Array.isArray(metadata.triggers) ? metadata.triggers.join(" · ") : String(metadata.triggers)}</p>}</section>}
     </>}
     <section className="metadata-section"><h3>Metadata</h3><dl><dt>Created</dt><dd><NodeTime value={node.created_at} /></dd><dt>Updated</dt><dd><NodeTime value={node.updated_at} /></dd><dt>Path</dt><dd>{node.path || "—"}</dd>{extraMetadata.map(([key, value]) => <><dt key={`${key}-term`}>{key.replaceAll("_", " ")}</dt><dd key={key}>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></>)}</dl></section>
-    <div className="inspector-actions"><button onClick={onFocus}>Focus neighborhood</button><button onClick={() => navigator.clipboard?.writeText(node.id)}>Copy ID</button></div>
+    <div className="inspector-actions"><button onClick={onFocus}>Focus neighborhood</button><button onClick={() => navigator.clipboard?.writeText(node.id)}>Copy ID</button><button onClick={() => navigator.clipboard?.writeText(editCommand)}>Copy edit command</button></div>
     <section className="markdown-section"><h3>Markdown content</h3><pre className="markdown">{node.markdown || "(No content)"}</pre></section>
   </>;
 }

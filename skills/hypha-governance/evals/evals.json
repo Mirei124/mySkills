@@ -4,13 +4,13 @@
     {
       "id": "cross-directory-handoff",
       "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
-      "expected_output": "Boot once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, and record the requested handoff. Use lint --audit only for needed semantic relationship review, and close only for the actual handoff.",
+      "expected_output": "Run context resume once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, and record the requested handoff. Use check --audit only for needed semantic relationship review, and context close only for the actual handoff.",
       "files": []
     },
     {
       "id": "evidence-backed-decision",
       "prompt": "We need to retain the OAuth provider decision with a quote from its documentation and link it to the migration task so later agents can find it.",
-      "expected_output": "Ingest a source snapshot, publish a sourced draft with exact evidence and recall terms, and link the existing task with affects. Do not confuse structural validation with semantic review.",
+      "expected_output": "Use knowledge create with a source snapshot and exact quote, then link the existing task with affects. Do not confuse structural validation with semantic review.",
       "files": []
     },
     {
@@ -22,19 +22,19 @@
     {
       "id": "context-exhaustion-recovery",
       "prompt": "The previous context ended with task 0002 still in_progress and a handoff in .hypha/.drafts/recovery/handoff.md. Resume implementation; the handoff is not publishable knowledge.",
-      "expected_output": "Boot once, locate the nested draft, read it and relevant task/knowledge bodies, and continue from the saved next step. Do not apply the handoff or restart an in-progress task.",
+      "expected_output": "Run context resume once, locate the nested draft, read it and relevant task/knowledge bodies, and continue from the saved next step. Do not publish the handoff or restart an in-progress task.",
       "files": []
     },
     {
       "id": "audit-resolution-memory",
-      "prompt": "lint --audit lists a potentially missing affects relationship. I have confirmed it is unrelated; the next session should not ask me to review the same candidate.",
-      "expected_output": "Persist the unrelated judgment with dismiss <candidate-id>; a subsequent audit does not list that candidate.",
+      "prompt": "check --audit lists a potentially missing affects relationship. I have confirmed it is unrelated; the next session should not ask me to review the same candidate.",
+      "expected_output": "Persist the unrelated judgment with advanced dismiss <candidate-id>; a subsequent audit does not list that candidate.",
       "files": []
     },
     {
       "id": "short-task-durable-rationale",
       "prompt": "Change this configuration. The product has to work offline because customer environments have no network access; remember this when choosing dependencies.",
-      "expected_output": "Complete the small change without a task node. Capture the authorized durable rationale through knowledge-only drafts and apply; keep any concise operating rule in AGENTS.md without duplicating it.",
+      "expected_output": "Complete the small change without a task node. Capture the authorized durable rationale with knowledge create; keep any concise operating rule in AGENTS.md without duplicating it.",
       "files": []
     },
     {

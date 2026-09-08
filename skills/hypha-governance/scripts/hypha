@@ -1,0 +1,11 @@
+#!/bin/sh
+SCRIPT=$0
+while [ -L "$SCRIPT" ]; do
+    LINK=$(readlink "$SCRIPT")
+    case "$LINK" in
+        /*) SCRIPT=$LINK ;;
+        *) SCRIPT=$(dirname "$SCRIPT")/$LINK ;;
+    esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT")" && pwd)
+exec python3 "$SCRIPT_DIR/hypha.py" "$@"

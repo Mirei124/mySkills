@@ -30,7 +30,7 @@ CLAIM_KINDS = {"sourced", "inference", "agreement", "note"}
 KNOWLEDGE_KINDS = {"rationale", "constraint", "decision", "consensus", "invariant", "non_goal", "definition", "lesson", "assumption", "synthesis"}
 KNOWLEDGE_SCOPES = {"project", "subsystem", "task"}
 KNOWLEDGE_AUTHORITIES = {"user_explicit", "user_confirmed", "repository", "external_source", "agent_inference"}
-GLOBAL_COMMANDS = {"init", "apply", "edit", "lint", "dismiss", "defer", "list", "drafts", "route", "show", "ingest", "search", "migrate", "view"}
+GLOBAL_COMMANDS = {"knowledge", "list", "show", "search", "view", "check", "advanced"}
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 WORD = re.compile(r"[\w-]+", re.UNICODE)
 BOOTSTRAP_EXCLUDED = {".git", ".hypha", "node_modules", "dist", "build", "target", "vendor", "__pycache__", ".venv"}
@@ -55,10 +55,30 @@ def agent_follow_up(purpose: str, steps: list[str], context: list[str] | None = 
         print(f"{index}. {step}")
 
 
+def discover_workspace(start: Path) -> Path:
+    """Find the nearest initialized workspace without creating one."""
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / ".hypha").is_dir():
+            return candidate
+    return current
+
+
 def root(args: argparse.Namespace) -> Path:
     if getattr(args, "global_store", False):
-        return Path.home() / ".hypha"
-    return Path(args.workspace).resolve() / ".hypha"
+        home = Path.home() / ".hypha"
+        if getattr(args, "command", None) != "init" and not home.is_dir():
+            raise ValueError("Global Hypha is not initialized; run hypha init --global first")
+        return home
+    workspace = Path(args.workspace).resolve()
+    if not getattr(args, "workspace_explicit", False) and getattr(args, "command", None) != "init":
+        workspace = discover_workspace(workspace)
+    args.workspace = str(workspace)
+    home = workspace / ".hypha"
+    bootstrap_preview = getattr(args, "command", None) == "advanced" and getattr(args, "action", None) == "bootstrap" and not getattr(args, "apply_plan", None)
+    if getattr(args, "command", None) != "init" and not bootstrap_preview and not home.is_dir():
+        raise ValueError(f"Hypha is not initialized from {Path(args.workspace).resolve()}; run hypha init")
+    return home
 
 
 def parse_value(value: str):
@@ -749,7 +769,7 @@ def task_mutate(args):
     if args.command == "start" and not acceptance:
         print(f"Warning: {args.id} has no Acceptance criteria; define the observable outcome before completion.")
     if args.command == "progress" and args.value == "100":
-        print(f"Note: 100% represents leaf work progress only; verify acceptance and evidence before running hypha done {args.id}.")
+        print(f"Note: 100% represents leaf work progress only; verify acceptance and evidence before running hypha task done {args.id}.")
 
 
 def lint_findings(home: Path, tasks: dict, knowledge: dict, trigger_warn_ratio: float) -> tuple[list[str], list[str], list[str]]:
@@ -894,12 +914,12 @@ def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True)
                 "Read each candidate task and knowledge node, including body, scope, evidence, and existing links.",
                 "For missing-relation candidates, decide whether the knowledge materially affects the task; if yes, publish the actual affects/wiki-link change before resolving it.",
                 "For isolated tasks, decide whether the task is a legitimate root, a child, or dependency-related; change the graph only with evidence or user confirmation.",
-                "Run lint --audit again. Use dismiss <id> only for confirmed false positives; use defer <id> when evidence is currently insufficient.",
+                "Run check --audit again. Use advanced dismiss <id> only for confirmed false positives; use advanced defer <id> when evidence is currently insufficient.",
             ],
             [f"actionable candidates: {len(actionable)}", f"deferred candidates: {len(unresolved) - len(actionable)}"],
         )
     elif not emit_follow_up:
-        print("- close requests no action on these candidates; review them in a later lint --audit session if needed")
+        print("- context close requests no action on these candidates; review them in a later check --audit session if needed")
     elif unresolved and not actionable:
         print("- All visible candidates are deferred; no action is requested until new evidence appears")
 
@@ -910,7 +930,7 @@ def resolve_candidate(args, resolution: str):
         tasks, knowledge = prepare(home)
         current = {candidate_id(candidate): candidate for candidate in audit_candidates(tasks, knowledge)}
         if args.candidate not in current:
-            raise ValueError("Candidate is not present in the current lint --audit output; run lint --audit again")
+            raise ValueError("Candidate is not present in the current check --audit output; run hypha check --audit again")
         path = home / "audit-resolutions.jsonl"
         record = {
             "candidate": args.candidate,
@@ -991,7 +1011,7 @@ def edit_draft(args):
             node.update(section=args.section, _body=f"\n## {args.section}\n\n{content.strip()}\n")
         write_node(draft, node, atomic=True)
     print(draft)
-    print("Edit this draft, then apply it. A changed source revision will be rejected; regenerate and reconcile instead of removing the guard.")
+    print("Edit this draft, then run hypha advanced publish. A changed source revision will be rejected; regenerate and reconcile instead of removing the guard.")
 
 
 def apply(args):
@@ -1049,6 +1069,8 @@ def apply(args):
             slug = re.sub(r"[^\w-]+", "-", node["title"].lower()).strip("-")
             target = guarded["_path"] if guarded else home / kind / f"{slug or hashlib.sha256(draft.read_bytes()).hexdigest()[:12]}.md"
             ident = str(target.relative_to(home)).removesuffix(".md")
+            if target.exists() and not guarded:
+                raise ValueError(f"Knowledge with this title already exists: {ident}; use hypha knowledge edit {ident}")
             inferred_kind = {"user_explicit": "agreement", "user_confirmed": "agreement", "repository": "sourced", "external_source": "sourced", "agent_inference": "inference"}.get(node.get("authority"))
             if inferred_kind and node.get("claim_kind", inferred_kind) not in {inferred_kind, "note"}:
                 raise ValueError("claim_kind contradicts authority; preserve the actual evidence origin")
@@ -1280,7 +1302,7 @@ def ready(args):
         if node.get("status") == "todo" and all(tasks[str(dep)].get("status") == "done" for dep in node.get("depends_on", [])):
             print(f"- {task_id} {node['title']}")
     print_draft_summary(home)
-    print("Next: hypha start <id>")
+    print("Next: hypha task start <id>")
 
 
 def list_nodes(args):
@@ -1294,6 +1316,8 @@ def list_nodes(args):
             status = str(node.get("status", "todo"))
             if args.status and status != args.status:
                 continue
+            if args.ready and not (status == "todo" and all(str(dep) in tasks and tasks[str(dep)].get("status") == "done" for dep in node.get("depends_on", []))):
+                continue
             rows.append({
                 "id": task_id, "type": "task", "title": node["title"], "status": status,
                 "progress": progresses[task_id], "parent": node.get("parent"),
@@ -1301,6 +1325,8 @@ def list_nodes(args):
                 **observation_times.get(("intent", task_id), {}),
             })
     if args.type in {"all", "knowledge"}:
+        if args.ready and args.type != "task":
+            raise ValueError("--ready applies to tasks; use hypha list --type task --ready")
         for path, node in sorted(knowledge.items()):
             status = str(node.get("status", "active"))
             if args.status and status != args.status:
@@ -1420,7 +1446,7 @@ def ingest(args):
             "For each durable claim, classify it as support, refinement, contradiction, or genuinely new knowledge relative to existing nodes.",
             "Update or supersede existing knowledge instead of duplicating it. Create a sourced draft only when a distinct claim remains, with when, triggers, anchors, evidence, and affected tasks.",
             "Do not infer task completion from the source. Ask for confirmation when scope, consensus, or a high-impact relationship is ambiguous.",
-            "Validate and publish confirmed drafts with hypha apply, then run lint --audit.",
+            "Validate and publish confirmed drafts with hypha advanced publish, then run hypha check --audit.",
         ],
         [f"captured source: {destination.relative_to(home)}",
          f"route candidates: {', '.join(path for _, path, _ in candidates) or 'none'}"],
@@ -1457,8 +1483,12 @@ def search(args):
                 if eligible:
                     seen.add(resolved); candidates.append(resolved)
     else:
-        candidates = [node["_path"] for node in knowledge.values()
-                      if node.get("status", "active") == "active" and node.get("claim_kind") != "note"]
+        tasks, _ = scan(home)
+        candidates = []
+        if args.type in {"all", "task"}: candidates.extend(node["_path"] for node in tasks.values())
+        if args.type in {"all", "knowledge"}:
+            candidates.extend(node["_path"] for node in knowledge.values()
+                              if node.get("status", "active") == "active" and node.get("claim_kind") != "note")
     matches = []
     for path in candidates:
         try: lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -1488,7 +1518,7 @@ def migrate(args):
         if errors: raise ValueError("\n".join(errors))
         agreements = sorted((home / "agreements").glob("*.md"))
     if not agreements:
-        print("No legacy agreements require migration; use hypha lint for structural validation.")
+        print("No legacy agreements require migration; use hypha check for structural validation.")
         return
     agent_follow_up(
         "Migrate legacy agreements without losing rationale or duplicating always-on rules.",
@@ -1497,7 +1527,7 @@ def migrate(args):
             "Move only concise always-on operational instructions into AGENTS.md; preserve rationale, history, scope, exceptions, evidence, and review conditions as Hypha knowledge drafts.",
             "Ask the user before treating inferred consensus as confirmed agreement.",
             "Publish validated knowledge drafts, verify AGENTS.md does not duplicate their explanatory text, then remove legacy files only after the migration is reviewed.",
-            "Run hypha lint --audit after the reviewed migration.",
+            "Run hypha check --audit after the reviewed migration.",
         ],
         [f"legacy file: {path.relative_to(home)}" for path in agreements],
     )
@@ -1533,7 +1563,7 @@ def bootstrap(args):
             "Verify every checklist-derived task against its source and current repository state; correct status and leaf progress, and remove transient or already irrelevant items.",
             "Review each background candidate against its exact quote. Rewrite it into a durable sourced claim, merge it with existing concepts, or delete it; do not publish generic summaries.",
             "Set reviewed: true only after task meaning, acceptance, status, progress, evidence, knowledge scope, and relationships are justified.",
-            f"Apply the reviewed plan with hypha --workspace {workspace} bootstrap --apply {target}.",
+            f"Apply the reviewed plan with hypha --workspace {workspace} advanced bootstrap --apply {target}.",
         ],
         [f"bootstrap plan: {target}", f"observed files: {plan['inventory']['files']}"],
     )
@@ -1615,6 +1645,17 @@ def open_view(path: Path) -> None:
 
 def show(args):
     home = root(args)
+    target_path = Path(args.target)
+    if target_path.suffix == ".md" and target_path.exists():
+        drafts = (home / ".drafts").resolve()
+        resolved = target_path.resolve()
+        if drafts not in resolved.parents:
+            raise ValueError("show accepts Markdown paths only from .hypha/.drafts/")
+        n = read_node(resolved)
+        print(resolved)
+        print(n["title"])
+        if not args.summary: print(n.get("_body", "").strip())
+        return
     with locked(home): tasks, knowledge = prepare(home)
     n = tasks.get(args.target) or knowledge.get(args.target.removesuffix(".md"))
     if not n: raise ValueError(f"Node does not exist: {args.target}")
@@ -1645,104 +1686,277 @@ def show(args):
         print(n.get("_body", "").strip())
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        prog="hypha",
-        description="Low-frequency memory for long-running tasks and durable project knowledge.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Daily: boot, search, show, edit, apply; task status: add, start, block, done, drop.\nInspect: list, drafts, ready, view. Relationships: parent, needs. Optional estimate: progress.\nAdvanced maintenance: init, ingest, lint, dismiss, defer, route, migrate, bootstrap.\nHandoff: close only when context is genuinely ending, after saving task recovery information.",
-    )
-    parser.add_argument("--workspace", default=".", help="Workspace root (default: current directory)")
-    parser.add_argument("--global", dest="global_store", action="store_true", help="Use ~/.hypha for cross-repository knowledge")
-    sub = parser.add_subparsers(dest="command", required=True, title="commands")
-    sub.add_parser("init", help="Initialize the .hypha directory", description="Create task, knowledge, draft, source, and audit directories.")
-    p = sub.add_parser("add", help="Create a todo task", description="Task IDs are allocated automatically; optionally attach the task to an existing parent.")
-    p.add_argument("title", help="Task title")
-    p.add_argument("parent", nargs="?", help="Optional parent task ID, for example 0001")
-    p.add_argument("--root", action="store_true", help="Explicitly create an independent root when tasks already exist")
-    for name in ("start", "done", "drop"):
-        actions = {"start": "Start a task", "done": "Mark a task done", "drop": "Drop a task"}
-        p = sub.add_parser(name, help=actions[name]); p.add_argument("id", help="Task ID")
-    p = sub.add_parser("progress", help="Update explainable leaf progress from 0 to 100")
-    p.add_argument("id", help="Task ID"); p.add_argument("value", help="Explainable integer estimate, or unknown to clear it")
-    p = sub.add_parser("block", help="Mark a task blocked and record the reason")
-    p.add_argument("id", help="Task ID"); p.add_argument("value", help="Blocking reason")
-    p = sub.add_parser("needs", help="Declare an execution dependency and create a DAG edge")
-    p.add_argument("id", help="Dependent task ID"); p.add_argument("dependency", help="Task ID that must finish first")
-    p = sub.add_parser("parent", help="Set the parent of an existing task and create a hierarchy edge")
-    p.add_argument("id", help="Child task ID"); p.add_argument("parent", help="Parent task ID")
-    p = sub.add_parser("apply", help="Validate and atomically publish a draft")
-    p.add_argument("draft", help="Path to a Markdown draft under .hypha/.drafts/")
-    p = sub.add_parser("edit", help="Generate a revision-guarded draft from a node")
-    p.add_argument("target", help="Task ID or know/... path")
-    p.add_argument("--section", help="Update only this level-two section; omit for a full editable copy")
-    p = sub.add_parser("lint", help="Validate after structural or published knowledge changes")
-    p.add_argument("--audit", action="store_true", help="Also list possible missing relationships and routing candidates")
-    p.add_argument("--trigger-warn-ratio", type=float, default=.5, help="Shared-trigger warning ratio (default: 0.5; warning only)")
-    p = sub.add_parser("dismiss", help="Confirm an audit candidate is unrelated and hide it permanently")
-    p.add_argument("candidate", help="Candidate ID from lint --audit")
-    p = sub.add_parser("defer", help="Postpone an audit candidate and keep showing it later")
-    p.add_argument("candidate", help="Candidate ID from lint --audit")
-    p = sub.add_parser("boot", help="Restore task and knowledge context once at a new-session boundary")
-    p.add_argument("term", nargs="*", default=[], help="Current task or topic keywords")
-    sub.add_parser("ready", help="Refresh execution candidates when choices have materially changed")
-    p = sub.add_parser("list", help="List all task and knowledge nodes", description="Print a compact table, filter nodes, show task hierarchy, or emit JSON.")
-    p.add_argument("--type", choices=("all", "task", "knowledge"), default="all", help="Node type (default: all)")
-    p.add_argument("--status", choices=tuple(sorted(TASK_STATUSES | KNOWLEDGE_STATUSES)), help="Filter by exact status")
-    formats = p.add_mutually_exclusive_group()
-    formats.add_argument("--tree", action="store_true", help="Show tasks by parent hierarchy and list knowledge separately")
-    formats.add_argument("--json", action="store_true", help="Emit stable machine-readable JSON")
-    sub.add_parser("drafts", help="List unapplied drafts for interrupted-session recovery")
-    p = sub.add_parser("route", help="Explain which knowledge the current topic recalls and how it was scored")
-    p.add_argument("term", help="Topic keywords to explain")
-    p = sub.add_parser("show", help="Show a node and its derived relationships")
-    p.add_argument("target", help="Task ID or know/... path")
-    p.add_argument("--body", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--summary", action="store_true", help="Omit the body for a compact relationship check")
-    sub.add_parser("close", help="Validate and record a real handoff or governed-session end")
-    p = sub.add_parser("ingest", help="Capture an external source and list existing knowledge candidates")
-    p.add_argument("file", help="Source file to copy into .hypha/src/")
-    p = sub.add_parser("search", help="Full-text search with comma-separated literal keywords")
-    p.add_argument("keywords", help="Comma-separated keywords, for example login,authentication,session")
-    p.add_argument("--file", action="append", help="Search only the specified workspace file or directory; repeatable")
-    p.add_argument("--limit", type=int, default=30, help="Maximum matching lines to return (default: 30)")
-    sub.add_parser("migrate", help="Inspect legacy agreements and print the semantic migration protocol")
-    p = sub.add_parser("bootstrap", help="Scan an existing project and generate a reviewable initialization plan")
-    group = p.add_mutually_exclusive_group()
-    group.add_argument("--dry-run", action="store_true", help="Print the candidate plan to stdout only")
-    group.add_argument("--output", help="Write the candidate plan to a JSON file inside the workspace")
-    group.add_argument("--apply", dest="apply_plan", help="Validate and apply a reviewed bootstrap plan")
-    p = sub.add_parser("view", help="Generate a draggable, zoomable task/knowledge canvas")
-    p.add_argument("--mode", choices=("all", "tasks", "knowledge"), default="all", help="Initial layer: all, tasks, or knowledge")
-    p.add_argument("--open", action="store_true", help="Open the generated view in the default browser (xdg-open on Linux)")
-    args = parser.parse_args()
+def task_create(args):
+    """Create a task from ordinary CLI fields while preserving the node format."""
+    args.parent = args.parent
+    home = root(args)
+    with locked(home):
+        (home / "intent").mkdir(parents=True, exist_ok=True)
+        tasks, knowledge = prepare(home)
+        if args.parent and args.root: raise ValueError("Cannot specify both --parent and --root")
+        if args.parent and args.parent not in tasks: raise ValueError(f"Parent task does not exist: {args.parent}")
+        if tasks and not args.parent and not args.root:
+            raise ValueError("Tasks already exist; specify --parent ID or --root")
+        duplicate = next((task_id for task_id, node in tasks.items() if node.get("status") != "dropped" and node["title"].casefold() == args.title.casefold()), None)
+        if duplicate: raise ValueError(f"An active task with this title already exists: {duplicate}; use hypha task edit {duplicate}")
+        numeric = [int(x) for x in tasks if x.isdigit()]
+        task_id = f"{max(numeric, default=0) + 1:04d}"
+        slug = re.sub(r"[^\w-]+", "-", args.title.lower()).strip("-") or task_id
+        path = home / "intent" / f"{task_id}-{slug[:40]}.md"
+        if args.body_file:
+            body = Path(args.body_file).read_text(encoding="utf-8")
+            if not re.search(r"(?m)^# ", body): body = f"# {args.title}\n\n" + body
+        else:
+            acceptance = "\n".join(f"- [ ] {item}" for item in args.acceptance)
+            body = f"# {args.title}\n\n## Acceptance\n\n{acceptance}\n\n## Evidence\n"
+        node = {"id": task_id, "status": "todo", "_body": "\n" + body.strip() + "\n", "_path": path}
+        if args.parent: node["parent"] = args.parent
+        probe = dict(tasks); probe[task_id] = node
+        if args.parent: probe[args.parent].pop("progress", None)
+        reopened = reopen_incomplete_done_tasks(probe)
+        errors = validate(home, probe, knowledge)
+        if errors: raise ValueError("\n".join(errors))
+        for changed_id in sorted(reopened | ({args.parent} if args.parent else set())):
+            write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
+        write_node(path, node, atomic=True); sync(home, by="cli")
+    print(f"Created task {task_id}: {path.relative_to(home)}")
+    print(f"Next: hypha task start {task_id}")
+
+
+def run_editor(path: Path) -> None:
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor: raise ValueError("--editor requires VISUAL or EDITOR to be set")
+    result = subprocess.run([*editor.split(), str(path)], check=False)
+    if result.returncode: raise ValueError(f"Editor exited with status {result.returncode}; draft kept at {path}")
+
+
+def node_edit(args):
+    if not (args.editor or args.body_file or args.draft):
+        raise ValueError(f"Choose --body-file FILE, --editor, or --draft; example: hypha {args.node_kind} edit {args.target} --editor")
+    generated = argparse.Namespace(**vars(args))
+    buffer = []
+    class Capture:
+        def write(self, value): buffer.append(value); return len(value)
+        def flush(self): pass
+    with contextlib.redirect_stdout(Capture()): edit_draft(generated)
+    draft = Path("".join(buffer).splitlines()[0])
+    if args.body_file:
+        replacement = Path(args.body_file).read_text(encoding="utf-8")
+        original = read_node(draft)
+        if args.section:
+            if not re.match(r"\s*##\s+" + re.escape(args.section) + r"\s*$", replacement.splitlines()[0] if replacement.splitlines() else ""):
+                replacement = f"## {args.section}\n\n" + replacement
+        elif not re.search(r"(?m)^# ", replacement):
+            replacement = f"# {original['title']}\n\n" + replacement
+        node = original; node["_body"] = "\n" + replacement.strip() + "\n"; write_node(draft, node, atomic=True)
+    if args.draft:
+        print(draft); print(f"Draft created. Next: hypha advanced publish {draft}"); return
+    if args.editor: run_editor(draft)
+    args.draft = str(draft); apply(args)
+
+
+ORIGIN_AUTHORITIES = {"user": "user_explicit", "user-confirmed": "user_confirmed", "repository": "repository", "external": "external_source", "inference": "agent_inference"}
+
+
+def source_destination(home: Path, source: Path) -> Path:
+    destination = home / "src" / source.name
+    if destination.exists() and destination.read_bytes() != source.read_bytes():
+        destination = home / "src" / f"{source.stem}-{hashlib.sha256(source.read_bytes()).hexdigest()[:8]}{source.suffix}"
+    return destination
+
+
+def knowledge_create(args):
+    authority = ORIGIN_AUTHORITIES[args.origin]
+    if authority in {"user_explicit", "user_confirmed"} and not args.quote:
+        raise ValueError("--quote is required for user knowledge; example: hypha knowledge create \"Decision\" --origin user --quote \"Exact words\" --when \"Applicable condition\"")
+    if authority in {"repository", "external_source"} and (not args.source or not args.quote):
+        raise ValueError("--source and --quote are required for repository or external knowledge")
+    if authority == "agent_inference" and (not args.premise or not args.reason):
+        raise ValueError("--premise and --reason are required for inference knowledge")
+    home = root(args)
+    if not home.is_dir(): raise ValueError("Hypha is not initialized; run hypha init first")
+    source, destination, copied = None, None, False
+    if args.source:
+        requested = Path(args.source)
+        source = requested.resolve() if requested.exists() else (home / args.source).resolve()
+        if not source.is_file(): raise ValueError(f"Source does not exist: {args.source}")
+        destination = source_destination(home, source)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists(): shutil.copy2(source, destination); copied = True
+    draft = home / ".drafts" / f"knowledge-{uuid.uuid4().hex[:12]}.md"
+    node = {"kind": "know", "authority": authority, "when": args.when, "affects": args.affects,
+            "_body": f"\n# {args.title}\n\n" + (Path(args.body_file).read_text(encoding="utf-8").strip() + "\n" if args.body_file else "")}
+    if args.review_when: node["review_when"] = args.review_when
+    if authority in {"user_explicit", "user_confirmed"}: node["agreement_quote"] = args.quote
+    elif authority in {"repository", "external_source"}:
+        anchor = str(destination.relative_to(home)); node.update(evidence=[{"anchor": anchor, "quote": args.quote}], anchors=[anchor])
+    else: node.update(inference=args.reason, anchors=args.premise)
+    write_node(draft, node, atomic=True)
+    if args.draft:
+        print(f"Draft created: {draft}"); print(f"Next: hypha advanced publish {draft}"); return
+    if args.editor: run_editor(draft)
     try:
-        if args.global_store and args.command not in GLOBAL_COMMANDS:
-            raise ValueError(f"--global does not support {args.command}; task governance must use workspace-local .hypha")
-        if args.command == "init": init(args)
-        elif args.command == "add": add(args)
-        elif args.command in {"start", "progress", "block", "done", "drop"}: task_mutate(args)
-        elif args.command == "needs": needs(args)
-        elif args.command == "parent": set_parent(args)
-        elif args.command == "apply": apply(args)
-        elif args.command == "edit": edit_draft(args)
-        elif args.command == "lint": lint(args)
-        elif args.command == "dismiss": dismiss(args)
-        elif args.command == "defer": defer(args)
-        elif args.command == "boot": args.term = " ".join(args.term); boot(args)
-        elif args.command == "ready": ready(args)
-        elif args.command == "list": list_nodes(args)
-        elif args.command == "drafts": drafts_command(args)
-        elif args.command == "route": route_command(args)
-        elif args.command == "show": show(args)
-        elif args.command == "close": close(args)
-        elif args.command == "ingest": ingest(args)
-        elif args.command == "search": search(args)
-        elif args.command == "migrate": migrate(args)
-        elif args.command == "bootstrap": bootstrap(args)
-        else: view(args)
+        args.draft = str(draft); apply(args)
+    except Exception:
+        if copied:
+            with contextlib.suppress(OSError): destination.unlink()
+        raise
+
+
+def advanced_import(args):
+    home, source = root(args), Path(args.file).resolve()
+    if not source.is_file(): raise ValueError(f"Source does not exist: {source}")
+    with locked(home):
+        tasks, knowledge = prepare(home)
+        destination = source_destination(home, source)
+        if not destination.exists(): shutil.copy2(source, destination)
+        sync(home, by="cli")
+    print(f"Captured source: {destination.relative_to(home)}")
+    print("No knowledge was created.")
+    if args.suggest:
+        candidates = route(tasks, knowledge, source.stem)[:8]
+        print("Existing knowledge candidates: " + (", ".join(path for _, path, _ in candidates) or "none"))
+    print(f"Next: hypha knowledge create \"Title\" --origin repository --source {args.file} --quote \"Exact quote\" --when \"Applicable condition\"")
+
+
+def legacy_command(name: str, replacement: str) -> None:
+    print(f"Error: 'hypha {name}' was replaced by 'hypha {replacement}'.", file=sys.stderr)
+    print(f"Try: hypha {replacement} --help", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def add_common_options(parser: argparse.ArgumentParser, suppressed: bool = False) -> None:
+    default = argparse.SUPPRESS if suppressed else None
+    parser.add_argument("--workspace", default=default, help="Workspace root; otherwise find the nearest .hypha upward")
+    parser.add_argument("--global", dest="global_store", action="store_true", default=default, help="Use ~/.hypha for supported knowledge operations")
+    parser.add_argument("--json", action="store_true", default=default, help="Emit machine-readable JSON without explanatory text")
+
+
+class HyphaArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        if "--json" in sys.argv[1:]:
+            print(json.dumps({"ok": False, "error": {"code": "invalid_arguments", "message": message}}, ensure_ascii=False))
+            raise SystemExit(2)
+        super().error(message)
+
+
+def leaf(sub, name, help_text, **kwargs):
+    parser = sub.add_parser(name, help=help_text, description=help_text, **kwargs)
+    add_common_options(parser, suppressed=True)
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    examples = """Examples:
+  hypha init
+  hypha task create "Support offline deployment" --acceptance "Runs with networking disabled"
+  hypha knowledge create "Offline deployment" --origin user --quote "The product must work offline." --when "Choosing deployment architecture"
+  hypha knowledge create "Offline deployment" --origin repository --source docs/requirements.md --quote "The product must work offline." --when "Choosing deployment architecture"
+  hypha context resume offline
+  hypha list --type task --ready
+
+Task: task create TITLE [--acceptance TEXT ...] [--body-file FILE] [--parent ID|--root]; task edit ID [--section NAME] (--editor|--body-file FILE|--draft); task start|done|drop ID; task block ID REASON; task progress ID VALUE; task parent ID PARENT; task needs ID DEPENDENCY.
+Knowledge: knowledge create TITLE --origin ORIGIN --when CONDITION [--quote TEXT] [--source FILE] [--premise ANCHOR ...] [--reason TEXT] [--body-file FILE] [--review-when TEXT] [--affects ID ...] [--draft|--editor]; knowledge edit PATH [--section NAME] (--editor|--body-file FILE|--draft).
+Context: context resume [TOPIC ...]; context close.
+General: init; list [--type TYPE] [--status STATUS] [--ready] [--tree]; show ID; search QUERY [--type TYPE] [--file PATH] [--limit N]; view [--mode MODE] [--open]; check [--audit].
+Advanced: advanced import FILE [--suggest]; advanced drafts; advanced publish DRAFT; advanced bootstrap [--dry-run|--output FILE|--apply FILE]; advanced migrate; advanced dismiss|defer ID; advanced explain TOPIC.
+Common options may appear before or after a subcommand: --workspace PATH, --global, --json."""
+    parser = HyphaArgumentParser(prog="hypha", description="Local task and durable knowledge CLI.", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=examples)
+    add_common_options(parser)
+    top = parser.add_subparsers(dest="command", required=True, title="commands")
+    task = top.add_parser("task", help="Create, edit, relate, and update tasks"); add_common_options(task, True)
+    task_sub = task.add_subparsers(dest="action", required=True)
+    p = leaf(task_sub, "create", "Create a task without writing YAML"); p.add_argument("title"); p.add_argument("--acceptance", action="append", default=[]); p.add_argument("--body-file"); relation=p.add_mutually_exclusive_group(); relation.add_argument("--parent"); relation.add_argument("--root", action="store_true")
+    p = leaf(task_sub, "edit", "Edit a task body, section, or full draft"); p.add_argument("target"); p.add_argument("--section"); modes=p.add_mutually_exclusive_group(); modes.add_argument("--editor", action="store_true"); modes.add_argument("--body-file"); modes.add_argument("--draft", action="store_true"); p.set_defaults(node_kind="task")
+    for name, text in (("start","Start a task"),("done","Mark a task done"),("drop","Drop a task")):
+        p=leaf(task_sub,name,text); p.add_argument("id")
+    p=leaf(task_sub,"block","Block a task and record why"); p.add_argument("id"); p.add_argument("value", metavar="REASON")
+    p=leaf(task_sub,"progress","Set leaf progress or clear it with unknown"); p.add_argument("id"); p.add_argument("value")
+    p=leaf(task_sub,"parent","Set a task parent"); p.add_argument("id"); p.add_argument("parent")
+    p=leaf(task_sub,"needs","Add an execution dependency"); p.add_argument("id"); p.add_argument("dependency")
+    knowledge = top.add_parser("knowledge", help="Create and edit durable knowledge"); add_common_options(knowledge, True)
+    know_sub=knowledge.add_subparsers(dest="action",required=True)
+    p=leaf(know_sub,"create","Create validated knowledge without writing YAML"); p.add_argument("title"); p.add_argument("--origin",required=True,choices=tuple(ORIGIN_AUTHORITIES)); p.add_argument("--when",required=True); p.add_argument("--quote"); p.add_argument("--source"); p.add_argument("--premise",action="append",default=[]); p.add_argument("--reason"); p.add_argument("--body-file"); p.add_argument("--review-when"); p.add_argument("--affects",action="append",default=[]); mode=p.add_mutually_exclusive_group(); mode.add_argument("--draft",action="store_true"); mode.add_argument("--editor",action="store_true")
+    p=leaf(know_sub,"edit","Edit knowledge with revision protection"); p.add_argument("target"); p.add_argument("--section"); modes=p.add_mutually_exclusive_group(); modes.add_argument("--editor",action="store_true"); modes.add_argument("--body-file"); modes.add_argument("--draft",action="store_true"); p.set_defaults(node_kind="knowledge")
+    context = top.add_parser("context",help="Resume or close governed context"); add_common_options(context,True); context_sub=context.add_subparsers(dest="action",required=True)
+    p=leaf(context_sub,"resume","Show an index of relevant tasks, knowledge, and drafts"); p.add_argument("term",nargs="*",metavar="TOPIC")
+    leaf(context_sub,"close","Validate and record a handoff without completing tasks")
+    leaf(top,"init","Initialize the current workspace")
+    p=leaf(top,"list","List tasks and knowledge"); p.add_argument("--type",choices=("all","task","knowledge"),default="all"); p.add_argument("--status",choices=tuple(sorted(TASK_STATUSES|KNOWLEDGE_STATUSES))); p.add_argument("--ready",action="store_true"); p.add_argument("--tree",action="store_true")
+    p=leaf(top,"show","Show a node, relationships, or a draft path"); p.add_argument("target"); p.add_argument("--summary",action="store_true"); p.add_argument("--body",action="store_true",help=argparse.SUPPRESS)
+    p=leaf(top,"search","Search tasks and active knowledge"); p.add_argument("keywords",metavar="QUERY"); p.add_argument("--type",choices=("all","task","knowledge"),default="all"); p.add_argument("--file",action="append"); p.add_argument("--limit",type=int,default=30)
+    p=leaf(top,"view","Generate the read-only graph"); p.add_argument("--mode",choices=("all","tasks","knowledge"),default="all"); p.add_argument("--open",action="store_true")
+    p=leaf(top,"check","Validate data and optionally show semantic audit candidates"); p.add_argument("--audit",action="store_true"); p.add_argument("--trigger-warn-ratio",type=float,default=.5)
+    advanced=top.add_parser("advanced",help="Draft, source, migration, and maintenance operations"); add_common_options(advanced,True); adv=advanced.add_subparsers(dest="action",required=True)
+    p=leaf(adv,"import","Save source material without creating knowledge"); p.add_argument("file"); p.add_argument("--suggest",action="store_true")
+    leaf(adv,"drafts","List unpublished drafts")
+    p=leaf(adv,"publish","Validate and publish a draft"); p.add_argument("draft")
+    p=leaf(adv,"bootstrap","Create or apply a reviewed bootstrap plan"); group=p.add_mutually_exclusive_group(); group.add_argument("--dry-run",action="store_true"); group.add_argument("--output"); group.add_argument("--apply",dest="apply_plan")
+    leaf(adv,"migrate","Inspect legacy agreements and print migration guidance")
+    for name,text in (("dismiss","Dismiss an unrelated audit candidate"),("defer","Defer an audit candidate")):
+        p=leaf(adv,name,text); p.add_argument("candidate")
+    p=leaf(adv,"explain","Explain knowledge recall scoring"); p.add_argument("term",metavar="TOPIC")
+    return parser
+
+
+def dispatch(args):
+    if args.global_store and args.command not in GLOBAL_COMMANDS:
+        raise ValueError(f"--global does not support {args.command}; task governance must use workspace-local .hypha")
+    if args.command == "init": return init(args)
+    if args.command == "task":
+        args.command=args.action
+        if args.action=="create": return task_create(args)
+        if args.action=="edit": return node_edit(args)
+        if args.action in {"start","progress","block","done","drop"}: return task_mutate(args)
+        if args.action=="needs": return needs(args)
+        return set_parent(args)
+    if args.command=="knowledge": return knowledge_create(args) if args.action=="create" else node_edit(args)
+    if args.command=="context":
+        if args.action=="resume": args.term=" ".join(args.term); return boot(args)
+        return close(args)
+    if args.command=="list": return list_nodes(args)
+    if args.command=="show": return show(args)
+    if args.command=="search": return search(args)
+    if args.command=="view": return view(args)
+    if args.command=="check": return lint(args)
+    if args.action=="import": return advanced_import(args)
+    if args.action=="drafts": return drafts_command(args)
+    if args.action=="publish": return apply(args)
+    if args.action=="bootstrap": return bootstrap(args)
+    if args.action=="migrate": return migrate(args)
+    if args.action=="dismiss": return dismiss(args)
+    if args.action=="defer": return defer(args)
+    return route_command(args)
+
+
+def main():
+    legacy = {"add":"task create","ingest":"advanced import","apply":"advanced publish","boot":"context resume","lint":"check","route":"advanced explain","ready":"list --type task --ready","edit":"task edit or hypha knowledge edit","start":"task start","block":"task block","done":"task done","drop":"task drop","progress":"task progress","parent":"task parent","needs":"task needs","drafts":"advanced drafts","bootstrap":"advanced bootstrap","migrate":"advanced migrate","dismiss":"advanced dismiss","defer":"advanced defer","close":"context close"}
+    option_values={"--workspace"}
+    tokens=sys.argv[1:]; index=0
+    while index<len(tokens):
+        if tokens[index] in option_values: index+=2; continue
+        if tokens[index].startswith("-"): index+=1; continue
+        if tokens[index] in legacy: legacy_command(tokens[index],legacy[tokens[index]])
+        break
+    parser=build_parser(); args=parser.parse_args()
+    args.workspace_explicit="--workspace" in sys.argv[1:]
+    if args.workspace is None: args.workspace="."
+    if args.global_store is None: args.global_store=False
+    if args.json is None: args.json=False
+    capture=[]
+    command_name=" ".join(x for x in (args.command,getattr(args,"action",None)) if x)
+    try:
+        if args.json:
+            stream=type("Capture",(),{"write":lambda self,value:(capture.append(value),len(value))[1],"flush":lambda self:None})()
+            with contextlib.redirect_stdout(stream): dispatch(args)
+            output="".join(capture).rstrip()
+            result=json.loads(output) if command_name=="list" and output else {"output":output}
+            print(json.dumps({"ok":True,"command":command_name,"result":result},ensure_ascii=False))
+        else: dispatch(args)
     except (TypeError, ValueError, OSError) as exc:
-        print(f"Error: {exc}", file=sys.stderr); raise SystemExit(2)
+        if args.json: print(json.dumps({"ok":False,"error":{"code":"invalid_request","message":str(exc)}},ensure_ascii=False))
+        else: print(f"Error: {exc}",file=sys.stderr)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__": main()
