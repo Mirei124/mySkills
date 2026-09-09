@@ -58,7 +58,7 @@
     {
       "id": "source-updates-existing-synthesis",
       "prompt": "This compatibility report contradicts our earlier conclusion that Firefox animation has no performance issues. Maintain the source and conclusion so future frontend performance work finds it.",
-      "expected_output": "Ingest the report, preserve exact evidence, update or supersede the old conclusion while retaining history, and connect relevant long-running work.",
+      "expected_output": "Save the report with advanced import, preserve exact evidence, update or supersede the old conclusion while retaining history, and connect relevant long-running work.",
       "files": []
     },
     {
@@ -75,21 +75,21 @@
     {
       "id": "task-body-publication",
       "prompt": "Task 0001 already has constraints, evidence, and remaining acceptance. Add the verified first-batch result and the next source cursor without losing existing content.",
-      "expected_output": "Read the existing body, preserve its sections in a kind: task-update draft, and apply it. Do not directly patch intent/ or replace the body with only the new note.",
+      "expected_output": "Read the existing body, preserve its sections in a kind: task-update draft, and publish it with advanced publish. Do not directly patch intent/ or replace the body with only the new note.",
       "assertions": [
-        "Writes formal task content only through apply.",
+        "Writes formal task content through task edit or advanced publish.",
         "Preserves existing constraints, evidence, and unfinished acceptance."
       ],
       "files": []
     },
     {
       "id": "unmanaged-notice-review",
-      "prompt": "lint exits successfully but reports a direct body write to task 0001. I have checked that the current body is correct. Record that review without changing content or erasing history, then continue the main work.",
-      "expected_output": "Publish a reviewed task-update draft with the identical body. Append-only review acknowledges the direct body write while original events remain. No whitespace round trip, ledger edits, repeated lint loop, or task blockage.",
+      "prompt": "check exits successfully but reports a direct body write to task 0001. I have checked that the current body is correct. Record that review without changing content or erasing history, then continue the main work.",
+      "expected_output": "Publish a reviewed task-update draft with the identical body. Append-only review acknowledges the direct body write while original events remain. No whitespace round trip, ledger edits, repeated check loop, or task blockage.",
       "assertions": [
         "Leaves task body bytes unchanged.",
         "Preserves original direct-write events.",
-        "Does not treat a successful lint notice as a blocker."
+        "Does not treat a successful check notice as a blocker."
       ],
       "files": []
     },
@@ -100,14 +100,14 @@
       "assertions": [
         "Reads the linked constraint body.",
         "Identifies remaining acceptance and a concrete next step.",
-        "Does not claim that boot success alone completes recovery."
+        "Does not claim that context resume success alone completes recovery."
       ],
       "files": []
     },
     {
       "id": "migration-preserves-unfinished-scope",
       "prompt": "Move old task records to Hypha. The root is reported 90% complete, a child is still in_progress at 95%, another task is blocked on that child, and a pagination todo remains. Completed steps can be summarized. Preserve unfinished scope without copying the whole tree.",
-      "expected_output": "Map every unfinished task and todo, preserving dependencies and blockers through live tasks or explicit remaining acceptance. Retain history and old percentages as historical values, not newly verified progress. Check coverage separately from lint.",
+      "expected_output": "Map every unfinished task and todo, preserving dependencies and blockers through live tasks or explicit remaining acceptance. Retain history and old percentages as historical values, not newly verified progress. Check coverage separately from check.",
       "assertions": [
         "Every unfinished item has an actionable destination or evidence-backed disposition.",
         "Preserves the pagination todo and blocked task dependency.",
@@ -120,7 +120,7 @@
     {
       "id": "milestone-before-context-handoff",
       "prompt": "The first import batch is verified, another source remains, and we are handing off to a new context now. Save enough to continue. Do not create a task for each imported record.",
-      "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with close after reviewing state; do not leave recovery solely in chat.",
+      "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with context close after reviewing state; do not leave recovery solely in chat.",
       "assertions": [
         "Persists recovery information in Hypha rather than only the final response.",
         "Does not create per-record task nodes.",

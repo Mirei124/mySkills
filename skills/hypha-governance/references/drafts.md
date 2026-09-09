@@ -6,9 +6,9 @@ Use the CLI prefix from SKILL.md. Drafts live under the target workspace's `.hyp
 
 Choose one:
 ```sh
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit 0001
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit 0001 --section Evidence
-python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" edit know/offline-deployment
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --draft
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --section Evidence --draft
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" knowledge edit know/offline-deployment --draft
 ```
 
 Edit the returned draft file, then run `advanced publish <draft-path>`. Full drafts preserve all fields and the body automatically. Section drafts replace only the named level-two section. Use a full draft for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields unchanged. If the source changed, regenerate and reconcile; do not remove the revision guard. Knowledge edits retain their path even when the title changes.
@@ -63,7 +63,7 @@ Legacy explicit claim_kind remains supported; it must not contradict the authori
 
 ## Source Evidence
 
-Use ingest to retain relevant sources when needed. Do not duplicate facts already fully answered by current project files unless explicitly requested.
+Use `knowledge create --source <file>` to capture evidence while creating knowledge, or `advanced import <file>` to retain material without publishing knowledge. Do not duplicate facts already fully answered by current project files unless explicitly requested.
 
 ```markdown
 ---
@@ -79,7 +79,7 @@ evidence:
 
 Use actual snapshot paths and exact quotes. Anchors are derived from evidence when omitted; inference still needs explicit premise anchors. Status defaults to active. Superseded knowledge requires status: superseded and superseded_by; preserve conflicting history rather than silently overwriting it.
 
-New knowledge uses its title to choose a path. Use edit for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
+New knowledge uses its title to choose a path. Use `knowledge edit` for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
 
 ## Minimal Handoff
 
@@ -99,4 +99,4 @@ Read task 0001 for current scope, acceptance, evidence, and knowledge links.
 - Cite the actual cursor/artifact path and whether it was verified.
 ```
 
-Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are recovery data and cannot be applied as knowledge. Pending drafts appear in drafts and boot; applied drafts are hidden automatically. Current task decisions override legacy handoff summaries. Keep history in the task and reconcile only temporary instructions that became stale.
+Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are recovery data and cannot be published as knowledge. Pending drafts appear in `advanced drafts` and `context resume`; published drafts are hidden automatically. Current task decisions override legacy handoff summaries. Keep history in the task and reconcile only temporary instructions that became stale.

@@ -4,7 +4,7 @@ Read only for migration, semantic follow-ups, or rejected publication.
 
 ## Migrate Existing Task Records
 
-When moving from another task system, read [Migration review](references/migration.md) before publishing. Preserve the original records and account for every unfinished task, blocker, dependency, and outstanding todo. Completed history can be summarized. Unfinished work needs an explicit destination: a live Hypha task, a specific remaining acceptance item, or an evidence-backed cancellation/supersession. An entry in a historical table alone is not a destination. Reuse task boundaries when appropriate; do not copy every historical step into a new node.
+When moving from another task system, read [Migration review](migration.md) before publishing. Preserve the original records and account for every unfinished task, blocker, dependency, and outstanding todo. Completed history can be summarized. Unfinished work needs an explicit destination: a live Hypha task, a specific remaining acceptance item, or an evidence-backed cancellation/supersession. An entry in a historical table alone is not a destination. Reuse task boundaries when appropriate; do not copy every historical step into a new node.
 
 Treat old percentages as historical reported values. Set current numeric progress only when current acceptance items justify it. Verify migration coverage separately from `check`: structural validation cannot prove that the source's unfinished scope survived.
 
@@ -14,8 +14,8 @@ Treat old percentages as historical reported values. Set current numeric progres
 `advanced bootstrap`, `advanced import --suggest`, `check --audit`, and `advanced migrate` may print `AGENT FOLLOW-UP`. This means the command completed a mechanical first stage and the calling agent should continue its Instructions in the same turn whenever safely possible. It is not, by itself, a reason to yield, ask the user a question, or mark work blocked. Continue until:
 
 - evidence from nodes, sources, code, or user confirmation supports a validated change;
-- a candidate is confirmed unrelated and recorded with `dismiss`; or
-- evidence is insufficient, so it is retained with `defer` and uncertainty is reported.
+- a candidate is confirmed unrelated and recorded with `advanced dismiss`; or
+- evidence is insufficient, so it is retained with `advanced defer` and uncertainty is reported.
 
 The CLI supplies candidates, paths, status, and constraints. The agent owns summarization, support/refinement/contradiction classification, relationship selection, acceptance review, deviation detection, and deciding when user confirmation is required. Never treat prompt candidates as facts or merely print the prompt and claim completion.
 

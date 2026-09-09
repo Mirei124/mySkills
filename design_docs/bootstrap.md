@@ -1,6 +1,6 @@
 # Bootstrap evidence bundle
 
-`hypha bootstrap` initializes a brownfield workspace without pretending that file counts or Git activity reveal the project's true completion state. The command produces a reviewable evidence bundle; an agent supplies the semantic judgment before anything enters the graph.
+`hypha advanced bootstrap` prepares a brownfield workspace after `hypha init`, without pretending that file counts or Git activity reveal the project's true completion state. The command produces a reviewable evidence bundle; an agent supplies the semantic judgment before `hypha advanced bootstrap --apply <plan-path>` publishes anything into the graph.
 
 ## What discovery records
 

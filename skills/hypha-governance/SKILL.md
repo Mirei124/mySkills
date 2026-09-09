@@ -38,7 +38,7 @@ Capture an answer if a future agent with project files but without this conversa
 
 Search for existing knowledge first; update or supersede rather than duplicate. If code explains what exists but not why it was chosen, save only that missing reason and link the code. Explicit user statements need no second confirmation to save their stated meaning. Ambiguous interpretations remain drafts or require confirmation; optional capture must not block the primary task.
 
-For user knowledge, supply `authority`, the smallest sufficient `agreement_quote`, and concrete `when` applicability. Add `review_when` when a meaningful invalidation condition is known and `affects` only for existing related tasks. The CLI derives claim kind and default triggers. Classification fields are optional; do not invent scope, risks, aliases, or a task to fill a template. A quote may be the entire factual answer; body prose should add context, not repeat it.
+For user knowledge, use `knowledge create "Title" --origin user --quote "Exact user statement" --when "Concrete applicability"` (`--origin user-confirmed` for explicit confirmation). Add `--review-when` when a meaningful invalidation condition is known and `--affects` only for existing related tasks. The CLI derives authority, claim kind, and default triggers; ordinary creation needs no handwritten YAML. Use `--draft` to postpone publication. A quote may be the entire factual answer; body prose should add context, not repeat it.
 
 Source-backed facts use evidence with exact quotes; inference needs explicit premises. See draft formats. Preserve conflicting history with `superseded`/`superseded_by`, rather than silently replacing a disputed decision.
 
@@ -52,11 +52,11 @@ Create nodes only for independently acceptable, schedulable outcomes. Sequential
 
 Use `task edit <id> --editor` for a complete editable draft, `task edit <id> --section Evidence --body-file <file>` for a section update, or `--draft` to postpone publication. Generated drafts reject changed source revisions. Use `task start`, `task block`, `task done`, `task drop`, `task parent`, and `task needs` for lifecycle and relationships.
 
-Maintain one Acceptance checklist and supporting Evidence. Check an item only after verification; `show` derives the remaining unchecked items. Do not maintain a second Remaining Acceptance list. Plain existing acceptance prose remains supported. Next Step and Risks are optional sections when they add recovery information. Numeric progress is optional, not a checklist ratio: omit unjustified estimates or clear stale ones with `progress <id> unknown`.
+Maintain one Acceptance checklist and supporting Evidence. Check an item only after verification; `show` derives the remaining unchecked items. Do not maintain a second Remaining Acceptance list. Plain existing acceptance prose remains supported. Next Step and Risks are optional sections when they add recovery information. Numeric progress is optional, not a checklist ratio: omit unjustified estimates or clear stale ones with `task progress <id> unknown`.
 
 On material scope changes, update current acceptance and add a concise dated Change History entry: what changed, why and on whose authority, and where unfinished work went. Mention dependencies or invalidated evidence only when affected. Keep earlier evidence attributed to the boundary it verified. Do not log ordinary plan reshuffling. Update or supersede affected knowledge; reopen completed tasks when new acceptance is unfinished.
 
-Record independently verified milestones and material changes, not every tool call, compile, turn, or percentage fluctuation. Before `done`, verify all current acceptance and cite concrete evidence; code or a Git commit alone is not completion.
+Record independently verified milestones and material changes, not every tool call, compile, turn, or percentage fluctuation. Before `task done`, verify all current acceptance and cite concrete evidence; code or a Git commit alone is not completion.
 
 ## 4. Context Handoff: Store Only Missing Recovery Information
 

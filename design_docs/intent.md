@@ -1,4 +1,6 @@
-# Hypha — 设计意图
+# Hypha — Historical Design Rationale
+
+> Historical record: the discussion below preserves earlier proposals, rejected alternatives, and command names; it is not current CLI guidance. Use [README](../README.md), [current specification](spec.md), and `hypha --help` for supported behavior. In particular, global storage supports knowledge only, source snapshots are not content-hash immutable, and Hypha does not automatically commit. Historical performance budgets are targets, not measured guarantees.
 
 > v0.9（2026-08-30）｜本版将 Hypha 从高频治理流程收缩为低频、关键检查点：它必须改善长期任务的恢复、决策和交接，而不是让 agent 为证明使用过 skill 而记账。
 > 本文件只承载**为什么**与**是什么**。实现细节见 `spec.md`（尚为 v0.3，正在按本版重写）。评审裁决见 §附录、§附录二。
