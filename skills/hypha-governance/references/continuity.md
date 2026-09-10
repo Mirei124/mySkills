@@ -46,6 +46,6 @@ Keep current acceptance in one task checklist. A handoff normally references tha
 
 ## Two-Stage Handoff
 
-Run `context close` to prepare. Review the current conversation for unsaved decisions and recovery details, update the authoritative task and any narrowly scoped handoff draft, then fill the two review decisions in `.hypha/.drafts/context-close.json`. Run `context close --finalize` only after that review. Preparation leaves the context open.
+Run `context close` to prepare. Review the current conversation for unsaved decisions and recovery details, update the authoritative task and any narrowly scoped handoff draft, then fill the two review decisions in `.hypha/.drafts/context-close.json`. Run `context close --finalize` only after that review. Preparation leaves the context open; finalization records the handoff but does not complete active tasks or end the current work.
 
 On resume without a topic, the latest completed handoff is the preferred entry point. Read its current task and Next Step, then its knowledge and recovery references. Hash or status differences mean the current files changed after handoff; reread current content instead of restoring the recorded version. With an explicit topic, use normal topic retrieval and treat the latest handoff as supplemental context. An unfinished preparation is only a warning that the prior handoff was never confirmed.

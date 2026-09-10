@@ -1594,7 +1594,8 @@ def finalize_handoff(home: Path) -> None:
         if draft.get("consumed"):
             if not record_path.is_file(): raise ValueError("Consumed preparation is missing its handoff record")
             if not close_marker_exists(home, handoff_id): append_session_marker(home, "close", handoff_id)
-            print("Handoff checks passed. Context closed.")
+            print("Handoff recorded. Selected tasks keep their current status.")
+            print("This closes the handoff record, not the task or the current work. Continue the selected task unless the user requested an end to this turn.")
             print("Checks cover record completeness and valid references; they cannot prove that no conversation information was omitted.")
             return
         if record_path.is_file():
@@ -1617,7 +1618,8 @@ def finalize_handoff(home: Path) -> None:
             append_session_marker(home, "close", handoff_id)
         draft["consumed"] = True; draft["record"] = str(record_path.relative_to(home))
         atomic_write(preparation, json.dumps(draft, ensure_ascii=False, indent=2) + "\n")
-    print("Handoff checks passed. Context closed.")
+    print("Handoff recorded. Selected tasks keep their current status.")
+    print("This closes the handoff record, not the task or the current work. Continue the selected task unless the user requested an end to this turn.")
     print("Checks cover record completeness and valid references; they cannot prove that no conversation information was omitted.")
 
 

@@ -678,7 +678,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("add", "follow up", "0001")
         prepared, finalized = self.finalize_context()
         self.assertIn("Context remains open", prepared.stdout)
-        self.assertIn("Handoff checks passed. Context closed.", finalized.stdout)
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized.stdout)
         view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
         html = view.read_text(encoding="utf-8")
         self.assertIn("Tasks", html)
@@ -820,7 +820,7 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("done", "0001")
         prepared, finalized = self.finalize_context()
         self.assertIn("Context remains open", prepared.stdout)
-        self.assertIn("Handoff checks passed. Context closed.", finalized.stdout)
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized.stdout)
         self.assertNotIn("previous session may not have been closed", self.cli("boot").stdout)
         self.assertIn("No legacy agreements require migration", self.cli("migrate").stdout)
 
@@ -981,7 +981,11 @@ class HyphaCliTest(unittest.TestCase):
         draft["recovery_review"] = {"status": "saved", "references": [".drafts/recovery.md"], "note": ""}
         preparation.write_text(json.dumps(draft, indent=2), encoding="utf-8")
         first = self.cli("context", "close", "--finalize")
-        self.assertIn("Handoff checks passed", first.stdout)
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", first.stdout)
+        self.assertIn("not the task or the current work", first.stdout)
+        self.assertNotIn("Context closed", first.stdout)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+        self.assertIn("## Next Step\n\nRun the remaining fixture.", task.read_text(encoding="utf-8"))
         record = json.loads(next((self.workspace / ".hypha/handoffs").glob("*.json")).read_text())
         self.assertEqual(hashlib.sha256(task.read_bytes()).hexdigest(), record["content_hashes"]["tasks"]["0001"])
         events = [json.loads(line) for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl") for line in path.read_text().splitlines()]
@@ -1039,7 +1043,9 @@ class HyphaCliTest(unittest.TestCase):
         draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No durable change."}
         draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "All selected work ended."}
         preparation.write_text(json.dumps(draft), encoding="utf-8")
-        self.assertIn("Context closed", self.cli("context", "close", "--finalize").stdout)
+        finalized = self.cli("context", "close", "--finalize").stdout
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized)
+        self.assertIn("not the task or the current work", finalized)
 
     def test_resume_prefers_completed_handoff_and_reports_changes(self):
         self.cli("init")

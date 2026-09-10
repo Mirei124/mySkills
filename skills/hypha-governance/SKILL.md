@@ -71,7 +71,7 @@ The CLI can validate record structure, task recovery fields, references, and ver
 
 Use a `kind: handoff` draft only for unpublished observations or temporary recovery details absent from the task: reference its ID and add the missing cursor, artifact, or uncertainty. Do not copy its goal, acceptance, evidence, or knowledge constraints. Existing legacy handoff summaries are secondary to the current task and its dated decisions; refresh a conflicting temporary instruction or replace duplicated summaries with a pointer, without reviving cancelled scope or re-asking a settled question.
 
-Run this two-stage close only for an explicit close/handoff or when the governed context genuinely ends. `--finalize` records the handoff and close marker but does not complete tasks or commit Git changes. Do not close after ordinary turns, commits, or knowledge-only capture.
+Run this two-stage close only for an explicit close/handoff or when the governed context genuinely ends. `--finalize` records the handoff and close marker but does not complete tasks, end the current work, or commit Git changes. Keep working on any active selected task unless the user explicitly ends the turn. Do not close after ordinary turns, commits, or knowledge-only capture.
 
 ## Reference And Maintenance
 
