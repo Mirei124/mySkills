@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import runpy
@@ -54,6 +55,25 @@ class HyphaCliTest(unittest.TestCase):
         text = text.replace("## Acceptance\n\n", f"## Acceptance\n\n- {acceptance}\n\n", 1)
         text = text.replace("## Evidence\n", f"## Evidence\n\n- {evidence}\n", 1)
         task.write_text(text, encoding="utf-8")
+
+    def finalize_context(self, no_task_reason="Only durable knowledge was saved."):
+        prepared = self.cli("context", "close")
+        path = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(path.read_text(encoding="utf-8"))
+        for task_id in draft["tasks"]:
+            task = next((self.workspace / ".hypha/intent").glob(f"{task_id}-*.md"))
+            text = task.read_text(encoding="utf-8")
+            acceptance = re.search(r"(?ms)^## Acceptance\s*$\n?(.*?)(?=^## |\Z)", text)
+            if acceptance and not acceptance.group(1).strip():
+                text = text.replace("## Acceptance\n", "## Acceptance\n\n- Continue the tracked outcome.\n", 1)
+            if "## Next Step" not in text:
+                text += "\n## Next Step\n\nContinue the next verified action.\n"
+            task.write_text(text, encoding="utf-8")
+        if not draft["tasks"]: draft["no_task_reason"] = no_task_reason
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No unsaved durable knowledge was identified."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "The selected task contains the recovery entry point."}
+        path.write_text(json.dumps(draft, indent=2) + "\n", encoding="utf-8")
+        return prepared, self.cli("context", "close", "--finalize")
 
     def test_generated_drafts_preserve_sections_and_reject_stale_source(self):
         self.cli("init")
@@ -334,7 +354,7 @@ class HyphaCliTest(unittest.TestCase):
             "Hosted processing was rejected. The batch cap is 64 MiB because of device memory.\n"
         )
         self.cli("apply", str(knowledge))
-        self.cli("close")
+        self.finalize_context()
         old_workspace = self.workspace
         with tempfile.TemporaryDirectory() as next_context:
             self.workspace = Path(next_context)
@@ -656,10 +676,9 @@ class HyphaCliTest(unittest.TestCase):
         self.document_task("0001")
         self.cli("done", "0001")
         self.cli("add", "follow up", "0001")
-        close_output = self.cli("close").stdout
-        self.assertIn("Completion candidate 0001", close_output)
-        self.assertIn("Session closed.", close_output)
-        self.assertNotIn("AGENT FOLLOW-UP", close_output)
+        prepared, finalized = self.finalize_context()
+        self.assertIn("Context remains open", prepared.stdout)
+        self.assertIn("Handoff checks passed. Context closed.", finalized.stdout)
         view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
         html = view.read_text(encoding="utf-8")
         self.assertIn("Tasks", html)
@@ -750,7 +769,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("progress: 40", self.cli("show", "0001").stdout)
         lint = self.cli("lint", "--audit")
         self.assertEqual("", lint.stderr)
-        self.cli("close")
+        self.finalize_context()
         self.assertNotIn("previous session may not have been closed", self.cli("boot", "oauth").stdout)
 
     def test_dismiss_suppresses_repeated_candidate(self):
@@ -799,12 +818,9 @@ class HyphaCliTest(unittest.TestCase):
         self.cli("boot")
         self.document_task("0001")
         self.cli("done", "0001")
-        close = self.cli("close").stdout
-        self.assertIn("Completion candidate 0001", close)
-        self.assertIn("Session closed.", close)
-        self.assertNotIn("AGENT FOLLOW-UP", close)
-        self.assertIn("close requests no action", close)
-        self.assertNotIn("Routing preview", close)
+        prepared, finalized = self.finalize_context()
+        self.assertIn("Context remains open", prepared.stdout)
+        self.assertIn("Handoff checks passed. Context closed.", finalized.stdout)
         self.assertNotIn("previous session may not have been closed", self.cli("boot").stdout)
         self.assertIn("No legacy agreements require migration", self.cli("migrate").stdout)
 
@@ -919,6 +935,127 @@ class HyphaCliTest(unittest.TestCase):
         refused = subprocess.run([str(installer), str(collision)], text=True, capture_output=True, check=False)
         self.assertNotEqual(0, refused.returncode)
         self.assertEqual("different", (collision / "hypha").read_text(encoding="utf-8"))
+
+    def test_close_preparation_is_non_closing_and_pending_finalize_fails(self):
+        self.cli("init")
+        self.cli("task", "create", "Continue delivery", "--acceptance", "Result is delivered")
+        self.cli("task", "start", "0001")
+        before = sum(1 for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl")
+                     for line in path.read_text(encoding="utf-8").splitlines() if '"to":"close"' in line)
+        prepared = self.cli("context", "close")
+        self.assertIn("Handoff preparation required. Context remains open.", prepared.stdout)
+        self.assertNotIn("Session closed", prepared.stdout)
+        path = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(["0001"], draft["tasks"])
+        self.assertEqual("0001", draft["resume_task"])
+        draft["knowledge_review"]["note"] = "Human text survives repeated preparation."
+        path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        self.cli("context", "close")
+        self.assertEqual("Human text survives repeated preparation.", json.loads(path.read_text())["knowledge_review"]["note"])
+        self.assertIn("previous handoff was not finalized", self.cli("context", "resume").stdout)
+        json_prepared = json.loads(self.cli("context", "close", "--json").stdout)
+        self.assertTrue(json_prepared["ok"])
+        self.assertIn("Context remains open", json_prepared["result"]["output"])
+        failed = self.cli("context", "close", "--finalize", ok=False)
+        self.assertIn("knowledge_review.status is still pending", failed.stderr)
+        self.assertIn("Task 0001 needs a non-empty Next Step", failed.stderr)
+        json_failed = self.cli("context", "close", "--finalize", "--json", ok=False)
+        self.assertEqual("invalid_request", json.loads(json_failed.stdout)["error"]["code"])
+        after = sum(1 for event in (self.workspace / ".hypha/snapshots").glob("*.jsonl")
+                    for line in event.read_text().splitlines() if '"to":"close"' in line)
+        self.assertEqual(before, after)
+
+    def test_finalize_records_final_versions_references_and_is_idempotent(self):
+        self.cli("init")
+        self.cli("task", "create", "Active work", "--acceptance", "Feature works")
+        self.cli("task", "start", "0001")
+        self.cli("context", "close")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nRun the remaining fixture.\n", encoding="utf-8")
+        handoff = self.workspace / ".hypha/.drafts/recovery.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Cursor\n\nResume fixture 8.\n", encoding="utf-8")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No new durable decision was made."}
+        draft["recovery_review"] = {"status": "saved", "references": [".drafts/recovery.md"], "note": ""}
+        preparation.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        first = self.cli("context", "close", "--finalize")
+        self.assertIn("Handoff checks passed", first.stdout)
+        record = json.loads(next((self.workspace / ".hypha/handoffs").glob("*.json")).read_text())
+        self.assertEqual(hashlib.sha256(task.read_bytes()).hexdigest(), record["content_hashes"]["tasks"]["0001"])
+        events = [json.loads(line) for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl") for line in path.read_text().splitlines()]
+        closes = [event for event in events if event.get("handoff_id") == record["handoff_id"]]
+        self.assertEqual(1, len(closes))
+        self.cli("context", "close", "--finalize")
+        events = [json.loads(line) for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl") for line in path.read_text().splitlines()]
+        self.assertEqual(1, len([event for event in events if event.get("handoff_id") == record["handoff_id"]]))
+        handoff.unlink()
+        self.assertIn("handoff reference disappeared", self.cli("context", "resume").stdout)
+
+    def test_task_free_and_multi_task_handoff_validation(self):
+        self.cli("init")
+        self.cli("context", "close")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "Knowledge-only session was reviewed."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "No execution state exists."}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        self.assertIn("no_task_reason is required", self.cli("context", "close", "--finalize", ok=False).stderr)
+        draft["no_task_reason"] = "This session only saved durable knowledge."
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        self.cli("context", "close", "--finalize")
+
+        self.cli("task", "create", "First", "--acceptance", "First works")
+        self.cli("task", "create", "Second", "--root", "--acceptance", "Second works")
+        for task_id in ("0001", "0002"):
+            self.cli("task", "start", task_id)
+            task = next((self.workspace / ".hypha/intent").glob(f"{task_id}-*.md"))
+            task.write_text(task.read_text() + "\n## Next Step\n\nContinue this task.\n", encoding="utf-8")
+        self.cli("context", "close", "--task", "0001", "--task", "0002")
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "Reviewed."}
+        draft["recovery_review"] = {"status": "saved", "references": ["missing.md"], "note": ""}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        failed = self.cli("context", "close", "--finalize", ok=False)
+        self.assertIn("Multiple active handoff tasks require resume_task", failed.stderr)
+        self.assertIn("Invalid or missing recovery_review reference", failed.stderr)
+
+    def test_blocked_and_completed_task_handoffs_succeed(self):
+        self.cli("init")
+        self.cli("task", "create", "Blocked work", "--acceptance", "Dependency becomes available")
+        self.cli("task", "block", "0001", "Waiting for the upstream fixture")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nAfter the fixture arrives, rerun verification.\n", encoding="utf-8")
+        self.finalize_context()
+
+        self.cli("task", "create", "Completed work", "--root", "--acceptance", "Result is verified")
+        self.document_task("0002")
+        self.cli("task", "done", "0002")
+        self.cli("context", "close", "--task", "0002")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["resume_task"] = None
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No durable change."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "All selected work ended."}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        self.assertIn("Context closed", self.cli("context", "close", "--finalize").stdout)
+
+    def test_resume_prefers_completed_handoff_and_reports_changes(self):
+        self.cli("init")
+        self.cli("task", "create", "Resume target", "--acceptance", "Target works")
+        self.cli("task", "start", "0001")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nContinue from the saved cursor.\n", encoding="utf-8")
+        self.finalize_context()
+        resumed = self.cli("context", "resume").stdout
+        self.assertIn("Latest completed handoff", resumed)
+        self.assertIn("Resume task: 0001", resumed)
+        self.assertIn("Current Next Step: Continue from the saved cursor", resumed)
+        task.write_text(task.read_text() + "\nChanged after handoff.\n", encoding="utf-8")
+        changed = self.cli("context", "resume", "different topic").stdout
+        self.assertIn("Handoff supplement", changed)
+        self.assertIn("changed since handoff", changed)
 
 if __name__ == "__main__":
     unittest.main()

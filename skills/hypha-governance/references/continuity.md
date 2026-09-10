@@ -43,3 +43,9 @@ Use a dated entry under `Change History` in the existing task body. Record only 
 The record describes a semantic change, not every edit. The current task body should be enough to understand what remains and why the goal evolved without reading old plans, session transcripts, or Git history.
 
 Keep current acceptance in one task checklist. A handoff normally references that task and adds only temporary recovery details. If a legacy handoff says "implement JSON," replace its duplicate scope summary with a task pointer and reconcile any stale temporary instruction. The recorded correction settles the issue without another user question.
+
+## Two-Stage Handoff
+
+Run `context close` to prepare. Review the current conversation for unsaved decisions and recovery details, update the authoritative task and any narrowly scoped handoff draft, then fill the two review decisions in `.hypha/.drafts/context-close.json`. Run `context close --finalize` only after that review. Preparation leaves the context open.
+
+On resume without a topic, the latest completed handoff is the preferred entry point. Read its current task and Next Step, then its knowledge and recovery references. Hash or status differences mean the current files changed after handoff; reread current content instead of restoring the recorded version. With an explicit topic, use normal topic retrieval and treat the latest handoff as supplemental context. An unfinished preparation is only a warning that the prior handoff was never confirmed.

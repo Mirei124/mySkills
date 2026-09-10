@@ -58,13 +58,20 @@ On material scope changes, update current acceptance and add a concise dated Cha
 
 Record independently verified milestones and material changes, not every tool call, compile, turn, or percentage fluctuation. Before `task done`, verify all current acceptance and cite concrete evidence; code or a Git commit alone is not completion.
 
-## 4. Context Handoff: Store Only Missing Recovery Information
+## 4. Context Handoff: Prepare, Review, Then Finalize
 
-The task is the authoritative current state. Save the next useful action and genuinely unresolved risks there when necessary. If this covers recovery, no separate handoff draft is needed.
+The task is the authoritative current state. Save the next useful action and genuinely unresolved risks there when necessary. If this covers recovery, no separate handoff draft is needed. Closing is deliberately two-stage:
+
+1. Run `context close` (repeat `--task ID` to select explicit handoff targets). This creates or reuses `.hypha/.drafts/context-close.json` and leaves the context open.
+2. Review this turn's conversation and the CLI checklist. Correct task acceptance, evidence, scope changes, cancellations, and Next Step. Save missing durable knowledge or temporary recovery details, and remove stale directions from existing handoff drafts.
+3. Fill both review decisions in the preparation file. Use `saved` with existing Hypha references, or `not_needed` with a specific human-reviewed reason. Never fill `not_needed` automatically.
+4. Run `context close --finalize`. A successful preparation is not a completed handoff; do not end the handoff before finalize succeeds.
+
+The CLI can validate record structure, task recovery fields, references, and versions. It cannot read chat archives or prove that every relevant fact from the conversation was saved. Do that semantic review before finalize. Do not create a false task, knowledge node, or risk merely to pass validation.
 
 Use a `kind: handoff` draft only for unpublished observations or temporary recovery details absent from the task: reference its ID and add the missing cursor, artifact, or uncertainty. Do not copy its goal, acceptance, evidence, or knowledge constraints. Existing legacy handoff summaries are secondary to the current task and its dated decisions; refresh a conflicting temporary instruction or replace duplicated summaries with a pointer, without reviving cancelled scope or re-asking a settled question.
 
-Run `context close` only for explicit close/handoff or when the governed context genuinely ends, after saving recovery information. It validates and reports; its output is not a reason to launch more work or mark a runtime goal blocked. Do not close after ordinary turns, commits, or knowledge-only capture. Continue the user's main task after routine governance operations.
+Run this two-stage close only for an explicit close/handoff or when the governed context genuinely ends. `--finalize` records the handoff and close marker but does not complete tasks or commit Git changes. Do not close after ordinary turns, commits, or knowledge-only capture.
 
 ## Reference And Maintenance
 

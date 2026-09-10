@@ -107,6 +107,22 @@ hypha advanced explain "offline deployment"
 
 `advanced migrate` retains legacy-agreement guidance. Bootstrap proposals must be reviewed before `--apply`, which requires an empty graph.
 
+## Two-stage context handoff
+
+Prepare a handoff, review this turn for anything not yet saved, then finalize it:
+
+```bash
+hypha context close
+# Review .hypha/.drafts/context-close.json and save missing information.
+hypha context close --finalize
+```
+
+Preparation selects all in-progress and blocked tasks, or accepts repeated `--task ID`. It creates or reuses the JSON preparation without writing a close marker. Fill `resume_task` for multiple active targets, or `no_task_reason` when there is no task. Both knowledge and recovery reviews must be `saved` with valid references or `not_needed` with a reviewed reason; the CLI never supplies that answer.
+
+Finalization checks task Acceptance and Next Step, blockers, completed-task evidence, review decisions, and references. It writes `.hypha/handoffs/<handoff-id>.json` with content hashes before appending the linked close marker. Repeating finalize is idempotent. These checks cannot prove that the conversation contained no other information worth saving.
+
+Without a topic, `context resume` shows the latest completed handoff first, including the current Next Step and references. It reports task, status, hash, and reference changes without restoring old content. With a topic, normal retrieval remains primary and handoff data is supplemental. An unfinished close preparation is reported as unconfirmed.
+
 ## Query, validation, and output
 
 ```bash

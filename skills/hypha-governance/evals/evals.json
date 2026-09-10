@@ -4,7 +4,7 @@
     {
       "id": "cross-directory-handoff",
       "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
-      "expected_output": "Run context resume once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, and record the requested handoff. Use check --audit only for needed semantic relationship review, and context close only for the actual handoff.",
+      "expected_output": "Run context resume once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, then use the two-stage context close flow. Preparation must be followed by conversation review, missing-information capture, explicit review decisions, and successful --finalize.",
       "files": []
     },
     {
@@ -120,7 +120,7 @@
     {
       "id": "milestone-before-context-handoff",
       "prompt": "The first import batch is verified, another source remains, and we are handing off to a new context now. Save enough to continue. Do not create a task for each imported record.",
-      "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Complete the requested handoff with context close after reviewing state; do not leave recovery solely in chat.",
+      "expected_output": "Update the existing task once with milestone evidence and remaining acceptance, next step, and risks, or retain a handoff draft if publication is not justified. Prepare context close, review and save missing information, then finalize; do not stop after preparation or leave recovery solely in chat.",
       "assertions": [
         "Persists recovery information in Hypha rather than only the final response.",
         "Does not create per-record task nodes.",
@@ -174,6 +174,18 @@
         "Does not treat a previous customer's scoped decision as universal.",
         "Does not infer data-transfer authorization from internet access.",
         "Asks a focused question about the unresolved decision."
+      ],
+      "files": []
+    },
+    {
+      "id": "two-stage-handoff-review",
+      "prompt": "Hand this work to a fresh agent. The implementation task is still active, and this conversation established one durable constraint plus a temporary recovery cursor that are not saved yet.",
+      "expected_output": "Run context close to prepare, review the conversation, save the durable constraint and temporary cursor in their proper locations, update task Acceptance/Next Step as needed, fill both review decisions with valid references, and run context close --finalize. Do not stop after preparation or default reviews to not_needed.",
+      "assertions": [
+        "Preparation does not create a close marker.",
+        "Durable knowledge and temporary recovery data use distinct records.",
+        "Finalize succeeds only after task and review requirements are satisfied.",
+        "A fresh context resume identifies the current task Next Step and saved references."
       ],
       "files": []
     },

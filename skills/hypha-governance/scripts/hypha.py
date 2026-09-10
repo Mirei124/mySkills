@@ -597,7 +597,7 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
 def init(args):
     home = root(args)
     with locked(home):
-        for name in ("src", "intent", "know", ".drafts", "snapshots"):
+        for name in ("src", "intent", "know", "handoffs", ".drafts", "snapshots"):
             (home / name).mkdir(parents=True, exist_ok=True)
         atomic_write(home / ".gitignore", "lock\nview.html\n")
         atomic_write(home / ".gitattributes", "snapshots/*.jsonl merge=union\naudit-resolutions.jsonl merge=union\n")
@@ -1135,7 +1135,7 @@ def node_observation_times(events: list[dict]) -> dict[tuple[str, str], dict[str
     return times
 
 
-def append_session_marker(home: Path, action: str) -> None:
+def append_session_marker(home: Path, action: str, handoff_id: str | None = None) -> None:
     event = {
         "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "origin": f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:12]}",
@@ -1147,6 +1147,7 @@ def append_session_marker(home: Path, action: str) -> None:
         "to": action,
         "by": "cli",
     }
+    if handoff_id: event["handoff_id"] = handoff_id
     target = home / "snapshots" / (dt.datetime.now(dt.timezone.utc).date().isoformat() + ".jsonl")
     with target.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -1161,6 +1162,25 @@ def previous_session_unclosed(home: Path) -> bool:
     if not lifecycle:
         return any(event.get("kind") in {"intent", "know"} for event in events)
     return lifecycle[-1].get("to") == "open"
+
+
+def close_marker_exists(home: Path, handoff_id: str) -> bool:
+    return any(event.get("kind") == "session" and event.get("to") == "close"
+               and event.get("handoff_id") == handoff_id for event in read_events(home))
+
+
+def latest_handoff(home: Path) -> tuple[Path, dict] | None:
+    records = []
+    for path in (home / "handoffs").glob("*.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record.get("schema_version") == 1 and record.get("handoff_id"):
+                records.append((str(record.get("finalized_at", "")), path, record))
+        except (OSError, json.JSONDecodeError):
+            continue
+    if not records: return None
+    _, path, record = max(records, key=lambda item: (item[0], item[1].name))
+    return path, record
 
 
 def applied_draft_hashes(home: Path) -> dict[str, str]:
@@ -1246,9 +1266,56 @@ def git_changes(workspace: Path) -> list[str]:
     return [line[3:] for line in result.stdout.splitlines() if len(line) > 3]
 
 
+def print_handoff_resume(home: Path, tasks: dict, explicit_topic: bool) -> None:
+    preparation = home / ".drafts" / "context-close.json"
+    if preparation.exists():
+        try: pending = not json.loads(preparation.read_text(encoding="utf-8")).get("consumed", False)
+        except (OSError, json.JSONDecodeError): pending = True
+        if pending: print(f"Warning: the previous handoff was not finalized: {preparation.relative_to(home)}")
+    latest = latest_handoff(home)
+    if not latest:
+        closed = [event for event in read_events(home) if event.get("kind") == "session" and event.get("to") == "close"]
+        if closed: print("Historical close event found without a handoff completeness record; using the current recovery flow.")
+        return
+    path, record = latest
+    prefix = "Handoff supplement" if explicit_topic else "Latest completed handoff"
+    print(f"{prefix}: {path.relative_to(home)}")
+    resume_task = record.get("resume_task")
+    if resume_task:
+        print(f"Resume task: {resume_task}")
+        node = tasks.get(str(resume_task))
+        if not node:
+            print(f"Warning: handoff task {resume_task} no longer exists.")
+        else:
+            next_step = task_section(node.get("_body", ""), "Next Step", "下一步")
+            print("Current Next Step: " + (next_step or "(missing)"))
+    others = [str(item) for item in record.get("tasks", []) if str(item) != str(resume_task or "")]
+    if others: print("Other handoff tasks: " + ", ".join(others))
+    for review_name in ("knowledge_review", "recovery_review"):
+        review = record.get(review_name, {})
+        label = review_name.removesuffix("_review").replace("_", " ").title()
+        references = [str(item) for item in review.get("references", [])]
+        print(f"{label} references: " + (", ".join(references) or "none"))
+    baselines = record.get("content_hashes", {})
+    for task_id, baseline in baselines.get("tasks", {}).items():
+        node = tasks.get(task_id)
+        if not node: continue
+        current = hashlib.sha256(node["_path"].read_bytes()).hexdigest()
+        old_status = record.get("task_statuses", {}).get(task_id)
+        if current != baseline: print(f"Notice: task {task_id} changed since handoff; reread its current content.")
+        if old_status and node.get("status") != old_status:
+            print(f"Notice: task {task_id} status changed since handoff: {old_status} -> {node.get('status')}.")
+    for reference, baseline in baselines.get("references", {}).items():
+        path_ref = home / reference
+        if not path_ref.is_file(): print(f"Warning: handoff reference disappeared: {reference}")
+        elif hashlib.sha256(path_ref.read_bytes()).hexdigest() != baseline:
+            print(f"Notice: handoff reference changed; reread current content: {reference}")
+
+
 def boot(args):
     home = root(args)
     with locked(home): tasks, knowledge = prepare(home)
+    print_handoff_resume(home, tasks, bool(args.term.strip()))
     if previous_session_unclosed(home):
         running = ", ".join(task_id for task_id, node in sorted(tasks.items()) if node.get("status") == "in_progress") or "none"
         print(f"Note: the previous session may not have been closed; in-progress tasks: {running}")
@@ -1394,35 +1461,170 @@ def route_command(args):
               f"\twhen={node.get('when', '')}")
 
 
+HANDOFF_REVIEW_STATUSES = {"pending", "saved", "not_needed"}
+
+
+def handoff_reference(home: Path, tasks: dict, knowledge: dict, value: str) -> tuple[str, Path] | None:
+    """Resolve a handoff reference without allowing paths outside this store."""
+    if value in tasks: return str(tasks[value]["_path"].relative_to(home)), tasks[value]["_path"]
+    key = value.removesuffix(".md")
+    if key in knowledge: return str(knowledge[key]["_path"].relative_to(home)), knowledge[key]["_path"]
+    requested = Path(value)
+    if requested.is_absolute(): return None
+    path = (home / requested).resolve()
+    try: path.relative_to(home.resolve())
+    except ValueError: return None
+    return (str(path.relative_to(home)), path) if path.is_file() else None
+
+
+def task_handoff_errors(tasks: dict, knowledge: dict, task_ids: list[str], resume_task: str | None) -> list[str]:
+    errors = []
+    relations = graph(tasks, knowledge)
+    progresses = task_progresses(tasks)
+    for task_id in task_ids:
+        node = tasks.get(task_id)
+        if not node:
+            errors.append(f"Task does not exist: {task_id}; rerun hypha context close with valid --task values")
+            continue
+        status = node.get("status")
+        acceptance = task_section(node.get("_body", ""), "Acceptance", "验收").strip()
+        evidence = task_section(node.get("_body", ""), "Evidence", "证据").strip()
+        next_step = task_section(node.get("_body", ""), "Next Step", "下一步").strip()
+        if status in {"todo", "in_progress", "blocked"} and not acceptance:
+            errors.append(f"Task {task_id} needs non-empty Acceptance; fix with hypha task edit {task_id} --section Acceptance --editor")
+        if status in {"todo", "in_progress", "blocked"} and not next_step:
+            errors.append(f"Task {task_id} needs a non-empty Next Step; fix with hypha task edit {task_id} --section 'Next Step' --editor")
+        if status == "blocked" and not node.get("blocked_reason"):
+            errors.append(f"Blocked task {task_id} is missing its blocker; fix with hypha task block {task_id} REASON")
+        if status == "done":
+            if not acceptance: errors.append(f"Done task {task_id} is missing Acceptance")
+            if not evidence: errors.append(f"Done task {task_id} is missing Evidence")
+            if relations["children"].get(task_id) and progresses[task_id] != 100:
+                errors.append(f"Done task {task_id} has incomplete descendant progress")
+        if status == "dropped" and resume_task == task_id:
+            errors.append(f"Dropped task {task_id} cannot be resume_task")
+    return errors
+
+
+def validate_handoff(home: Path, tasks: dict, knowledge: dict, draft: dict) -> tuple[list[str], dict[str, str]]:
+    errors, resolved = [], {}
+    if draft.get("schema_version") != 1 or not re.fullmatch(r"[0-9a-f]{32}", str(draft.get("handoff_id") or "")):
+        errors.append("Invalid context-close schema or missing handoff_id; rerun preparation after preserving any notes")
+    task_ids = [str(item) for item in draft.get("tasks", [])]
+    if len(task_ids) != len(set(task_ids)): errors.append("Handoff tasks must be unique")
+    resume_task = str(draft["resume_task"]) if draft.get("resume_task") else None
+    if not task_ids:
+        if resume_task: errors.append("resume_task must be empty when no tasks are selected")
+        if not str(draft.get("no_task_reason") or "").strip():
+            errors.append("no_task_reason is required for a task-free handoff; explain whether work ended or only knowledge was saved")
+    else:
+        actionable = any(tasks.get(task_id, {}).get("status") not in {"done", "dropped"} for task_id in task_ids)
+        if len(task_ids) > 1 and actionable and not resume_task:
+            errors.append("Multiple active handoff tasks require resume_task")
+        if resume_task and resume_task not in task_ids: errors.append("resume_task must belong to tasks")
+    errors.extend(task_handoff_errors(tasks, knowledge, task_ids, resume_task))
+    for field in ("knowledge_review", "recovery_review"):
+        review = draft.get(field)
+        if not isinstance(review, dict): errors.append(f"{field} must be an object"); continue
+        status = review.get("status")
+        references = review.get("references", [])
+        note = str(review.get("note") or "").strip()
+        if status not in HANDOFF_REVIEW_STATUSES: errors.append(f"{field}.status must be pending, saved, or not_needed"); continue
+        if status == "pending": errors.append(f"{field}.status is still pending; review this turn before finalizing")
+        if status == "saved" and not references: errors.append(f"{field}.references is required when status is saved")
+        if status == "not_needed" and not note: errors.append(f"{field}.note must explain why nothing needed saving")
+        if not isinstance(references, list): errors.append(f"{field}.references must be a list"); continue
+        for value in references:
+            found = handoff_reference(home, tasks, knowledge, str(value))
+            if not found: errors.append(f"Invalid or missing {field} reference inside this Hypha store: {value}")
+            else: resolved[str(value)] = str(found[0])
+    return errors, resolved
+
+
+def prepare_handoff(home: Path, args) -> None:
+    path = home / ".drafts" / "context-close.json"
+    with locked(home):
+        tasks, knowledge = prepare(home)
+        if path.exists():
+            try: existing = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc: raise ValueError(f"Invalid existing handoff preparation: {exc}")
+            if not existing.get("consumed", False):
+                selected = [str(item) for item in existing.get("tasks", [])]
+            else: existing = None
+        else: existing = None
+        if existing is None:
+            selected = list(dict.fromkeys(args.task or [task_id for task_id, node in sorted(tasks.items()) if node.get("status") in {"in_progress", "blocked"}]))
+            missing = [task_id for task_id in selected if task_id not in tasks]
+            if missing: raise ValueError("Task does not exist: " + ", ".join(missing))
+            draft = {"schema_version": 1, "handoff_id": uuid.uuid4().hex, "tasks": selected,
+                     "resume_task": selected[0] if len(selected) == 1 else None, "no_task_reason": None,
+                     "knowledge_review": {"status": "pending", "references": [], "note": ""},
+                     "recovery_review": {"status": "pending", "references": [], "note": ""}}
+            atomic_write(path, json.dumps(draft, ensure_ascii=False, indent=2) + "\n")
+        structural = validate(home, tasks, knowledge)
+        recovery_issues = task_handoff_errors(tasks, knowledge, selected, existing.get("resume_task") if existing else draft.get("resume_task"))
+    print("Handoff preparation required. Context remains open.")
+    print("Selected tasks: " + (", ".join(selected) or "none"))
+    print("Structural checks: " + ("passed" if not structural else f"{len(structural)} issue(s); run hypha check"))
+    print("Task handoff checks: " + ("passed" if not recovery_issues else f"{len(recovery_issues)} issue(s) to fix before finalize"))
+    for issue in recovery_issues: print("- " + issue)
+    print(f"Preparation file: {path}")
+    print("Review checklist (the CLI cannot answer these by reading chat):")
+    print("- Is current acceptance accurate, with completed and unfinished work clearly separated?")
+    print("- Does verified work have evidence, and are scope changes and cancellations saved?")
+    print("- Are any user decisions, constraints, rationale, or excluded options still unsaved?")
+    print("- Are recovery cursors, artifacts, uncommitted implementation details, or startup conditions saved?")
+    print("- Do existing handoff drafts contain stale directions?")
+    print("Do not use not_needed as a default answer; record a brief reviewed reason.")
+    print("Review and save missing information, then run:")
+    print("  hypha context close --finalize")
+
+
+def finalize_handoff(home: Path) -> None:
+    preparation = home / ".drafts" / "context-close.json"
+    if not preparation.is_file(): raise ValueError("No handoff preparation exists; run hypha context close first")
+    with locked(home):
+        tasks, knowledge = prepare(home)
+        try: draft = json.loads(preparation.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc: raise ValueError(f"Invalid handoff preparation JSON: {exc}")
+        handoff_id = str(draft.get("handoff_id") or "")
+        if not re.fullmatch(r"[0-9a-f]{32}", handoff_id):
+            raise ValueError("Invalid handoff_id; preserve review notes and rerun hypha context close")
+        record_path = home / "handoffs" / f"{handoff_id}.json"
+        if draft.get("consumed"):
+            if not record_path.is_file(): raise ValueError("Consumed preparation is missing its handoff record")
+            if not close_marker_exists(home, handoff_id): append_session_marker(home, "close", handoff_id)
+            print("Handoff checks passed. Context closed.")
+            print("Checks cover record completeness and valid references; they cannot prove that no conversation information was omitted.")
+            return
+        if record_path.is_file():
+            if not close_marker_exists(home, handoff_id): append_session_marker(home, "close", handoff_id)
+        else:
+            structural = validate(home, tasks, knowledge)
+            errors, resolved = validate_handoff(home, tasks, knowledge, draft)
+            errors = structural + errors
+            if errors:
+                raise ValueError("Handoff checks failed; context remains open and the preparation was kept:\n- " + "\n- ".join(errors))
+            task_ids = [str(item) for item in draft.get("tasks", [])]
+            record = {key: draft.get(key) for key in ("schema_version", "handoff_id", "tasks", "resume_task", "no_task_reason", "knowledge_review", "recovery_review")}
+            record["finalized_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            record["task_statuses"] = {task_id: tasks[task_id].get("status") for task_id in task_ids}
+            record["content_hashes"] = {
+                "tasks": {task_id: hashlib.sha256(tasks[task_id]["_path"].read_bytes()).hexdigest() for task_id in task_ids},
+                "references": {resolved[value]: hashlib.sha256((home / resolved[value]).read_bytes()).hexdigest() for value in resolved},
+            }
+            atomic_write(record_path, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+            append_session_marker(home, "close", handoff_id)
+        draft["consumed"] = True; draft["record"] = str(record_path.relative_to(home))
+        atomic_write(preparation, json.dumps(draft, ensure_ascii=False, indent=2) + "\n")
+    print("Handoff checks passed. Context closed.")
+    print("Checks cover record completeness and valid references; they cannot prove that no conversation information was omitted.")
+
+
 def close(args):
     home = root(args)
-    with locked(home): tasks, knowledge = prepare(home)
-    errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, .5)
-    if errors:
-        raise ValueError("Lint failed before session close:\n" + "\n".join(errors))
-    for warning in warnings: print("Warning: " + warning)
-    print_unmanaged_notice(unmanaged)
-    print("In progress: " + ", ".join(k for k,v in tasks.items() if v.get("status") == "in_progress"))
-    print("Blocked: " + ", ".join(k for k,v in tasks.items() if v.get("status") == "blocked"))
-    redlinks = graph(tasks, knowledge)["redlinks"]
-    print("Redlinks: " + ", ".join(sorted(redlinks)))
-    audit(home, tasks, knowledge, emit_follow_up=False)
-    done = done_in_current_session(home)
-    for task_id in done:
-        if task_id not in tasks: continue
-        node = tasks[task_id]
-        print(f"Completion candidate {task_id}:")
-        print(task_section(node.get("_body", ""), "Acceptance", "\u9a8c\u6536") or "(no acceptance criteria)")
-        print(task_section(node.get("_body", ""), "Evidence", "\u8bc1\u636e") or "(no evidence)")
-        print("Knowledge premises: " + ", ".join(sorted(graph(tasks, knowledge)["premises"].get(task_id, set()))) )
-    changes = git_changes(home.parent)
-    if changes:
-        print("Session files: " + ", ".join(changes))
-        print("Suggested commit: git add " + " ".join(changes) + " && git commit -m 'hypha: update state'")
-    else: print("No uncommitted Hypha files in this session.")
-    with locked(home):
-        append_session_marker(home, "close")
-    print("Session closed.")
+    if args.finalize: finalize_handoff(home)
+    else: prepare_handoff(home, args)
 
 
 def ingest(args):
@@ -1857,7 +2059,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 Task: task create TITLE [--acceptance TEXT ...] [--body-file FILE] [--parent ID|--root]; task edit ID [--section NAME] (--editor|--body-file FILE|--draft); task start|done|drop ID; task block ID REASON; task progress ID VALUE; task parent ID PARENT; task needs ID DEPENDENCY.
 Knowledge: knowledge create TITLE --origin ORIGIN --when CONDITION [--quote TEXT] [--source FILE] [--premise ANCHOR ...] [--reason TEXT] [--body-file FILE] [--review-when TEXT] [--affects ID ...] [--draft|--editor]; knowledge edit PATH [--section NAME] (--editor|--body-file FILE|--draft).
-Context: context resume [TOPIC ...]; context close.
+Context: context resume [TOPIC ...]; context close [--task ID ...]; context close --finalize.
 General: init; list [--type TYPE] [--status STATUS] [--ready] [--tree]; show ID; search QUERY [--type TYPE] [--file PATH] [--limit N]; view [--mode MODE] [--open]; check [--audit].
 Advanced: advanced import FILE [--suggest]; advanced drafts; advanced publish DRAFT; advanced bootstrap [--dry-run|--output FILE|--apply FILE]; advanced migrate; advanced dismiss|defer ID; advanced explain TOPIC.
 Common options may appear before or after a subcommand: --workspace PATH, --global, --json."""
@@ -1880,7 +2082,8 @@ Common options may appear before or after a subcommand: --workspace PATH, --glob
     p=leaf(know_sub,"edit","Edit knowledge with revision protection"); p.add_argument("target"); p.add_argument("--section"); modes=p.add_mutually_exclusive_group(); modes.add_argument("--editor",action="store_true"); modes.add_argument("--body-file"); modes.add_argument("--draft",action="store_true"); p.set_defaults(node_kind="knowledge")
     context = top.add_parser("context",help="Resume or close governed context"); add_common_options(context,True); context_sub=context.add_subparsers(dest="action",required=True)
     p=leaf(context_sub,"resume","Show an index of relevant tasks, knowledge, and drafts"); p.add_argument("term",nargs="*",metavar="TOPIC")
-    leaf(context_sub,"close","Validate and record a handoff without completing tasks")
+    p=leaf(context_sub,"close","Prepare a handoff, or validate and close it with --finalize")
+    close_mode=p.add_mutually_exclusive_group(); close_mode.add_argument("--task",action="append",metavar="ID",help="Task to hand off; repeat for multiple tasks"); close_mode.add_argument("--finalize",action="store_true",help="Validate the prepared handoff and record the close")
     leaf(top,"init","Initialize the current workspace")
     p=leaf(top,"list","List tasks and knowledge"); p.add_argument("--type",choices=("all","task","knowledge"),default="all"); p.add_argument("--status",choices=tuple(sorted(TASK_STATUSES|KNOWLEDGE_STATUSES))); p.add_argument("--ready",action="store_true"); p.add_argument("--tree",action="store_true")
     p=leaf(top,"show","Show a node, relationships, or a draft path"); p.add_argument("target"); p.add_argument("--summary",action="store_true"); p.add_argument("--body",action="store_true",help=argparse.SUPPRESS)

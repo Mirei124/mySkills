@@ -100,3 +100,7 @@ Read task 0001 for current scope, acceptance, evidence, and knowledge links.
 ```
 
 Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are recovery data and cannot be published as knowledge. Pending drafts appear in `advanced drafts` and `context resume`; published drafts are hidden automatically. Current task decisions override legacy handoff summaries. Keep history in the task and reconcile only temporary instructions that became stale.
+
+## Context Close Preparation
+
+`context close` creates `.hypha/.drafts/context-close.json`. It is a small review record, not a copy of task bodies. Keep its generated `handoff_id`; select one `resume_task` when multiple active tasks are present; explain `no_task_reason` for a task-free handoff. Set each review to `saved` with existing task, knowledge, or handoff-draft references, or to `not_needed` with a reviewed reason. `pending` intentionally blocks finalization. A handoff draft may be referenced while unpublished and remains non-publishable recovery data.
