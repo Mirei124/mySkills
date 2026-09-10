@@ -1,32 +1,23 @@
 # Maintenance
 
-Read only for bootstrap/import, migration, semantic follow-ups, or rejected publication. Source capture and copy behavior are described in [Conclusion records](records.md#source-snapshot-behavior).
+Read for bootstrap/import, migration, audits, or rejected writes. See [Source snapshots](records.md#source-snapshot-behavior) for copying and [Migration review](migration.md) before moving another system's task records.
 
-## Migrate Existing Task Records
+## Semantic Follow-ups
 
-When moving from another task system, read [Migration review](migration.md). Preserve originals and account for every unfinished task, blocker, dependency, and todo. Completed history may be summarized; unfinished work needs a live task, named remaining acceptance, or evidence-backed cancellation/supersession. A historical table alone is not a destination.
+`advanced bootstrap`, `check --audit`, and `advanced migrate` may emit `AGENT FOLLOW-UP`: a mechanical stage finished, not the semantic work. Continue safely within the authorized scope until evidence supports a validated change, `advanced dismiss` records an unrelated candidate, or `advanced defer` retains uncertainty.
 
-Treat old percentages as historical reported values. Set current numeric progress only when current acceptance items justify it. Verify migration coverage separately from `check`: structural validation cannot prove that the source's unfinished scope survived.
+`advanced import --suggest` only captures a source and lists existing candidates; it neither creates knowledge nor emits that protocol. Candidates are not facts. The agent still owns classification, relationships, acceptance, deviations, and authority checks; printing a follow-up is not completion.
 
+Exhaust safe authorized work before asking about materially ambiguous decisions or new authority. Optional capture must not stall the primary task: leave a draft/deferred candidate and report uncertainty. Deferred audit candidates remain visible without another follow-up; do not repeatedly run `check --audit` merely to revisit them.
 
-## Execute Semantic CLI Hand-offs
+## Rejections And Permissions
 
-`advanced bootstrap`, `check --audit`, and `advanced migrate` may print `AGENT FOLLOW-UP`. This means the command completed a mechanical first stage and the calling agent should continue its Instructions in the same turn whenever safely possible. `advanced import --suggest` only captures a source and lists existing knowledge candidates; it does not create knowledge or emit that protocol. Continue the authorized semantic work until:
+Distinguish syntax, invalid state, and permissions. For unknown commands/arguments use current `--help`; no compatibility translation exists. Inspect nodes and make safe deterministic corrections, such as updating leaves before completing parents or choosing `task parent` versus `task needs` from established semantics. A rejected operation alone does not justify declaring the task/runtime goal blocked.
 
-- evidence from nodes, sources, code, or user confirmation supports a validated change;
-- a candidate is confirmed unrelated and recorded with `advanced dismiss`; or
-- evidence is insufficient, so it is retained with `advanced defer` and uncertainty is reported.
+Queries are read-only; source capture, publication, and `check` require writes. Copying fallback does not bypass permissions. For interrupted record writes, follow [record recovery](records.md#add-evidence-or-correct-a-conclusion).
 
-The CLI supplies candidates, paths, status, and constraints; the agent owns classification, relationship selection, acceptance review, deviation detection, and user-confirmation decisions. Never treat candidates as facts or merely print the prompt and claim completion.
+## Handoff And Audit Recovery
 
-Exhaust safe, authorized work before asking for confirmation. Ask only when a missing decision would materially change formal task/knowledge state or requires new authority. If confirmation concerns optional knowledge capture rather than the user's primary request, leave a draft or defer the candidate, report it briefly, and still finish the primary work. A deferred audit candidate remains visible but does not emit another follow-up, so do not rerun `check --audit` merely to revisit it.
+Follow SKILL.md's handoff sequence. Finalize failures retain preparation and keep context open. Do not default reviews or fabricate records. Retrying can finish an interrupted close whose handoff record exists but close marker does not.
 
-## Handle CLI Rejections Without Stalling
-
-A nonzero CLI exit is a validation result, not proof that the user's work is blocked. Read the error, inspect current nodes, and perform every safe deterministic correction available. For example, update leaves before completing a parent, choose `task parent` versus `task needs` from established task semantics, or keep uncertain knowledge as a draft. Ask the user only when the remaining choice is materially ambiguous and would change formal state. Do not mark a runtime goal blocked merely because `task create`, `advanced publish`, `task done`, `check`, or `context close` rejected invalid state.
-
-For an unknown command or argument, inspect the bundled CLI's relevant `--help`; there is no old-command translation layer. Distinguish syntax errors from invalid node state. Read-only queries do not need write permission, but source capture, publication, and `check` do; a copying fallback does not bypass filesystem permissions.
-
-For a real handoff, `context close` only prepares `.hypha/.drafts/context-close.json`. Review and save this turn's missing task, knowledge, and recovery information before `context close --finalize`. Finalization records a handoff and leaves each selected task in its existing status; it is not a signal to finish active work or the current turn. Finalize failures preserve the preparation and keep context open. Do not default either review to `not_needed`, and do not create false records to satisfy checks. A retry may safely finish an interrupted close when the handoff record was written before its linked close marker.
-
-An unmanaged-write notice with a successful check is historical audit information, not a validation failure. Inspect relevant content and continue the primary task. To acknowledge it, publish the same body with actually reviewed metadata; this appends a review event without erasing direct-write history. Do not alter whitespace, repeatedly check, rewrite audit logs, or delete drafts solely to clear a notice. CLI validation does not replace semantic review.
+An unmanaged-write notice after a successful check is historical audit information, not failure. Inspect the relevant content and continue. To acknowledge reviewed content, publish its unchanged body with actually reviewed metadata; this records review without erasing history. Do not tweak whitespace, repeat checks, rewrite audit logs, or delete drafts just to clear notices. Structural validation cannot establish semantic completeness.

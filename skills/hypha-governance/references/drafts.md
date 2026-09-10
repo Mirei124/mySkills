@@ -1,17 +1,17 @@
 # Draft Formats
 
-Use the CLI prefix from SKILL.md. Drafts live in the target `.hypha/.drafts/` and support nested paths. YAML supports scalars, inline lists, and lists of mappings—not block scalars or arbitrary nesting.
+Use SKILL.md's CLI prefix. Drafts live under the project's `.hypha/.drafts/`, including nested paths. YAML supports scalars, inline lists, and mapping lists—not block scalars or arbitrary nesting.
 
 ## Update Existing Nodes
 
-For ordinary observed conclusions use `record` instead of task-body editing; see [Conclusion records](records.md). Direct edits use `task edit ID --section NAME --body-file FILE` (whole section replacement). Choose a draft only for coordinated review or unresolved content:
+Prefer `record` for observed conclusions and `task edit ID --section NAME --body-file FILE` for direct section replacement. Use drafts for coordinated review/unresolved content:
 ```sh
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --draft
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --section Evidence --draft
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" knowledge edit know/offline-deployment --draft
 ```
 
-Edit the returned draft, then run `advanced publish <draft-path>`. Full drafts preserve fields and body; section drafts replace only their named level-two section. Use full drafts for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields; if the source changed, regenerate and reconcile rather than removing the revision guard. Knowledge edits retain their path when titles change.
+Edit, then `advanced publish <draft-path-or-ID>`. Full drafts preserve fields/body; section drafts replace only the named level-two section. Keep generated target/base_revision/section; reconcile changed sources, never remove guards. Knowledge edits retain paths even when titles change.
 
 Keep one authoritative Acceptance checklist:
 ```markdown
@@ -30,9 +30,9 @@ Keep one authoritative Acceptance checklist:
 - Record the actual date: the user replaced JSON with XML because the customer's export format changed. JSON is cancelled; CSV evidence remains applicable; recovery remains required.
 ```
 
-`show` derives remaining items. Counts are not progress or evidence; plain legacy acceptance text remains supported. Acceptance and Evidence must be non-empty before completion, and the agent verifies meaning. Next Step and Risks should add recovery value, not filler.
+`show` derives remaining items; counts are neither progress nor evidence. Plain acceptance text remains supported. Completion requires non-empty Acceptance/Evidence and actual verification. Add Next Step/Risks only for recovery value.
 
-Legacy handwritten `kind: task-update` drafts with `id` remain supported: omitted metadata is preserved, but the entire body is replaced. Prefer generated guarded drafts. Applying unchanged reviewed content acknowledges direct-write history for supplied fields without erasing history. Use `advanced drafts --all` for state and target details, and `advanced discard ID` to retire a stale candidate without deletion. Publish accepts an exact draft path or its unique ID; do not guess a filename.
+Legacy `kind: task-update` plus `id` preserves omitted metadata but replaces the entire body; prefer generated guards. Publishing unchanged reviewed content acknowledges supplied fields without erasing direct-write history. See [Draft recovery](records.md#draft-recovery-is-exceptional) for IDs, states, and discard.
 
 ## Minimal User Knowledge
 
@@ -47,9 +47,9 @@ review_when: Orion changes its data-transfer policy
 # Orion deployment constraint
 ```
 
-Use the smallest sufficient actual quote; body prose adds only missing rationale, exclusions, or context. Explicit statements need no reconfirmation; ambiguous interpretations remain drafts.
+Quote only sufficient actual words; body adds missing rationale/exclusions/context. No reconfirmation for explicit statements; keep ambiguous interpretations as drafts.
 
-Supply origin, evidence, concrete `when`, and title. The CLI derives claim_kind; optional classifications never replace applicability. `affects: [0001]` links existing tasks only, triggers add useful aliases, and known review_when conditions should remain.
+Supply authority/evidence, concrete `when`, and title. Claim kind is derived; classification never replaces applicability. `affects: [0001]` links existing tasks, triggers supply aliases, and `review_when` preserves known invalidation.
 
 | Authority | Derived claim kind |
 | --- | --- |
@@ -59,13 +59,11 @@ Supply origin, evidence, concrete `when`, and title. The CLI derives claim_kind;
 | external_source | sourced |
 | agent_inference | inference |
 
-Legacy explicit claim_kind remains supported; it must not contradict the authority. Agreement requires a user authority and agreement_quote. Source-derived inference requires anchors and an inference statement explaining premises and conclusion; `record` instead supplies observations for agent-observed conclusions. Do not promote either form to user agreement.
+Explicit claim_kind must match authority. Agreement needs user authority/agreement_quote; source inference needs resolvable anchors and reasoning. `record` instead uses observations; neither inference form implies user agreement.
 
 ## Source Evidence
 
-Use `knowledge create --source <file>` to capture evidence while creating knowledge, or `advanced import <file>` to retain material without publishing knowledge. Do not duplicate facts already fully answered by current project files unless explicitly requested.
-
-Source capture saves the complete file, even when creating only a draft. Linux reflink is preferred with ordinary copying as fallback; `record --reference` does not copy anything. See [Source snapshot behavior](records.md#source-snapshot-behavior) for reuse rules and failed-publication recovery.
+`knowledge create --source FILE` captures sources with knowledge; `advanced import FILE` captures material only. Both save full files, unlike `record --reference`. See [Source snapshots](records.md#source-snapshot-behavior) for CoW/fallback, reuse, and failure recovery. Avoid duplicating file-recoverable facts unless requested.
 
 ```markdown
 ---
@@ -79,9 +77,9 @@ evidence:
 # Historical deployment evidence
 ```
 
-Use actual snapshot paths and exact quotes. Repeat CLI source/quote pairs for multiple sources. Anchors derive from evidence when omitted; source-derived inference requires resolvable premise anchors. Experimental observations instead use record, which does not claim source verification. Status defaults to active; supersession requires `status: superseded` and `superseded_by`. See [Conclusion records](records.md) for reviewed corrections and unverified source locators.
+Use real snapshot paths/exact quotes; repeat source/quote pairs for multiple sources. Evidence supplies omitted anchors. Status defaults to active; supersession needs `status: superseded` and `superseded_by`. See [Conclusion records](records.md) for corrections.
 
-New knowledge uses its title to choose a path. Use `knowledge edit` for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
+Search before creating: validation cannot detect semantic duplicates. New titles select paths; `knowledge edit` preserves identity.
 
 ## Minimal Handoff
 
@@ -101,8 +99,8 @@ Read task 0001 for current scope, acceptance, evidence, and knowledge links.
 - Cite the actual cursor/artifact path and whether it was verified.
 ```
 
-Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are non-publishable recovery data. Current task decisions override legacy summaries; reconcile only stale temporary instructions.
+Omit id without a task. Handoff/note drafts cannot publish as knowledge. Copy no task state, transcripts, or secrets; current task decisions override old summaries.
 
 ## Context Close Preparation
 
-`context close` creates `.hypha/.drafts/context-close.json`. It is a small review record, not a copy of task bodies. Keep its generated `handoff_id`; select one `resume_task` when multiple active tasks are present; explain `no_task_reason` for a task-free handoff. Set each review to `saved` with existing task, knowledge, or handoff-draft references, or to `not_needed` with a reviewed reason. `pending` intentionally blocks finalization. A handoff draft may be referenced while unpublished and remains non-publishable recovery data.
+`context close` prepares `.hypha/.drafts/context-close.json`. Keep generated `handoff_id`; choose one `resume_task` among multiple active tasks; explain `no_task_reason` without tasks. Both reviews need `saved` plus existing task/knowledge/handoff-draft references, or `not_needed` plus a reviewed reason. Use exact existing task-file paths including `.md` in review references. `pending` blocks finalization. Unpublished handoff drafts are valid recovery references, not publishable knowledge.
