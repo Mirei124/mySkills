@@ -107,6 +107,8 @@ For an existing recorded conclusion, use `--update know/path --revision HASH` fr
 
 Record writes validate the combined graph and use a recovery journal to protect knowledge, task references, index, and audit together. On interruption, normal reads refuse partial results; a subsequent write or `check` restores pre-write state. The journal is temporary and ignored in newly initialized stores.
 
+Source snapshots prefer Linux reflink (copy-on-write) when supported and otherwise fall back to a full copy with metadata. Hard links are never used; modifying the original must not change saved evidence.
+
 ## Sources, drafts, and advanced operations
 
 Importing a document stores material only. Add `--suggest` to request existing knowledge candidates; interpretation and claim extraction remain agent work.
@@ -156,26 +158,6 @@ Drafts are exceptional, not required for routine capture. `advanced drafts --all
 All commands accept `--json`, and common options can appear before or after the selected command. Successful JSON has `ok`, `command`, and `result`; errors use `ok: false` with a stable error code and message. `list --json` places its structured counts and node collection inside `result`. Normal explanatory text is never mixed into JSON.
 
 `--global` is limited to knowledge, sources, drafts, and applicable queries. Tasks and context lifecycle operations always use workspace-local storage.
-
-## Command migration
-
-Old entries are no longer execution aliases. They exit with a replacement command:
-
-| Old entry | Replacement |
-|---|---|
-| `add` | `task create` |
-| `start`, `block`, `done`, `drop`, `progress` | `task <command>` |
-| `parent`, `needs` | `task <command>` |
-| `edit` | `task edit` or `knowledge edit` |
-| `boot` | `context resume` |
-| `close` | `context close` |
-| `ready` | `list --type task --ready` |
-| `ingest` | `advanced import` |
-| `apply` | `advanced publish` |
-| `drafts` | `advanced drafts` |
-| `lint` | `check` |
-| `route` | `advanced explain` |
-| `bootstrap`, `migrate`, `dismiss`, `defer` | `advanced <command>` |
 
 ## Development
 

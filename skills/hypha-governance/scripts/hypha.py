@@ -627,12 +627,12 @@ def apply_bootstrap_plan(home: Path, plan: dict) -> list[str]:
     with tempfile.TemporaryDirectory() as temp_dir:
         validation_home = Path(temp_dir)
         for source_path, captured in source_copies:
-            destination = validation_home / captured; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source_path, destination)
+            destination = validation_home / captured; destination.parent.mkdir(parents=True, exist_ok=True); copy_source(source_path, destination)
         errors = validate(validation_home, proposed, proposed_knowledge)
     if errors: raise ValueError("\n".join(errors))
     (home / "intent").mkdir(parents=True, exist_ok=True)
     for source_path, captured in source_copies:
-        destination = home / captured; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source_path, destination)
+        destination = home / captured; destination.parent.mkdir(parents=True, exist_ok=True); copy_source(source_path, destination)
     for task_id, node in proposed.items(): write_node(node["_path"], node, atomic=True)
     for node in proposed_knowledge.values(): write_node(node["_path"], node, atomic=True)
     sync(home, by="bootstrap")
@@ -1712,34 +1712,6 @@ def close(args):
     else: prepare_handoff(home, args)
 
 
-def ingest(args):
-    home, source = root(args), Path(args.file).resolve()
-    if not source.is_file(): raise ValueError(f"Source does not exist: {source}")
-    with locked(home):
-        tasks, knowledge = prepare(home)
-        destination = home / "src" / source.name
-        if destination.exists() and destination.read_bytes() != source.read_bytes():
-            destination = home / "src" / f"{source.stem}-{hashlib.sha256(source.read_bytes()).hexdigest()[:8]}{source.suffix}"
-        if not destination.exists(): shutil.copy2(source, destination)
-        sync(home, by="cli")
-    candidates = route(tasks, knowledge, source.stem)[:8]
-    print(f"Captured source: {destination.relative_to(home)}")
-    print("Existing knowledge candidates: " + ", ".join(path for _, path, _ in candidates) if candidates else "Existing knowledge candidates: none")
-    agent_follow_up(
-        "Turn the captured source into evidence-backed project knowledge.",
-        [
-            "Read the copied source and extract only durable claims relevant across sessions; preserve exact quotes and heading/file anchors.",
-            "Search existing knowledge with search using 3-8 literal keywords from the source, then inspect the listed candidates and backlinks.",
-            "For each durable claim, classify it as support, refinement, contradiction, or genuinely new knowledge relative to existing nodes.",
-            "Update or supersede existing knowledge instead of duplicating it. Create a sourced draft only when a distinct claim remains, with when, triggers, anchors, evidence, and affected tasks.",
-            "Do not infer task completion from the source. Ask for confirmation when scope, consensus, or a high-impact relationship is ambiguous.",
-            "Validate and publish confirmed drafts with hypha advanced publish, then run hypha check --audit.",
-        ],
-        [f"captured source: {destination.relative_to(home)}",
-         f"route candidates: {', '.join(path for _, path, _ in candidates) or 'none'}"],
-    )
-
-
 def search(args):
     """Search knowledge or explicit source files using comma-separated literals."""
     if args.limit < 1: raise ValueError("search --limit must be greater than 0")
@@ -2053,6 +2025,23 @@ def node_edit(args):
 ORIGIN_AUTHORITIES = {"user": "user_explicit", "user-confirmed": "user_confirmed", "repository": "repository", "external": "external_source", "inference": "agent_inference"}
 
 
+def copy_source(source: Path, destination: Path) -> None:
+    """Clone a source snapshot on Linux when supported, otherwise copy data and metadata."""
+    if destination.exists() and source.samefile(destination):
+        raise shutil.SameFileError(f"Source and destination are the same file: {source}")
+    if sys.platform.startswith("linux") and fcntl is not None:
+        # FICLONE creates independent files with shared extents, never hard links.
+        with source.open("rb") as src, destination.open("wb") as dst:
+            try:
+                fcntl.ioctl(dst.fileno(), 0x40049409, src.fileno())
+            except OSError:
+                pass
+            else:
+                shutil.copystat(source, destination)
+                return
+    shutil.copy2(source, destination)
+
+
 def source_destination(home: Path, source: Path) -> Path:
     destination = home / "src" / source.name
     if destination.exists() and destination.read_bytes() != source.read_bytes():
@@ -2177,7 +2166,7 @@ def knowledge_create(args):
     for source, quote in pairs:
         destination = source_destination(home, source)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if not destination.exists(): shutil.copy2(source, destination)
+        if not destination.exists(): copy_source(source, destination)
         evidence.append({"anchor": str(destination.relative_to(home)), "quote": quote})
     draft = home / ".drafts" / f"knowledge-{uuid.uuid4().hex[:12]}.md"
     node = {"kind": "know", "authority": authority, "when": args.when, "affects": args.affects,
@@ -2205,7 +2194,7 @@ def advanced_import(args):
     with locked(home):
         tasks, knowledge = prepare(home)
         destination = source_destination(home, source)
-        if not destination.exists(): shutil.copy2(source, destination)
+        if not destination.exists(): copy_source(source, destination)
         sync(home, by="cli")
     print(f"Captured source: {destination.relative_to(home)}")
     print("No knowledge was created.")
@@ -2213,12 +2202,6 @@ def advanced_import(args):
         candidates = route(tasks, knowledge, source.stem)[:8]
         print("Existing knowledge candidates: " + (", ".join(path for _, path, _ in candidates) or "none"))
     print(f"Next: hypha knowledge create \"Title\" --origin repository --source {args.file} --quote \"Exact quote\" --when \"Applicable condition\"")
-
-
-def legacy_command(name: str, replacement: str) -> None:
-    print(f"Error: 'hypha {name}' was replaced by 'hypha {replacement}'.", file=sys.stderr)
-    print(f"Try: hypha {replacement} --help", file=sys.stderr)
-    raise SystemExit(2)
 
 
 def add_common_options(parser: argparse.ArgumentParser, suppressed: bool = False) -> None:
@@ -2344,14 +2327,6 @@ def dispatch(args):
 
 
 def main():
-    legacy = {"add":"task create","ingest":"advanced import","apply":"advanced publish","boot":"context resume","lint":"check","route":"advanced explain","ready":"list --type task --ready","edit":"task edit or hypha knowledge edit","start":"task start","block":"task block","done":"task done","drop":"task drop","progress":"task progress","parent":"task parent","needs":"task needs","drafts":"advanced drafts","bootstrap":"advanced bootstrap","migrate":"advanced migrate","dismiss":"advanced dismiss","defer":"advanced defer","close":"context close"}
-    option_values={"--workspace"}
-    tokens=sys.argv[1:]; index=0
-    while index<len(tokens):
-        if tokens[index] in option_values: index+=2; continue
-        if tokens[index].startswith("-"): index+=1; continue
-        if tokens[index] in legacy: legacy_command(tokens[index],legacy[tokens[index]])
-        break
     parser=build_parser(); args=parser.parse_args()
     args.workspace_explicit="--workspace" in sys.argv[1:]
     if args.workspace is None: args.workspace="."
