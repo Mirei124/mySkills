@@ -19,6 +19,8 @@ python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" --help
 
 An explicit initialization request authorizes `init`, not invented tasks. Inspect this skill before declaring the CLI unavailable; it needs neither a connector nor network access.
 
+Use the current command groups shown by `--help`; unknown commands are rejected without compatibility aliases or replacement hints. Inspect `<command> --help` when syntax is uncertain rather than guessing an older entry point.
+
 ## Recall Before Asking
 
 When a missing preference, fact, rationale, or decision may be saved:
@@ -44,7 +46,7 @@ For an agent-observed conclusion, use the ordinary one-write path:
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" record "Defer overlap until transfer becomes material" --task 0001 --evidence "Profiler reports 2% transfer; no overlap implementation was tested" --decision defer --review-when "A fresh profile identifies transfer as a bottleneck"
 ```
 
-Only a conclusion and actual observation are required with an explicit related task; for standalone knowledge supply concrete `--when`. The tool stores agent observations as inference, not user agreement or automatically verified facts. It links knowledge and adds a short task Evidence reference without completing acceptance. `--reference` can identify logs, source files, runs, or URLs; locators are not automatically checked. No experiment node type or mandatory experiment form exists. Read [Conclusion records](references/records.md) only for updates, corrections, or multi-source evidence.
+Only a conclusion and actual observation are required with an explicit related task; for standalone knowledge supply concrete `--when`. The tool stores agent observations as inference, not user agreement or automatically verified facts. It links knowledge and adds a short task Evidence reference without completing acceptance. `--reference` can identify logs, source files, runs, or URLs; locators are neither copied nor automatically checked. No experiment node type or mandatory experiment form exists. Read [Conclusion records](references/records.md) for updates, corrections, multi-source evidence, or source snapshot behavior.
 
 State verification limits in ordinary prose: design assessed, primitive probe passed, integration failed, or performance not tested. Optional `--decision keep|reject|defer|investigate` describes disposition, not how far testing progressed. A failed integration does not prove its primitive unusable; a successful changed version does not prove a unique root cause. Before retrying, read the previous stopping reason and identify changed evidence or conditions.
 

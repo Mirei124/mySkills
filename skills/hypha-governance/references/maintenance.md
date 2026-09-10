@@ -1,6 +1,6 @@
 # Maintenance
 
-Read only for migration, semantic follow-ups, or rejected publication.
+Read only for bootstrap/import, migration, semantic follow-ups, or rejected publication. Source capture and copy behavior are described in [Conclusion records](records.md#source-snapshot-behavior).
 
 ## Migrate Existing Task Records
 
@@ -11,7 +11,7 @@ Treat old percentages as historical reported values. Set current numeric progres
 
 ## Execute Semantic CLI Hand-offs
 
-`advanced bootstrap`, `advanced import --suggest`, `check --audit`, and `advanced migrate` may print `AGENT FOLLOW-UP`. This means the command completed a mechanical first stage and the calling agent should continue its Instructions in the same turn whenever safely possible. It is not, by itself, a reason to yield, ask the user a question, or mark work blocked. Continue until:
+`advanced bootstrap`, `check --audit`, and `advanced migrate` may print `AGENT FOLLOW-UP`. This means the command completed a mechanical first stage and the calling agent should continue its Instructions in the same turn whenever safely possible. `advanced import --suggest` only captures a source and lists existing knowledge candidates; it does not create knowledge or emit that protocol. Continue the authorized semantic work until:
 
 - evidence from nodes, sources, code, or user confirmation supports a validated change;
 - a candidate is confirmed unrelated and recorded with `advanced dismiss`; or
@@ -24,6 +24,8 @@ Exhaust safe, authorized work before asking for confirmation. Ask only when a mi
 ## Handle CLI Rejections Without Stalling
 
 A nonzero CLI exit is a validation result, not proof that the user's work is blocked. Read the error, inspect current nodes, and perform every safe deterministic correction available. For example, update leaves before completing a parent, choose `task parent` versus `task needs` from established task semantics, or keep uncertain knowledge as a draft. Ask the user only when the remaining choice is materially ambiguous and would change formal state. Do not mark a runtime goal blocked merely because `task create`, `advanced publish`, `task done`, `check`, or `context close` rejected invalid state.
+
+For an unknown command or argument, inspect the bundled CLI's relevant `--help`; there is no old-command translation layer. Distinguish syntax errors from invalid node state. Read-only queries do not need write permission, but source capture, publication, and `check` do; a copying fallback does not bypass filesystem permissions.
 
 For a real handoff, `context close` only prepares `.hypha/.drafts/context-close.json`. Review and save this turn's missing task, knowledge, and recovery information before `context close --finalize`. Finalization records a handoff and leaves each selected task in its existing status; it is not a signal to finish active work or the current turn. Finalize failures preserve the preparation and keep context open. Do not default either review to `not_needed`, and do not create false records to satisfy checks. A retry may safely finish an interrupted close when the handoff record was written before its linked close marker.
 

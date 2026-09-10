@@ -5,7 +5,7 @@ Use this protocol when the user authorizes moving existing task records into Hyp
 1. Inspect source tasks, outstanding todos, dependencies, blockers, deviations, and handoff records. Keep the originals as history. Identify the source's statuses and what they mean before mapping them.
 2. Prepare a coverage table before publishing. Each unfinished source item needs one explicit disposition and supporting evidence. Preserve acceptance boundaries, not just titles or percentages.
 3. Reuse existing Hypha tasks. Create a child only for independently acceptable or schedulable work. Merge smaller unfinished items into named remaining acceptance items on a live destination task.
-4. Publish reviewed drafts, then compare destination bodies and relationships with the coverage table. Check every unfinished source ID and todo; `check` proves structure only.
+4. Save reviewed changes through direct commands, or publish guarded drafts for coordinated changes, then compare destination bodies and relationships with the coverage table. Check every unfinished source ID and todo; `check` proves structure only.
 5. Retain the coverage table as migration evidence with source paths and destination links. State unresolved mappings explicitly; leave uncertain items pending rather than silently archiving or cancelling them. Finish all unambiguous migration work before asking about a material scope decision.
 
 ## Coverage Example
@@ -21,4 +21,4 @@ A history row saying only "OLD-7 was 95% complete" is insufficient. Cancellation
 
 Do not transfer old percentages directly into current `progress`. Record them as dated source reports in migration evidence; use status and explicit remaining acceptance until current acceptance items support a percentage. Current parent progress remains derived from live leaves.
 
-Use `sourced` knowledge and an ingested snapshot for facts taken from the old records, `agreement` for explicit user migration decisions, and `inference` only for new conclusions with premises and invalidation conditions. Preserve concise operating rules in AGENTS.md and rationale/history in Hypha.
+Use `sourced` knowledge and a source snapshot for facts taken from the old records, `agreement` for explicit user migration decisions, and `inference` for new conclusions with supporting premises or observations and applicable review conditions. Capture a local source with `advanced import FILE` or directly with `knowledge create --source FILE --quote TEXT`; `record --reference` alone does not preserve the source. See [Source snapshot behavior](records.md#source-snapshot-behavior). Preserve concise operating rules in AGENTS.md and rationale/history in Hypha.

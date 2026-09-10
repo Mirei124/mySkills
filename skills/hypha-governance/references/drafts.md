@@ -59,11 +59,13 @@ Supply origin, evidence, concrete `when`, and title. The CLI derives claim_kind;
 | external_source | sourced |
 | agent_inference | inference |
 
-Legacy explicit claim_kind remains supported; it must not contradict the authority. Agreement requires a user authority and agreement_quote. Inference requires anchors and an inference statement explaining premises and conclusion; do not promote it to user agreement.
+Legacy explicit claim_kind remains supported; it must not contradict the authority. Agreement requires a user authority and agreement_quote. Source-derived inference requires anchors and an inference statement explaining premises and conclusion; `record` instead supplies observations for agent-observed conclusions. Do not promote either form to user agreement.
 
 ## Source Evidence
 
 Use `knowledge create --source <file>` to capture evidence while creating knowledge, or `advanced import <file>` to retain material without publishing knowledge. Do not duplicate facts already fully answered by current project files unless explicitly requested.
+
+Source capture saves the complete file, even when creating only a draft. Linux reflink is preferred with ordinary copying as fallback; `record --reference` does not copy anything. See [Source snapshot behavior](records.md#source-snapshot-behavior) for reuse rules and failed-publication recovery.
 
 ```markdown
 ---

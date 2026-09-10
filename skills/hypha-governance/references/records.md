@@ -28,6 +28,18 @@ Every excerpt is checked before sources are copied. Each source has its own evid
 
 For a navigation list only, record that limited purpose explicitly, e.g. `record "API references to inspect" --when "Investigating target compatibility" --evidence "These are candidate links; their claims have not been verified" --reference https://example.org/api`. This stores useful provenance without pretending it is a source-backed factual conclusion. Do not use it as a workaround for publishing an unsupported fact.
 
+## Source Snapshot Behavior
+
+- `knowledge create --origin repository/external --source FILE --quote TEXT` captures each complete source file under `.hypha/src/`, not just its quoted excerpt. All source/quote checks precede copying, including with `--draft`. If later publication fails, the draft and captured sources remain available for recovery.
+- `advanced import FILE` captures material under `.hypha/src/` without creating knowledge. `--suggest` only adds existing knowledge candidates; it does not publish them.
+- `advanced bootstrap --apply PLAN` copies sources selected by reviewed knowledge entries into a temporary validation directory, then into `.hypha/src/bootstrap/<relative-path>` after validation. A dry run does not copy sources.
+
+Import and knowledge creation reuse an existing same-name, same-content snapshot. A same-name content change selects a filename with a content-hash suffix. Different filenames are not deduplicated solely by content. Bootstrap uses its separate relative-path layout.
+
+Copies prefer Linux reflink (copy-on-write) when available and fall back to `shutil.copy2`, preserving metadata. No hard links are used: later changes to the original must not change saved evidence. Reflink support depends on the platform and filesystem; do not assume it succeeded or promise space savings. No extra flag or manual cloning step is required.
+
+`record --reference` stores only a locator; it does not preserve a file or fetch a URL. `--body-file` reads text into a node, not into a source snapshot. Queries, ordinary draft publication, and user/inference knowledge creation do not capture external files. Import a needed local artifact explicitly when durable access to its contents matters, and avoid capturing large or sensitive files merely to retain a pointer.
+
 ## Draft Recovery Is Exceptional
 
 Direct record/create/body-file operations do not require manual draft management. `advanced drafts --all` shows pending, stale, published, and discarded states. Publish accepts the displayed draft ID (with or without `.md`) or exact path. Use `advanced discard ID` to retire a stale candidate without deleting its file; changing a discarded draft's content makes it pending again. Published and discarded content is hidden from normal recovery lists. Revision guards still prevent stale publication.
