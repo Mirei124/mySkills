@@ -4,7 +4,7 @@ Use the CLI prefix from SKILL.md. Drafts live in the target `.hypha/.drafts/` an
 
 ## Update Existing Nodes
 
-Choose one:
+For ordinary observed conclusions use `record` instead of task-body editing; see [Conclusion records](records.md). Direct edits use `task edit ID --section NAME --body-file FILE` (whole section replacement). Choose a draft only for coordinated review or unresolved content:
 ```sh
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --draft
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --section Evidence --draft
@@ -32,7 +32,7 @@ Keep one authoritative Acceptance checklist:
 
 `show` derives remaining items. Counts are not progress or evidence; plain legacy acceptance text remains supported. Acceptance and Evidence must be non-empty before completion, and the agent verifies meaning. Next Step and Risks should add recovery value, not filler.
 
-Legacy handwritten `kind: task-update` drafts with `id` remain supported: omitted metadata is preserved, but the entire body is replaced. Prefer generated guarded drafts. Applying unchanged reviewed content acknowledges direct-write history for supplied fields without erasing history.
+Legacy handwritten `kind: task-update` drafts with `id` remain supported: omitted metadata is preserved, but the entire body is replaced. Prefer generated guarded drafts. Applying unchanged reviewed content acknowledges direct-write history for supplied fields without erasing history. Use `advanced drafts --all` for state and target details, and `advanced discard ID` to retire a stale candidate without deletion. Publish accepts an exact draft path or its unique ID; do not guess a filename.
 
 ## Minimal User Knowledge
 
@@ -77,7 +77,7 @@ evidence:
 # Historical deployment evidence
 ```
 
-Use actual snapshot paths and exact quotes. Anchors derive from evidence when omitted; inference still needs explicit premise anchors. Status defaults to active; supersession requires `status: superseded` and `superseded_by`.
+Use actual snapshot paths and exact quotes. Repeat CLI source/quote pairs for multiple sources. Anchors derive from evidence when omitted; source-derived inference requires resolvable premise anchors. Experimental observations instead use record, which does not claim source verification. Status defaults to active; supersession requires `status: superseded` and `superseded_by`. See [Conclusion records](records.md) for reviewed corrections and unverified source locators.
 
 New knowledge uses its title to choose a path. Use `knowledge edit` for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
 

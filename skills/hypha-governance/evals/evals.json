@@ -192,13 +192,50 @@
     {
       "id": "minimal-capture-and-handoff",
       "prompt": "Remember that customer Vega prohibits data leaving its private network until its data-transfer policy changes. Track CSV and XML ingestion plus recovery as one long-term goal. CSV checks passed (user-confirmed); XML and recovery remain. Save for another session without inventing percentages. Then replace XML with TSV because Vega changed its export format, preserving CSV evidence and the same goal.",
-      "expected_output": "Minimal scoped knowledge with provenance; one persistent task with current acceptance and history, no duplicated handoff state, unknown progress. Use guarded drafts for updates.",
+      "expected_output": "Minimal scoped knowledge with provenance; one persistent task with current acceptance and history, no duplicated handoff state, unknown progress. Use direct guarded updates where sufficient; drafts are optional for coordinated changes.",
       "assertions": [
         "Preserves Vega-only scope, source authority, and review condition.",
         "Retains one task ID and attributed CSV evidence.",
         "Cancels XML explicitly while TSV and recovery remain open.",
         "Does not invent a percentage.",
         "Uses one authoritative current acceptance record; handoff adds only missing recovery details."
+      ],
+      "files": []
+    },
+    {
+      "id": "capture-action-changing-conclusions",
+      "prompt": "Continue the long-running ingestion goal. Profiling reports transfer at 2%; no overlap implementation was tested, so defer overlap until transfer becomes a bottleneck. The isolated reduction probe passes, but integration with reused scratch fails full FP32 tests. Keep scalar fallback and investigate separate buffers; the cause is not established. The unchanged build passed again. Make appropriate continuity updates and identify the next action; do not implement anything.",
+      "expected_output": "Save two scoped knowledge conclusions with user attribution and verification limits, link the existing task, and preserve its open acceptance. Retain the next investigation without claiming a proven fix. Do not save the routine repeated build or create tasks for each validation step.",
+      "assertions": [
+        "Captures meaningful stopping reasons without an explicit save-to-Hypha request.",
+        "Distinguishes unimplemented overlap, passing primitive probe, failing integration, and untested separate buffers.",
+        "Preserves user-reported authority and invents no artifacts or root cause.",
+        "Stores rationale in knowledge and only brief references and next action in the task.",
+        "Does not require a draft or mandatory experiment-stage form."
+      ],
+      "files": []
+    },
+    {
+      "id": "recall-experimental-boundaries",
+      "prompt": "Resume the ingestion goal in this fresh context. Which approaches were tested and how far? What should continue, what should not be retried unchanged, and what evidence is missing? Do not implement or change stored records.",
+      "expected_output": "Recover the saved decisions read-only, distinguish deferred work from failed implementations, and propose the untested buffer investigation while preserving fallback and open acceptance. Ask only about gaps absent from project files and saved records.",
+      "assertions": [
+        "Does not infer that the reduction primitive is unusable from integration failure.",
+        "Does not call the proposed buffer change a validated fix.",
+        "Does not ask the user to repeat recorded stopping reasons.",
+        "Does not write a lock, index, audit marker, or new node during recall."
+      ],
+      "setup": "Run after capture-action-changing-conclusions in a fresh context receiving only the persisted project and this prompt; withhold the capture prompt and reports.",
+      "files": []
+    },
+    {
+      "id": "record-observed-correction",
+      "prompt": "The existing record rejects the reduction approach based on an earlier failed integration. We have now independently run the separate-buffer version: full FP32 tests pass, but performance and the unique root cause remain unverified. Record the corrected conclusion for its existing task, retaining historical evidence and leaving final acceptance open.",
+      "expected_output": "Read the old record and revision, use an explicit reasoned supersession with observed evidence, and retain both nodes plus correction references in the task. Do not delete historical observations or infer performance or completion.",
+      "assertions": [
+        "Uses revision-protected correction rather than silently rewriting history.",
+        "Keeps verification limits and task acceptance intact.",
+        "Makes the replacement discoverable when recovering the old task."
       ],
       "files": []
     }

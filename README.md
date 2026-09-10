@@ -89,7 +89,23 @@ Knowledge origins map to the existing authority fields:
 | `external` | `external_source` | `--source` and exact `--quote` |
 | `inference` | `agent_inference` | repeated `--premise` and `--reason` |
 
-All knowledge also requires `--when`. Use `--review-when`, repeated `--affects`, `--body-file`, `--draft`, or `--editor` as needed. Classification and retrieval terms are derived when omitted. An active knowledge title cannot be overwritten. Failed publication retains the draft and leaves no formal node or newly copied source.
+Knowledge create also requires `--when`. Use `--review-when`, repeated `--affects`, `--body-file`, `--draft`, or `--editor` as needed. Repeat local `--source` and corresponding `--quote` in matching order for multiple evidence sources. Invalid quotes are rejected before creating drafts or copying sources. If later publication fails, its draft and captured sources remain recoverable; no formal node is published. An active knowledge title cannot be overwritten without a guarded edit.
+
+## Record an observed conclusion
+
+Record decisions that change the next action, not every build or test invocation:
+
+```bash
+hypha record "Defer overlap until transfer dominates" --task 0001 \
+  --evidence "Profiler shows 2% transfer; overlap implementation was not tested" \
+  --decision defer --review-when "A fresh profiler identifies transfer as a bottleneck"
+```
+
+One write creates ordinary knowledge and adds a brief task Evidence link. Observations are agent-reported, not automatic proof or user authorization. No experimental node type, handwritten YAML, or duplicate task summary is needed. Without a task, supply concrete `--when`. Optional `--reference` stores a file, run, or URL locator without fetching or verifying it. Detailed artifacts stay in project files.
+
+For an existing recorded conclusion, use `--update know/path --revision HASH` from `show` to add observations. For an explicitly reviewed correction, use a new conclusion with `--supersedes know/old --revision HASH --because "Reason"`; old evidence remains and linked tasks receive correction references. No semantic deletion or supersession is inferred by the tool. See [Conclusion records](skills/hypha-governance/references/records.md).
+
+Record writes validate the combined graph and use a recovery journal to protect knowledge, task references, index, and audit together. On interruption, normal reads refuse partial results; a subsequent write or `check` restores pre-write state. The journal is temporary and ignored in newly initialized stores.
 
 ## Sources, drafts, and advanced operations
 
@@ -133,7 +149,9 @@ hypha check --audit
 hypha view --mode all
 ```
 
-`list`, `show`, and `search` are shared query commands. `show` also accepts a draft under `.hypha/.drafts/`. `check` performs structural validation; `--audit` adds semantic review candidates. The graph is read-only.
+`list`, `show`, `search`, `context resume`, `advanced explain`, and `advanced drafts` are read-only: no lock creation, index rewrites, or audit/lifecycle writes. `show` also accepts a draft under `.hypha/.drafts/`. `check` synchronizes audit/index data and performs structural validation; `--audit` adds semantic review candidates. View generation writes a read-only HTML graph.
+
+Drafts are exceptional, not required for routine capture. `advanced drafts --all` shows their IDs, targets, and pending/stale/published/discarded status. `advanced publish` accepts the exact path or unique ID, with or without `.md`. `advanced discard ID` keeps the file but removes unchanged discarded content from normal recovery lists; editing it makes it pending again.
 
 All commands accept `--json`, and common options can appear before or after the selected command. Successful JSON has `ok`, `command`, and `result`; errors use `ok: false` with a stable error code and message. `list --json` places its structured counts and node collection inside `result`. Normal explanatory text is never mixed into JSON.
 
@@ -162,7 +180,7 @@ Old entries are no longer execution aliases. They exit with a replacement comman
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v
+./.venv/bin/python -m unittest discover -s tests -v
 cd frontend
 pnpm install
 pnpm typecheck

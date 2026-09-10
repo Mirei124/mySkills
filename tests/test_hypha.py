@@ -890,7 +890,7 @@ class HyphaCliTest(unittest.TestCase):
         self.assertIn("quote is not present", failed.stderr)
         self.assertEqual([], list((self.workspace / ".hypha/know").glob("*.md")))
         self.assertEqual([], list((self.workspace / ".hypha/src").glob("*.md")))
-        self.assertTrue(list((self.workspace / ".hypha/.drafts").glob("knowledge-*.md")))
+        self.assertEqual([], list((self.workspace / ".hypha/.drafts").glob("knowledge-*.md")))
         self.cli("knowledge", "create", "Offline policy", "--origin", "repository", "--source", str(source),
                  "--quote", "The product must work without network access.", "--when", "Deploying")
         duplicate = self.cli("knowledge", "create", "Offline policy", "--origin", "user",

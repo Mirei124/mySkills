@@ -1,6 +1,7 @@
 .DS_Store
 .hypha
 __pycache__/
+/.venv/
 design_docs/mycelial-canvas.md
 design_reference
 frontend/dist
