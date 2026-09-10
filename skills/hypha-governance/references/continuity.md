@@ -2,13 +2,9 @@
 
 ## Missing Context During Work
 
-A new adapter needs a hosting choice. The code shows a local process, but does not explain whether hosted services are acceptable. Before asking the user, search Hypha for `hosting,offline,cloud,customer` and inspect the current task's knowledge links. Read the relevant body, not just a matching title.
+A new adapter needs a hosting choice. Code shows a local process but not whether hosting is acceptable. Before asking, search `hosting,offline,cloud,customer`, inspect current task links, and read the relevant body—not only its title.
 
-If a user-explicit node says the customer network is isolated and hosted processing was rejected for that reason, with review required only if network access changes, use that answer while the condition holds. Cite the saved rationale briefly if it explains the implementation. No repeat confirmation is needed because this is a new session.
-
-If the node applies only to the previous customer, or the user now says this deployment has internet access, do not generalize the restriction. Use the current correction where it settles the issue; ask only whether hosted processing is acceptable if that choice is still unresolved. Network availability alone does not authorize sending customer data anywhere.
-
-If no record answers the question after a bounded search, ask about the missing choice. Do not search session archives or invent a historical answer. Continue independent implementation work while awaiting necessary input.
+Use a user-explicit isolated-network restriction while its stated condition holds; no repeat confirmation is needed in a new session. Do not generalize a customer-scoped decision, and do not infer data-transfer permission from internet access. Apply current corrections; ask only if hosting remains unresolved. If bounded search finds no answer, ask about that choice without searching archives or inventing history, while continuing independent work.
 
 ## What To Capture
 
@@ -20,13 +16,13 @@ If no record answers the question after a bounded search, ask about the missing 
 | The agent suspects all future customers will require isolation | Keep it as an explicitly uncertain inference or draft; do not publish a universal user agreement. |
 | A one-off test used a temporary port | Keep it in execution context unless later recovery actually depends on it. |
 
-Knowledge bodies should make the recoverable answer and its conditions clear. Record the actual user quote rather than quoting these examples. Capture rationale and non-goals absent from project files; link existing facts instead of copying them. Never store credentials or complete transcripts.
+Knowledge should state the recoverable answer and conditions, using actual user quotes. Capture rationale and non-goals absent from files; link existing facts instead of copying them. Never store credentials or complete transcripts.
 
 ## Multiple Plans, One Goal
 
-Task 0001 aims to deliver a working import pipeline with CSV and JSON support. Plan A implements and verifies CSV. Plan B implements JSON and failure recovery. Completing Plan A records a CSV milestone on 0001; 0001 stays open because JSON and recovery are not accepted yet. Starting Plan B, even in the same conversation, does not create a new root or reset the goal.
+Task 0001 delivers an import pipeline with CSV and JSON. Plan A verifies CSV; Plan B adds JSON and recovery. Record CSV as a milestone, but keep 0001 open until the remaining acceptance is verified; a new plan does not create a new root or reset the goal.
 
-If the user replaces JSON with XML for a customer's integration, keep 0001 when the intended pipeline outcome continues. Record the old CSV+JSON boundary, new CSV+XML boundary, the user's reason, the explicit cancellation of JSON acceptance, and retained CSV evidence. XML and recovery remain unfinished acceptance. A new plan implements those items without disguising old work as newly verified progress.
+If a customer replaces JSON with XML, keep 0001 when the outcome continues. Record old and new boundaries, the user's reason, cancelled JSON acceptance, and retained CSV evidence. XML and recovery stay open; do not present old work as newly verified.
 
 An independently schedulable analytics report can be a linked child or another authorized task; an isolated parser helper in the current plan is normally an acceptance detail. If moving work changes a dependency, preserve the actual prerequisite. Do not drop a blocked item just because its old plan was replaced.
 

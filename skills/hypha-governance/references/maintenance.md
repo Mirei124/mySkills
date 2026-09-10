@@ -4,7 +4,7 @@ Read only for migration, semantic follow-ups, or rejected publication.
 
 ## Migrate Existing Task Records
 
-When moving from another task system, read [Migration review](migration.md) before publishing. Preserve the original records and account for every unfinished task, blocker, dependency, and outstanding todo. Completed history can be summarized. Unfinished work needs an explicit destination: a live Hypha task, a specific remaining acceptance item, or an evidence-backed cancellation/supersession. An entry in a historical table alone is not a destination. Reuse task boundaries when appropriate; do not copy every historical step into a new node.
+When moving from another task system, read [Migration review](migration.md). Preserve originals and account for every unfinished task, blocker, dependency, and todo. Completed history may be summarized; unfinished work needs a live task, named remaining acceptance, or evidence-backed cancellation/supersession. A historical table alone is not a destination.
 
 Treat old percentages as historical reported values. Set current numeric progress only when current acceptance items justify it. Verify migration coverage separately from `check`: structural validation cannot prove that the source's unfinished scope survived.
 
@@ -17,7 +17,7 @@ Treat old percentages as historical reported values. Set current numeric progres
 - a candidate is confirmed unrelated and recorded with `advanced dismiss`; or
 - evidence is insufficient, so it is retained with `advanced defer` and uncertainty is reported.
 
-The CLI supplies candidates, paths, status, and constraints. The agent owns summarization, support/refinement/contradiction classification, relationship selection, acceptance review, deviation detection, and deciding when user confirmation is required. Never treat prompt candidates as facts or merely print the prompt and claim completion.
+The CLI supplies candidates, paths, status, and constraints; the agent owns classification, relationship selection, acceptance review, deviation detection, and user-confirmation decisions. Never treat candidates as facts or merely print the prompt and claim completion.
 
 Exhaust safe, authorized work before asking for confirmation. Ask only when a missing decision would materially change formal task/knowledge state or requires new authority. If confirmation concerns optional knowledge capture rather than the user's primary request, leave a draft or defer the candidate, report it briefly, and still finish the primary work. A deferred audit candidate remains visible but does not emit another follow-up, so do not rerun `check --audit` merely to revisit it.
 
@@ -27,4 +27,4 @@ A nonzero CLI exit is a validation result, not proof that the user's work is blo
 
 For a real handoff, `context close` only prepares `.hypha/.drafts/context-close.json`. Review and save this turn's missing task, knowledge, and recovery information before `context close --finalize`. Finalization records a handoff and leaves each selected task in its existing status; it is not a signal to finish active work or the current turn. Finalize failures preserve the preparation and keep context open. Do not default either review to `not_needed`, and do not create false records to satisfy checks. A retry may safely finish an interrupted close when the handoff record was written before its linked close marker.
 
-An unmanaged-write notice with a successful check is historical audit information, not a validation failure. Inspect relevant content when needed and continue the primary task. To acknowledge reviewed content, publish a draft containing the same body and the metadata fields actually reviewed. Even with unchanged content, publication appends a review event for those fields while preserving the original direct-write history; omitted metadata is not acknowledged. Do not add/remove whitespace, repeatedly check, rewrite audit logs, or delete drafts solely to clear a notice. CLI validation does not replace semantic review.
+An unmanaged-write notice with a successful check is historical audit information, not a validation failure. Inspect relevant content and continue the primary task. To acknowledge it, publish the same body with actually reviewed metadata; this appends a review event without erasing direct-write history. Do not alter whitespace, repeatedly check, rewrite audit logs, or delete drafts solely to clear a notice. CLI validation does not replace semantic review.

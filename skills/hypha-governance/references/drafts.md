@@ -1,6 +1,6 @@
 # Draft Formats
 
-Use the CLI prefix from SKILL.md. Drafts live under the target workspace's `.hypha/.drafts/`; nested paths are supported. The small YAML subset supports scalars, inline lists, and lists of mappings, not block scalars or arbitrary nesting.
+Use the CLI prefix from SKILL.md. Drafts live in the target `.hypha/.drafts/` and support nested paths. YAML supports scalars, inline lists, and lists of mappings—not block scalars or arbitrary nesting.
 
 ## Update Existing Nodes
 
@@ -11,7 +11,7 @@ python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" task edit 0001 --section Evi
 python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" knowledge edit know/offline-deployment --draft
 ```
 
-Edit the returned draft file, then run `advanced publish <draft-path>`. Full drafts preserve all fields and the body automatically. Section drafts replace only the named level-two section. Use a full draft for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields unchanged. If the source changed, regenerate and reconcile; do not remove the revision guard. Knowledge edits retain their path even when the title changes.
+Edit the returned draft, then run `advanced publish <draft-path>`. Full drafts preserve fields and body; section drafts replace only their named level-two section. Use full drafts for coordinated scope/evidence/history changes. Keep generated target, base_revision, and section fields; if the source changed, regenerate and reconcile rather than removing the revision guard. Knowledge edits retain their path when titles change.
 
 Keep one authoritative Acceptance checklist:
 ```markdown
@@ -30,7 +30,7 @@ Keep one authoritative Acceptance checklist:
 - Record the actual date: the user replaced JSON with XML because the customer's export format changed. JSON is cancelled; CSV evidence remains applicable; recovery remains required.
 ```
 
-`show` derives remaining unchecked items. Counts are not work percentages or evidence. Plain legacy acceptance text remains supported. Acceptance and Evidence must be non-empty before completion; the agent verifies meaning. Optional Next Step and Risks sections should add useful information, not filler.
+`show` derives remaining items. Counts are not progress or evidence; plain legacy acceptance text remains supported. Acceptance and Evidence must be non-empty before completion, and the agent verifies meaning. Next Step and Risks should add recovery value, not filler.
 
 Legacy handwritten `kind: task-update` drafts with `id` remain supported: omitted metadata is preserved, but the entire body is replaced. Prefer generated guarded drafts. Applying unchanged reviewed content acknowledges direct-write history for supplied fields without erasing history.
 
@@ -47,9 +47,9 @@ review_when: Orion changes its data-transfer policy
 # Orion deployment constraint
 ```
 
-Use the actual smallest sufficient quote. The quote already supplies the answer; body prose adds only missing rationale, exclusions, or context. Explicit statements need no second confirmation; ambiguous interpretations remain drafts until confirmed.
+Use the smallest sufficient actual quote; body prose adds only missing rationale, exclusions, or context. Explicit statements need no reconfirmation; ambiguous interpretations remain drafts.
 
-Supply origin and evidence, concrete applicability (`when`), and a title. The CLI derives claim_kind from authority when omitted. Optional knowledge_kind and coarse scope classifications do not replace concrete applicability. Optional `affects: [0001]` links existing tasks; do not invent a task. Optional triggers add useful aliases to automatically derived literal keywords. Preserve meaningful review_when conditions when known.
+Supply origin, evidence, concrete `when`, and title. The CLI derives claim_kind; optional classifications never replace applicability. `affects: [0001]` links existing tasks only, triggers add useful aliases, and known review_when conditions should remain.
 
 | Authority | Derived claim kind |
 | --- | --- |
@@ -77,13 +77,13 @@ evidence:
 # Historical deployment evidence
 ```
 
-Use actual snapshot paths and exact quotes. Anchors are derived from evidence when omitted; inference still needs explicit premise anchors. Status defaults to active. Superseded knowledge requires status: superseded and superseded_by; preserve conflicting history rather than silently overwriting it.
+Use actual snapshot paths and exact quotes. Anchors derive from evidence when omitted; inference still needs explicit premise anchors. Status defaults to active; supersession requires `status: superseded` and `superseded_by`.
 
 New knowledge uses its title to choose a path. Use `knowledge edit` for existing knowledge to retain identity. Search before creating: structural validation cannot determine semantic duplication.
 
 ## Minimal Handoff
 
-When the task covers recovery, no extra summary is needed. Otherwise save only missing temporary information:
+When the task covers recovery, add no summary; otherwise save only missing temporary detail:
 
 ```markdown
 ---
@@ -99,7 +99,7 @@ Read task 0001 for current scope, acceptance, evidence, and knowledge links.
 - Cite the actual cursor/artifact path and whether it was verified.
 ```
 
-Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are recovery data and cannot be published as knowledge. Pending drafts appear in `advanced drafts` and `context resume`; published drafts are hidden automatically. Current task decisions override legacy handoff summaries. Keep history in the task and reconcile only temporary instructions that became stale.
+Omit id if no task exists. Do not copy task state, transcripts, or secrets. Handoff/note drafts are non-publishable recovery data. Current task decisions override legacy summaries; reconcile only stale temporary instructions.
 
 ## Context Close Preparation
 
