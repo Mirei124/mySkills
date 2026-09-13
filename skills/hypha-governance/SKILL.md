@@ -31,6 +31,14 @@ At a new-session task boundary, run `context resume "task and keywords"` once, t
 
 ## Record Meaningful Changes
 
+For a small update to a known conclusion, use the short path:
+
+```sh
+python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" record append know/browser-validation --evidence "Reported browser flow passed; load behavior remains untested" --user-quote "The browser flow passed." --current-state "Browser passed; load testing remains"
+```
+
+Use `--user-quote` only for actual user words; `--evidence` and `--current-state` remain agent observations/inference. Append retains the title, scope, references, and task links without a preliminary revision lookup. Explicit prior current states become history. Update a task only if its remaining work or acceptance changed. This command already validates the write: routine capture needs no extra draft, duplicate knowledge, repeated task Evidence link, or audit. Omit optional fields when they add nothing.
+
 Use three checkpoints, not a per-turn checklist:
 
 - **Next action changed:** save evidence-backed retain/revert/defer/retry conclusions whose loss could repeat a question or mistake, even within one long-term task.
@@ -49,7 +57,7 @@ New records need a conclusion, evidence, and an explicit task or standalone `--w
 
 Keep verification limits in prose: design assessed, primitive probe passed, integration failed, performance untested. Optional `--decision keep|reject|defer|investigate` is disposition, not validation depth. Integration failure does not invalidate a primitive; a changed version passing does not prove a unique root cause. Read stopping reasons and identify changed evidence/conditions before retrying.
 
-Search before capture; update or explicitly supersede instead of duplicating, preserving historical observations. For updates, corrections, and source snapshots, read [Conclusion records](references/records.md).
+When the relevant record is unknown, search before capture. Append to known records or explicitly supersede changed conclusions instead of duplicating. For corrections, version guards, and source snapshots, read [Conclusion records](references/records.md).
 
 User statements use `knowledge create "Title" --origin user --quote "Exact statement" --when "Applicability"`, without reconfirmation; `user-confirmed` requires actual confirmation. Sourced claims require exact local-snapshot quotes: never change origin to bypass validation. Save no secrets, transcripts, routine repeated tests, or file-recoverable facts. Optional capture must not block primary work. Put always-on rules in the nearest AGENTS.md, missing rationale/history in Hypha.
 
@@ -57,7 +65,7 @@ User statements use `knowledge create "Title" --origin user --quote "Exact state
 
 Use stable tasks for unfinished commitments beyond one plan/session; runtime goals require explicit user requests. Default to one task. Split independently schedulable, recoverable, or acceptable/terminable branches, not compile/probe/regression steps. Link real parents/prerequisites; do not use `--root` merely to pass validation. Normal child/lifecycle changes within an authorized goal are allowed; ask before unrelated roots or ambiguous scope.
 
-Keep one Acceptance checklist and supporting Evidence; Next Step/Risks and numeric progress are optional, and progress is not a checklist ratio. `task edit ID --section Evidence --body-file FILE` replaces, not appends. Prefer direct commands; use guarded drafts for coordinated review/conflicts. Read [Draft formats](references/drafts.md) before publishing drafts.
+Keep one Acceptance checklist and supporting Evidence; Next Step/Risks and numeric progress are optional, and progress is not a checklist ratio. Task creation merges repeated `--acceptance` into `--body-file` when both are supplied. `Next action` and `Next steps` are recognized during recovery; prefer `Next Step`. `task edit ID --section Evidence --body-file FILE` replaces, not appends. Prefer direct commands; use guarded drafts for coordinated review/conflicts. Read [Draft formats](references/drafts.md) before publishing drafts.
 
 Use `task start`, `task block`, `task done`, `task drop`, `task parent`, and `task needs` for lifecycle/relations. Before `task done`, verify every acceptance item and cite evidence; a commit or passing code alone is insufficient. On scope changes, update Acceptance, related knowledge, and dated Change History: change, reason/authority, and destination of unfinished work. Reopen completed tasks with new acceptance. See [Continuity examples](references/continuity.md) for ambiguous capture or evolution.
 
@@ -77,3 +85,5 @@ Validation checks records/references/versions, not chat completeness. Finalizati
 `show`, `list`, `search`, `context resume`, `advanced explain`, and `advanced drafts` are read-only: no locks, index/audit/lifecycle writes. `list --type task --ready` selects ready work. Published/discarded drafts are hidden; inspect them with `advanced drafts --all`.
 
 Read [Maintenance](references/maintenance.md) for bootstrap/import/migration, audits, or rejected writes. Safe in-scope corrections precede questions; nonzero exits alone do not imply blocked work. Hypha is local-first, single-agent, and does not commit. Follow repository Git rules; global storage supports knowledge only, not tasks or session lifecycle.
+
+`check` separates structural validation from task completeness warnings; `check --strict` fails for missing required sections. Audit is optional maintenance: use `check --audit --task ID`, `--subtree ID`, or `--changed [REF]` for the relevant scope. It defaults to stronger matches and 20 candidates; broaden only when useful, with `--all-candidates --limit N`.

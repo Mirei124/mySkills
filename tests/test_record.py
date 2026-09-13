@@ -136,3 +136,21 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(original, task.read_text())
         self.assertFalse(journal.exists())
         self.assertEqual(hashlib.sha256(original.encode()).hexdigest(), self.revision("0001"))
+
+    def test_append_failure_rolls_back_current_state_quotes_and_observations(self):
+        self.cli("record", "Browser validation", "--task", "0001", "--evidence", "Not tested", "--current-state", "Pending")
+        module = runpy.run_path(str(SCRIPT))
+        function = module["record_conclusion"]
+        args = module["build_parser"]().parse_args(["--workspace", str(self.workspace), "record", "append", "know/browser-validation", "--evidence", "Reported pass", "--current-state", "Passed", "--user-quote", "It passed."])
+        args.workspace_explicit = True
+        before = {k: data for k, (data, _) in self.snapshot().items()}
+        original = module["write_node"]
+        calls = 0
+        def fail_second(*a, **kw):
+            nonlocal calls
+            calls += 1
+            if calls == 2: raise OSError("Injected append failure")
+            return original(*a, **kw)
+        with mock.patch.dict(function.__globals__, {"write_node": fail_second}), self.assertRaisesRegex(OSError, "Injected append"):
+            function(args)
+        self.assertEqual(before, {k: data for k, (data, _) in self.snapshot().items()})

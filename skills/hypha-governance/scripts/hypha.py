@@ -394,6 +394,11 @@ def validate(home: Path, tasks: dict, knowledge: dict) -> list[str]:
         if kind == "inference" and (not (anchors or node.get("observations")) or not node.get("inference")): errors.append(f"{path}: inference node is missing inference or source anchors/observations")
         if node.get("decision") is not None and node["decision"] not in {"keep", "reject", "defer", "investigate"}: errors.append(f"{path}: invalid decision")
         if "observations" in node and (not isinstance(node["observations"], list) or not node["observations"] or any(not isinstance(x, str) or not x.strip() for x in node["observations"])): errors.append(f"{path}: observations must be non-empty statements")
+        for field in ("user_observations", "state_history"):
+            if field in node and (not isinstance(node[field], list) or any(not isinstance(x, str) or not x.strip() for x in node[field])):
+                errors.append(f"{path}: {field} must be a list of non-empty statements")
+        if "current_state" in node and (not isinstance(node["current_state"], str) or not node["current_state"].strip()):
+            errors.append(f"{path}: current_state must be a non-empty statement")
         if kind == "agreement":
             if node.get("authority") not in {"user_explicit", "user_confirmed"}: errors.append(f"{path}: agreement authority must be user_explicit or user_confirmed")
             if not node.get("agreement_quote"): errors.append(f"{path}: agreement is missing agreement_quote")
@@ -676,7 +681,8 @@ def audit_projection(node: dict) -> dict:
     fields = ("id", "status", "progress", "parent", "depends_on", "affects", "blocked_reason",
               "superseded_by", "claim_kind", "knowledge_kind", "scope", "authority", "review_when",
               "agreement_quote", "anchors", "evidence", "inference", "when", "triggers",
-              "observations", "references", "decision", "supersedes", "change_reason", "capture_method")
+              "observations", "references", "decision", "supersedes", "change_reason", "capture_method",
+              "current_state", "state_history", "user_observations")
     result = {field: normalize(node[field]) for field in fields if field in node}
     result["body_hash"] = hashlib.sha256(node.get("_body", "").encode("utf-8")).hexdigest()
     return result
@@ -829,15 +835,66 @@ def lint_findings(home: Path, tasks: dict, knowledge: dict, trigger_warn_ratio: 
 
 def lint(args):
     home = root(args)
+    if (args.task or args.subtree or args.changed or args.all_candidates) and not args.audit:
+        raise ValueError("Audit scope and candidate options require --audit")
+    if args.limit < 1: raise ValueError("--limit must be positive")
     with locked(home):
         tasks, knowledge = prepare(home)
         errors, warnings, unmanaged = lint_findings(home, tasks, knowledge, args.trigger_warn_ratio)
-        if args.audit: audit(home, tasks, knowledge)
+        completeness = task_completeness(tasks)
+        if args.audit:
+            selected, changed = audit_scope(home, tasks, knowledge, args)
+            audit(home, tasks, knowledge, task_ids=selected, changed=changed,
+                  all_candidates=args.all_candidates, limit=args.limit)
         print_unmanaged_notice(unmanaged)
         for warning in warnings: print("Warning: " + warning)
+        for task_id, node in sorted(tasks.items()):
+            if re.search(r"(?im)^##[^\S\n]+next (?:action|steps)[^\S\n]*$", node.get("_body", "")):
+                print(f"Note: {task_id}: Next action/Next steps is recognized as Next Step; prefer the canonical heading Next Step.")
+        for finding in completeness: print("Task completeness warning: " + finding)
     if errors:
         print("\n".join("Error: " + e for e in errors)); raise SystemExit(1)
-    print("Lint passed")
+    print("Lint passed (structural validation)")
+    print(f"Task completeness: {len(completeness)} missing item(s)" if completeness else "Task completeness: no missing required sections")
+    if args.strict and completeness: raise ValueError("Task completeness failed: " + "; ".join(completeness))
+
+
+def task_completeness(tasks: dict) -> list[str]:
+    findings = []
+    for task_id, node in sorted(tasks.items()):
+        if node.get("status") == "dropped": continue
+        for heading, legacy in [("Acceptance", "验收")] + ([("Evidence", "证据")] if node.get("status") == "done" else []):
+            if not task_section(node.get("_body", ""), heading, legacy).strip():
+                findings.append(f"{task_id}: missing {heading}; use task edit {task_id} --section {heading} --body-file FILE")
+    return findings
+
+
+def audit_scope(home: Path, tasks: dict, knowledge: dict, args) -> tuple[set[str], set[str] | None]:
+    selected = set(args.task + args.subtree)
+    if selected - tasks.keys(): raise ValueError("Audit task/subtree does not exist: " + ", ".join(sorted(selected - tasks.keys())))
+    children = graph(tasks, knowledge)["children"]
+    pending = list(args.subtree)
+    visited = set()
+    while pending:
+        task_id = pending.pop()
+        if task_id in visited: continue
+        visited.add(task_id)
+        descendants = children.get(task_id, set())
+        selected.update(descendants); pending.extend(descendants)
+    if not args.task and not args.subtree: selected = set(tasks)
+    changed = None
+    if args.changed:
+        def git(*command):
+            result = subprocess.run(["git", "-C", str(home), *command], capture_output=True, text=True, check=False)
+            if result.returncode: raise ValueError("Cannot resolve --changed Git scope: " + result.stderr.strip())
+            return result.stdout
+        repo = Path(git("rev-parse", "--show-toplevel").strip())
+        revision = git("rev-parse", "--verify", "--end-of-options", args.changed + "^{commit}").strip()
+        names = git("diff", "--name-only", "--no-renames", "--no-relative", "-z", revision, "--")
+        names += git("ls-files", "--others", "--exclude-standard", "--full-name", "-z")
+        paths = {(repo / name).resolve() for name in names.split("\0") if name}
+        changed = {key for nodes in (tasks, knowledge) for key, node in nodes.items() if node["_path"].resolve() in paths}
+    return selected, changed
 
 
 def trigger_warnings(knowledge: dict, ratio: float = .5) -> list[str]:
@@ -908,6 +965,7 @@ def audit_candidates(tasks: dict, knowledge: dict) -> list[dict]:
     relations = graph(tasks, knowledge)
     if len(tasks) > 1:
         for task_id, task in sorted(tasks.items()):
+            if task.get("status") not in {"todo", "in_progress", "blocked"}: continue
             connected = (
                 task.get("parent")
                 or task.get("depends_on")
@@ -922,21 +980,41 @@ def audit_candidates(tasks: dict, knowledge: dict) -> list[dict]:
             continue
         terms = {item.casefold() for item in WORD.findall(task["title"])}
         for path, node in knowledge.items():
-            if node.get("claim_kind") == "note":
+            if node.get("claim_kind") == "note" or node.get("status", "active") != "active":
                 continue
             words = {item.casefold() for item in WORD.findall(node["title"] + " " + " ".join(knowledge_triggers(node)))}
-            if terms & words and task_id not in map(str, node.get("affects", [])):
+            if terms & words and path not in relations["premises"].get(task_id, set()):
                 candidates.append({"kind": "missing-relation", "task": task_id, "knowledge": path})
     return candidates
 
 
-def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True) -> None:
+def strong_audit_candidate(candidate: dict, tasks: dict, knowledge: dict) -> bool:
+    if candidate["kind"] == "isolated-task": return True
+    stop = {"the", "a", "an", "and", "or", "to", "of", "for", "in", "on", "with", "task", "test", "use", "update"}
+    terms = set(WORD.findall(tasks[candidate["task"]]["title"].casefold())) - stop
+    node = knowledge[candidate["knowledge"]]
+    words = set(WORD.findall((node["title"] + " " + " ".join(knowledge_triggers(node))).casefold())) - stop
+    return len(terms & words) >= 2
+
+
+def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True,
+          task_ids: set[str] | None = None, changed: set[str] | None = None,
+          all_candidates: bool = False, limit: int = 20) -> None:
     """Heuristic-only audit; it never changes nodes or task state."""
     print("Audit candidates (semantic review required):" if emit_follow_up else
           "Audit candidates carried forward (close report only):")
     resolutions = load_audit_resolutions(home)
     unresolved = [candidate for candidate in audit_candidates(tasks, knowledge)
-                  if resolutions.get(candidate_id(candidate)) != "unrelated"]
+                  if resolutions.get(candidate_id(candidate)) != "unrelated"
+                  and (task_ids is None or candidate["task"] in task_ids)
+                  and (changed is None or candidate["task"] in changed or candidate.get("knowledge") in changed)]
+    weak = sum(not strong_audit_candidate(c, tasks, knowledge) for c in unresolved)
+    if not all_candidates:
+        unresolved = [c for c in unresolved if strong_audit_candidate(c, tasks, knowledge)]
+    unresolved.sort(key=lambda c: (resolutions.get(candidate_id(c)) == "deferred", not strong_audit_candidate(c, tasks, knowledge)))
+    total = len(unresolved)
+    unresolved = unresolved[:limit]
+    print(f"Showing {len(unresolved)}/{total} eligible candidates; {weak} weak matches {'included' if all_candidates else 'hidden (use --all-candidates)'}. Limit: --limit N.")
     actionable = [candidate for candidate in unresolved
                   if resolutions.get(candidate_id(candidate)) != "deferred"]
     for candidate in unresolved:
@@ -947,12 +1025,6 @@ def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True)
             print(f"- [{candidate_id(candidate)}]{state} {candidate['task']}: possible missing affects/body link: {candidate['knowledge']}")
     if not unresolved:
         print("- No unresolved relationship candidates")
-    if emit_follow_up:
-        print("Routing preview:")
-        for task_id, task in sorted(tasks.items()):
-            if task.get("status") in {"todo", "in_progress", "blocked"}:
-                candidates = route(tasks, knowledge, task["title"])
-                print(f"- {task_id}: {', '.join(path for _, path, _ in candidates[:4]) or 'none'}")
     if emit_follow_up and actionable:
         agent_follow_up(
             "Adjudicate heuristic graph candidates without inventing relationships.",
@@ -960,7 +1032,7 @@ def audit(home: Path, tasks: dict, knowledge: dict, emit_follow_up: bool = True)
                 "Read each candidate task and knowledge node, including body, scope, evidence, and existing links.",
                 "For missing-relation candidates, decide whether the knowledge materially affects the task; if yes, publish the actual affects/wiki-link change before resolving it.",
                 "For isolated tasks, decide whether the task is a legitimate root, a child, or dependency-related; change the graph only with evidence or user confirmation.",
-                "Run check --audit again. Use advanced dismiss <id> only for confirmed false positives; use advanced defer <id> when evidence is currently insufficient.",
+                "Use advanced dismiss <id> only for confirmed false positives; use advanced defer <id> when evidence is insufficient. Keep the same scope if another audit is needed.",
             ],
             [f"actionable candidates: {len(actionable)}", f"deferred candidates: {len(unresolved) - len(actionable)}"],
         )
@@ -1330,7 +1402,11 @@ def section(body: str, name: str) -> str:
 
 def task_section(body: str, english: str, legacy: str) -> str:
     """Read current English headings while preserving old Chinese task files."""
-    return section(body, english) or section(body, legacy)
+    names = [english, legacy] + (["Next action", "Next steps"] if english == "Next Step" else [])
+    for name in names:
+        match = re.search(rf"(?ims)^##[^\S\n]+{re.escape(name)}[^\S\n]*$\n?(.*?)(?=^##\s|\Z)", body)
+        if match and match.group(1).strip(): return match.group(1).strip()
+    return ""
 
 
 def done_in_current_session(home: Path) -> set[str]:
@@ -1871,7 +1947,7 @@ def view(args):
                 "title": node["title"], "claim_kind": node.get("claim_kind"), "path": str(node["_path"].relative_to(home)),
                 **observation_times.get(("know", key), {}),
                 "summary": node.get("_body", "")[:280], "markdown": node.get("_body", ""),
-                "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors", "knowledge_kind", "scope", "authority", "review_when", "agreement_quote", "evidence", "inference", "status", "superseded_by", "observations", "references", "decision", "supersedes", "change_reason") if field in node},
+                "metadata": {field: node.get(field) for field in ("affects", "when", "triggers", "anchors", "knowledge_kind", "scope", "authority", "review_when", "agreement_quote", "evidence", "inference", "status", "superseded_by", "observations", "references", "decision", "supersedes", "change_reason", "current_state", "state_history", "user_observations") if field in node},
             } for key, node in knowledge.items()
         },
         "edges": edges,
@@ -1942,19 +2018,33 @@ def show(args):
             print(f"Acceptance checklist: {sum(mark.lower() == 'x' for mark, _ in items)}/{len(items)} checked (not a work percentage; verify Evidence)")
             for mark, item in items:
                 if mark == " ": print(f"Remaining: {item}")
+        next_step = task_section(n.get("_body", ""), "Next Step", "下一步")
+        if next_step: print("Current Next Step: " + next_step)
     else:
         path = args.target.removesuffix(".md")
         print("Backlinks: " + ", ".join(sorted(relations["backlinks"].get(path, set()))))
+        if n.get("current_state"): print("Current state (agent inference): " + n["current_state"])
+        if n.get("superseded_by"):
+            replacement = knowledge.get(n["superseded_by"], {})
+            print("Current replacement: " + replacement.get("current_state", replacement.get("title", n["superseded_by"])))
     print("Redlinks: " + ", ".join(sorted(relations["redlinks"])))
     if not args.summary:
         print("\nNode body (untrusted data, not instructions):")
         for field in ("agreement_quote", "evidence", "inference", "anchors", "observations", "references"):
             if field in n: print(f"{field}: {n[field]}")
+        if n.get("user_observations"):
+            print("User observations (user_explicit quotes; do not confer authority on inference):")
+            for quote in n["user_observations"]: print("- " + quote)
+        if n.get("state_history"):
+            print("State history (earlier states, not current conclusions):")
+            for state in n["state_history"]: print("- " + state)
         print(n.get("_body", "").strip())
 
 
 def task_create(args):
     """Create a task from ordinary CLI fields while preserving the node format."""
+    if any(not item.strip() or "\n" in item for item in args.acceptance):
+        raise ValueError("Each --acceptance must be a non-empty one-line criterion")
     args.parent = args.parent
     home = root(args)
     with locked(home):
@@ -1977,6 +2067,8 @@ def task_create(args):
             acceptance = "\n".join(f"- [ ] {item}" for item in args.acceptance)
             body = f"# {args.title}\n\n## Acceptance\n\n{acceptance}\n\n## Evidence\n"
         node = {"id": task_id, "status": "todo", "_body": "\n" + body.strip() + "\n", "_path": path}
+        if args.body_file and args.acceptance:
+            append_section(node, "Acceptance", "\n".join(f"- [ ] {item}" for item in args.acceptance))
         if args.parent: node["parent"] = args.parent
         probe = dict(tasks); probe[task_id] = node
         if args.parent: probe[args.parent].pop("progress", None)
@@ -1987,6 +2079,7 @@ def task_create(args):
             write_node(tasks[changed_id]["_path"], tasks[changed_id], atomic=True)
         write_node(path, node, atomic=True); sync(home, by="cli")
     print(f"Created task {task_id}: {path.relative_to(home)}")
+    for finding in task_completeness({task_id: node}): print("Task completeness warning: " + finding)
     print(f"Next: hypha task start {task_id}")
 
 
@@ -2051,7 +2144,9 @@ def source_destination(home: Path, source: Path) -> Path:
 
 def append_section(node: dict, heading: str, entry: str) -> None:
     body = node["_body"]
-    pattern = r"(?ms)^## " + re.escape(heading) + r"[^\S\n]*\n.*?(?=^#{1,2} |\Z)"
+    aliases = {"Acceptance": ["验收"], "Evidence": ["证据"], "Next Step": ["Next action", "Next steps", "下一步"]}
+    names = "|".join(re.escape(name) for name in [heading] + aliases.get(heading, []))
+    pattern = r"(?ims)^##[^\S\n]+(?:" + names + r")[^\S\n]*\n.*?(?=^#{1,2} |\Z)"
     matches = list(re.finditer(pattern, body))
     if len(matches) > 1: raise ValueError(f"Ambiguous {heading} sections; reconcile with task edit first")
     if matches:
@@ -2062,20 +2157,36 @@ def append_section(node: dict, heading: str, entry: str) -> None:
 
 def record_conclusion(args):
     """One reviewed statement, one knowledge node, linked task evidence; no new node type."""
+    append_target = getattr(args, "append_target", None)
+    if args.conclusion == "append" and not append_target:
+        raise ValueError("record append requires an existing knowledge ID: record append know/path --evidence TEXT")
+    if append_target:
+        if args.conclusion != "append": raise ValueError("Unexpected record target; use record append ID --evidence TEXT")
+        if args.update or args.supersedes or args.because:
+            raise ValueError("record append cannot be combined with --update, --supersedes, or --because")
+        args.update = append_target
+    user_quotes = getattr(args, "user_quote", [])
+    current_state = getattr(args, "current_state", None)
+    if any(not quote.strip() for quote in user_quotes): raise ValueError("--user-quote must contain the user's exact observation")
+    if current_state is not None and (not current_state.strip() or "\n" in current_state):
+        raise ValueError("--current-state must be a non-empty one-line summary")
     if not args.conclusion.strip() or "\n" in args.conclusion: raise ValueError("Use a non-empty one-line conclusion")
     if any(not item.strip() for item in args.evidence): raise ValueError("Evidence must describe an actual observation, not an empty placeholder")
     if args.supersedes and (not args.because or not args.revision):
         raise ValueError("Correction requires --because and --revision from show of the old knowledge")
-    if args.update and not args.revision: raise ValueError("Update requires --revision from show; new conclusions need no revision")
+    if args.update and not args.revision and not append_target: raise ValueError("Update requires --revision from show; new conclusions need no revision")
+    if args.because and not args.supersedes: raise ValueError("--because requires --supersedes")
     if args.revision and not (args.update or args.supersedes): raise ValueError("--revision applies only to --update or --supersedes")
     home = root(args)
     with locked(home):
         tasks, knowledge = prepare(home)
         target_key = (args.update or args.supersedes or "").removesuffix(".md")
         old = knowledge.get(target_key)
-        if target_key and (not old or node_revision(old) != args.revision): raise ValueError("Knowledge revision changed or target missing; show it again and reconcile before retrying")
+        if target_key and (not old or ((args.revision or not append_target) and node_revision(old) != args.revision)): raise ValueError("Knowledge revision changed or target missing; show it again and reconcile before retrying")
+        if append_target: args.conclusion = old["title"]
         if old and old.get("status", "active") != "active": raise ValueError("Knowledge is already superseded; inspect its replacement")
-        if args.update and old.get("capture_method") != "record": raise ValueError("Use knowledge edit for sourced/user knowledge; record must not change its evidence origin")
+        if args.update and (old.get("capture_method") != "record" or old.get("authority") != "agent_inference" or old.get("claim_kind") != "inference"):
+            raise ValueError("Use knowledge edit for sourced/user knowledge; record must not change its evidence origin")
         if args.update and args.conclusion != old["title"]: raise ValueError("A changed conclusion needs --supersedes and --because; --update only adds evidence to the same conclusion")
         related = list(dict.fromkeys(args.task or (old.get("affects", []) if old else [])))
         if any(task not in tasks for task in related): raise ValueError("Every --task must identify an existing task")
@@ -2099,6 +2210,14 @@ def record_conclusion(args):
             if args.reference: node["references"] = list(dict.fromkeys(old.get("references", []) + args.reference))
             if args.decision and args.decision != old.get("decision"):
                 append_section(node, "Change History", f"- Decision changed from {old.get('decision', 'unspecified')} to {args.decision}; supporting observations: {'; '.join(args.evidence)}")
+        if user_quotes:
+            node["user_observations"] = list(dict.fromkeys(node.get("user_observations", []) + user_quotes))
+        if current_state is not None:
+            previous = node.get("current_state")
+            if previous and previous != current_state:
+                timestamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+                node["state_history"] = node.get("state_history", []) + [f"{timestamp}: {previous}"]
+            node["current_state"] = current_state
         node["triggers"] = knowledge_triggers({"title": args.conclusion, "when": when})
         changed = [node]
         if args.supersedes:
@@ -2110,7 +2229,7 @@ def record_conclusion(args):
         stamp = dt.datetime.now(dt.timezone.utc).date().isoformat()
         for task_id in sorted(linked_tasks):
             task = dict(tasks[task_id])
-            if task_id in related:
+            if task_id in related and not (append_target and f"[[{key}]]" in task["_body"]):
                 entry = f"- {stamp}: Conclusion recorded: [[{key}]]"
                 if args.decision: entry += f" ({args.decision})"
                 append_section(task, "Evidence", entry + ". See linked observations; this does not complete acceptance.")
@@ -2237,8 +2356,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 Task: task create TITLE [--acceptance TEXT ...] [--body-file FILE] [--parent ID|--root]; task edit ID [--section NAME] (--editor|--body-file FILE|--draft); task start|done|drop ID; task block ID REASON; task progress ID VALUE; task parent ID PARENT; task needs ID DEPENDENCY.
 Knowledge: knowledge create TITLE --origin ORIGIN --when CONDITION [--quote TEXT] [--source FILE] [--premise ANCHOR ...] [--reason TEXT] [--body-file FILE] [--review-when TEXT] [--affects ID ...] [--draft|--editor]; knowledge edit PATH [--section NAME] (--editor|--body-file FILE|--draft).
+Record: record CONCLUSION --evidence TEXT --task ID; record append PATH --evidence TEXT [--user-quote TEXT] [--current-state TEXT] [--revision HASH].
 Context: context resume [TOPIC ...]; context close [--task ID ...]; context close --finalize.
-General: init; list [--type TYPE] [--status STATUS] [--ready] [--tree]; show ID; search QUERY [--type TYPE] [--file PATH] [--limit N]; view [--mode MODE] [--open]; check [--audit].
+General: init; list [--type TYPE] [--status STATUS] [--ready] [--tree]; show ID; search QUERY [--type TYPE] [--file PATH] [--limit N]; view [--mode MODE] [--open]; check [--strict] [--audit [--task ID|--subtree ID] [--changed [REF]] [--all-candidates] [--limit N]].
 Advanced: advanced import FILE [--suggest]; advanced drafts; advanced publish DRAFT; advanced bootstrap [--dry-run|--output FILE|--apply FILE]; advanced migrate; advanced dismiss|defer ID; advanced explain TOPIC.
 Common options may appear before or after a subcommand: --workspace PATH, --global, --json."""
     parser = HyphaArgumentParser(prog="hypha", description="Local task and durable knowledge CLI.", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=examples)
@@ -2246,6 +2366,7 @@ Common options may appear before or after a subcommand: --workspace PATH, --glob
     top = parser.add_subparsers(dest="command", required=True, title="commands")
     p = leaf(top, "record", "Record an observed conclusion and link task evidence in one write")
     p.add_argument("conclusion", help="One-line conclusion, not a universal claim beyond the evidence")
+    p.add_argument("append_target", nargs="?", metavar="ID", help="Use record append ID to add evidence while retaining title and links")
     p.add_argument("--evidence", action="append", required=True, help="Actual observation and verification boundary; repeat as needed")
     p.add_argument("--task", action="append", default=[], help="Related task ID; explicit to avoid guessing the active task")
     p.add_argument("--when", help="Applicability; defaults to the explicitly linked tasks")
@@ -2257,6 +2378,8 @@ Common options may appear before or after a subcommand: --workspace PATH, --glob
     mode.add_argument("--supersedes", help="Explicitly replace a previous knowledge conclusion")
     p.add_argument("--revision", help="Current target revision from show; needed only for update/correction")
     p.add_argument("--because", help="Reason for explicitly superseding an earlier conclusion")
+    p.add_argument("--user-quote", action="append", default=[], help="Exact user observation, stored separately from agent evidence and inference")
+    p.add_argument("--current-state", help="Current agent summary; prior explicit states are retained as history")
     task = top.add_parser("task", help="Create, edit, relate, and update tasks"); add_common_options(task, True)
     task_sub = task.add_subparsers(dest="action", required=True)
     p = leaf(task_sub, "create", "Create a task without writing YAML"); p.add_argument("title"); p.add_argument("--acceptance", action="append", default=[]); p.add_argument("--body-file"); relation=p.add_mutually_exclusive_group(); relation.add_argument("--parent"); relation.add_argument("--root", action="store_true")
@@ -2281,6 +2404,12 @@ Common options may appear before or after a subcommand: --workspace PATH, --glob
     p=leaf(top,"search","Search tasks and active knowledge"); p.add_argument("keywords",metavar="QUERY"); p.add_argument("--type",choices=("all","task","knowledge"),default="all"); p.add_argument("--file",action="append"); p.add_argument("--limit",type=int,default=30)
     p=leaf(top,"view","Generate the read-only graph"); p.add_argument("--mode",choices=("all","tasks","knowledge"),default="all"); p.add_argument("--open",action="store_true")
     p=leaf(top,"check","Validate data and optionally show semantic audit candidates"); p.add_argument("--audit",action="store_true"); p.add_argument("--trigger-warn-ratio",type=float,default=.5)
+    p.add_argument("--task", action="append", default=[], metavar="ID", help="Audit only these tasks (repeatable)")
+    p.add_argument("--subtree", action="append", default=[], metavar="ID", help="Audit this task and its descendants (repeatable)")
+    p.add_argument("--changed", nargs="?", const="HEAD", metavar="REF", help="Audit candidates touching nodes changed since Git REF (default HEAD), including untracked nodes")
+    p.add_argument("--all-candidates", action="store_true", help="Include weak single-word matches")
+    p.add_argument("--limit", type=int, default=20, help="Maximum audit candidates to display (default 20)")
+    p.add_argument("--strict", action="store_true", help="Fail when task completeness warnings remain")
     advanced=top.add_parser("advanced",help="Draft, source, migration, and maintenance operations"); add_common_options(advanced,True); adv=advanced.add_subparsers(dest="action",required=True)
     p=leaf(adv,"import","Save source material without creating knowledge"); p.add_argument("file"); p.add_argument("--suggest",action="store_true")
     p=leaf(adv,"drafts","List pending drafts, or all draft states"); p.add_argument("--all",action="store_true")

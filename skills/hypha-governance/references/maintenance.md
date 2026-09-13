@@ -4,6 +4,10 @@ Read for bootstrap/import, migration, audits, or rejected writes. See [Source sn
 
 ## Semantic Follow-ups
 
+For local maintenance, scope audit to `check --audit --task ID` or `--subtree ID` (repeatable, combined by union). `--changed [REF]` restricts candidates to those touching a task or knowledge node changed since the Git commit (HEAD by default), including staged, unstaged, and untracked nodes. When combined, task scope and changed scope intersect. A Git repository and resolvable commit are required. Scope affects audit candidates, not whole-graph structural validation or completeness warnings.
+
+Default audit includes isolated active tasks and missing links with at least two shared non-generic terms; this is a heuristic, not measured confidence. Superseded knowledge is excluded. `--all-candidates` includes weaker matches; `--limit N` changes the default cap of 20. Only displayed candidates request follow-up, and existing dismiss/defer IDs remain stable across scopes. Do not broaden an audit merely to resolve unrelated work.
+
 `advanced bootstrap`, `check --audit`, and `advanced migrate` may emit `AGENT FOLLOW-UP`: a mechanical stage finished, not the semantic work. Continue safely within the authorized scope until evidence supports a validated change, `advanced dismiss` records an unrelated candidate, or `advanced defer` retains uncertainty.
 
 `advanced import --suggest` only captures a source and lists existing candidates; it neither creates knowledge nor emits that protocol. Candidates are not facts. The agent still owns classification, relationships, acceptance, deviations, and authority checks; printing a follow-up is not completion.

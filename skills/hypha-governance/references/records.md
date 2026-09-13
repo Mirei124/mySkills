@@ -6,9 +6,10 @@ Observations support agent inference, not automatic proof. A passing probe plus 
 
 ## Add Evidence Or Correct A Conclusion
 
-First `show know/path` for its revision.
-
-- **Same conclusion:** `record "Exact existing conclusion" --update know/path --revision HASH --evidence "New observation"`. Preserves body/observations; task links default to existing links, while explicit `--task` values replace that set. Disposition changes record history.
+- **Same conclusion:** `record append know/path --evidence "New observation"`. Reads the latest node under the write lock and retains title, body, applicability, references, and task links. No preliminary `show` or revision copying is needed. Supply `--revision HASH` when the append must be conditional on a previously reviewed version. Explicit `--task` values replace the linked set; omit them to preserve it. Existing task Evidence links are reused.
+- **Current state changed:** add `--current-state "Browser passed; load testing remains"`. `show` presents this agent summary before observations/history, including with `--summary`. Previous explicit current states move to labeled history; the CLI does not infer that old prose is obsolete. Keep the title as a stable subject; a changed substantive claim still needs explicit supersession.
+- **User observation plus inference:** add `--user-quote "Exact user words"` alongside `--evidence "What the observation supports and its limits"`. Quotes are stored in `user_observations` with user provenance; the record and current state remain `agent_inference`. This does not claim user confirmation of the analysis. Use separate user knowledge for a standalone user decision or constraint.
+- **Explicit guarded update:** `record "Exact existing conclusion" --update know/path --revision HASH --evidence "New observation"` remains available. Read `show` for the revision. Disposition changes record history.
 - **Changed conclusion:** `record "New scoped conclusion" --supersedes know/old --revision HASH --because "Correction reason" --evidence "New observation"`. Retains old knowledge/evidence and adds replacement links/correction references to old and new related tasks; no automatic semantic supersession.
 - **User/sourced knowledge:** edit in place with `knowledge edit`; `record --update` cannot downgrade origin. Superseding such knowledge through record still produces agent inference and requires adequate evidence/authority, not invented user confirmation.
 

@@ -61,7 +61,7 @@ hypha list --type task --ready
 
 ## Tasks and knowledge
 
-Task creation supports repeated `--acceptance`, `--body-file`, `--parent`, and `--root`. Completion requires non-empty Acceptance and Evidence sections, and progress belongs only to leaf tasks.
+Task creation supports repeated `--acceptance`, `--body-file`, `--parent`, and `--root`. When both body and acceptance are supplied, criteria are appended to the body's Acceptance section (including the legacy heading); ambiguous duplicate sections are rejected. Completion requires non-empty Acceptance and Evidence sections, and progress belongs only to leaf tasks. Recovery recognizes `Next action` and `Next steps` as aliases of `Next Step`.
 
 ```bash
 hypha task create "Regression coverage" --parent 0001 \
@@ -103,7 +103,18 @@ hypha record "Defer overlap until transfer dominates" --task 0001 \
 
 One write creates ordinary knowledge and adds a brief task Evidence link. Observations are agent-reported, not automatic proof or user authorization. No experimental node type, handwritten YAML, or duplicate task summary is needed. Without a task, supply concrete `--when`. Optional `--reference` stores a file, run, or URL locator without fetching or verifying it. Detailed artifacts stay in project files.
 
-For an existing recorded conclusion, use `--update know/path --revision HASH` from `show` to add observations. For an explicitly reviewed correction, use a new conclusion with `--supersedes know/old --revision HASH --because "Reason"`; old evidence remains and linked tasks receive correction references. No semantic deletion or supersession is inferred by the tool. See [Conclusion records](skills/hypha-governance/references/records.md).
+Append to an existing record without copying its title, metadata, or revision:
+
+```bash
+hypha record append know/browser-validation \
+  --evidence "Reported browser flow passed; load behavior remains untested" \
+  --user-quote "The browser flow passed." \
+  --current-state "Browser passed; load testing remains"
+```
+
+The command reads the latest node under the write lock, retains its title and links, and reuses existing task Evidence links. Optional `--revision HASH` rejects an append if the reviewed version has changed. `--user-quote` stores exact user observations separately; the conclusion, evidence interpretation, and current state remain agent inference. `show` displays the explicit current state first and labels prior states as history. The CLI does not automatically rewrite stale prose or infer a new conclusion.
+
+The explicit `--update know/path --revision HASH` form remains available. For an explicitly reviewed correction, use a new conclusion with `--supersedes know/old --revision HASH --because "Reason"`; old evidence remains and linked tasks receive correction references. No semantic deletion or supersession is inferred by the tool. See [Conclusion records](skills/hypha-governance/references/records.md).
 
 Record writes validate the combined graph and use a recovery journal to protect knowledge, task references, index, and audit together. On interruption, normal reads refuse partial results; a subsequent write or `check` restores pre-write state. The journal is temporary and ignored in newly initialized stores.
 
@@ -147,11 +158,15 @@ Without a topic, `context resume` shows the latest completed handoff first, incl
 hypha list --type task --status in_progress
 hypha show know/offline-deployment
 hypha search "offline,network" --type knowledge
-hypha check --audit
+hypha check --strict
+hypha check --audit --subtree 0001
+hypha check --audit --changed
 hypha view --mode all
 ```
 
-`list`, `show`, `search`, `context resume`, `advanced explain`, and `advanced drafts` are read-only: no lock creation, index rewrites, or audit/lifecycle writes. `show` also accepts a draft under `.hypha/.drafts/`. `check` synchronizes audit/index data and performs structural validation; `--audit` adds semantic review candidates. View generation writes a read-only HTML graph.
+`list`, `show`, `search`, `context resume`, `advanced explain`, and `advanced drafts` are read-only: no lock creation, index rewrites, or audit/lifecycle writes. `show` also accepts a draft under `.hypha/.drafts/`. `check` synchronizes audit/index data and reports structural validation separately from task completeness (Acceptance for non-dropped tasks, Evidence for completed tasks). `--strict` fails for completeness gaps.
+
+`check --audit` adds semantic review candidates. Repeated `--task ID` and `--subtree ID` select a union of tasks; `--changed [REF]` restricts candidates to endpoints changed since a Git commit (default HEAD), including untracked nodes. Combining task and changed scopes intersects them; validation still covers the whole graph. Audit defaults to 20 stronger candidates (isolated active tasks or links sharing at least two non-generic terms). This is a heuristic, not a confidence probability. Use `--all-candidates` for weak matches and `--limit N` to expand the display. View generation writes a read-only HTML graph.
 
 Drafts are exceptional, not required for routine capture. `advanced drafts --all` shows their IDs, targets, and pending/stale/published/discarded status. `advanced publish` accepts the exact path or unique ID, with or without `.md`. `advanced discard ID` keeps the file but removes unchanged discarded content from normal recovery lists; editing it makes it pending again.
 
