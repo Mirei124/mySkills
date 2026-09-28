@@ -15,7 +15,7 @@
     {
       "id": "noisy-recall-minimal-packet",
       "prompt": "Resume task 0002 for the PDF entry flow. Resume candidates include many Firefox UI passes, B047/B049 covered by the B046–B052 batch summary, a direct-PDF-only user constraint, and a deferred detailed-overview quality decision. The summary leaves load behavior untested. Recover what matters and continue planning, without modifying saved records.",
-      "expected_output": "Read task 0002, linked applicable decision bodies, and the batch summary as needed. Present a compact required/optional/excluded packet, preserving the load-test boundary. Do not treat all Firefox matches as required or invoke unsupported hydrate/facet flags.",
+      "expected_output": "Use context resume --task 0002 --hydrate, inspect applicable decisions, and read the batch summary as needed. Preserve the load-test boundary and follow required budget omissions. Do not treat all Firefox matches as required, invent facet flags, archive during read-only recovery, or restate the whole packet to the user unnecessarily.",
       "assertions": [
         "Reads required bodies instead of merely repeating the candidate index.",
         "Retains direct-PDF scope, deferred quality work, and the untested load boundary.",
@@ -51,7 +51,7 @@
     {
       "id": "shell-sensitive-durable-quote",
       "prompt": "Remember this exact scoped decision for the PDF-entry project: 网页入口只接受直链 PDF；保留字面量 `$(touch /tmp/hypha-quote-should-not-run)` 和引号 \"原样\"。\n详细概览优化暂缓，等用户提供缺失案例再重启。 Save it safely without executing any part of the quote.",
-      "expected_output": "Preserve exact quote and scope using literal argv via subprocess without a shell or correct shell quoting. Use supported knowledge fields, preserving the deferral condition; do not invent quote-file/stdin support or execute the embedded expression.",
+      "expected_output": "Use knowledge create --quote-file FILE (or - for stdin) to preserve exact text and scope without embedding it in shell source. Retain the deferral condition and do not execute the embedded expression.",
       "assertions": [
         "Preserves Chinese, quotes, literal shell syntax, and newline in stored attribution.",
         "Does not execute the embedded expression.",

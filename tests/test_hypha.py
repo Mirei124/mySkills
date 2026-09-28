@@ -824,8 +824,9 @@ class HyphaCliTest(unittest.TestCase):
         routed = self.cli("advanced", "explain", "oauth").stdout
         self.assertIn("trigger_hits=oauth", routed)
         self.assertIn("title_hits=oauth", routed)
-        lint = self.cli("check").stdout
-        self.assertIn("Warning: Shared trigger candidate", lint)
+        self.assertNotIn("Shared trigger candidate", self.cli("check").stdout)
+        lint = self.cli("check", "--verbose").stdout
+        self.assertIn("Info: Shared trigger candidate", lint)
         self.assertIn("Lint passed", lint)
 
     def test_command_surface_is_unambiguous_and_progress_starts_work(self):

@@ -31,7 +31,7 @@ Navigation-only records must state the limit, e.g. `record "API references to in
 
 ## Safe Input
 
-The current CLI has `--body-file` for task/knowledge bodies, but no `--quote-file`, `--evidence-file`, or `--stdin`. A body file does not replace required quote/evidence fields. For long Chinese text, quotes, newlines, backticks, or dollar expressions, prefer a small Python invocation with `subprocess.run([...], check=True)` and `shell=False` (the default), loading exact text from a UTF-8 file into a single argument. Use the project's Python interpreter and normal file-editing tools to prepare input. Never interpolate user text into shell source, use `eval`, or mistake JSON string escaping for shell quoting. Short literal arguments can use proper shell quoting. Preserve exact source text and authority checks.
+Use `knowledge create --quote-file FILE`, `record --evidence-file FILE`, or `record --user-quote-file FILE` for UTF-8 text with Chinese, quotes, newlines, or shell syntax. These also work with `record append`. Each file becomes one verbatim argument; `-` reads stdin, permitted for only one input per invocation. Inline and file inputs can be mixed in source order; repeat source/quote pairs in matching order. Empty evidence and non-matching source quotes still fail validation. Paths are relative to the invoking working directory. Prepare files with normal editing tools; never interpolate their content into shell source. `--body-file` remains for task/knowledge bodies, not a replacement for required evidence.
 
 ## Source Snapshot Behavior
 
