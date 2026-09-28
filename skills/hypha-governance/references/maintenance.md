@@ -25,3 +25,15 @@ Queries are read-only; source capture, publication, and `check` require writes. 
 Follow SKILL.md's handoff sequence. Finalize failures retain preparation and keep context open. Do not default reviews or fabricate records. Retrying can finish an interrupted close whose handoff record exists but close marker does not.
 
 An unmanaged-write notice after a successful check is historical audit information, not failure. Inspect the relevant content and continue. To acknowledge reviewed content, publish its unchanged body with actually reviewed metadata; this records review without erasing history. Do not tweak whitespace, repeat checks, rewrite audit logs, or delete drafts just to clear notices. Structural validation cannot establish semantic completeness.
+
+## Document Ownership And Review
+
+Edit formal task content through `task edit` or a guarded publication; external execution documents remain ordinary Markdown. Link the authoritative batch evidence rather than copying it into task bodies and knowledge. Updating a linked Markdown file does not require republishing an unchanged task unless acceptance or the next phase changed. If an external tool edited the formal task itself, read [Draft formats](drafts.md) and publish a reviewed task-update with the identical body to acknowledge it. The CLI has no `task sync-reference` or `task acknowledge-external-change` command.
+
+Triage diagnostics by their effect: structural errors need repair; conflicting, stale, or duplicate conclusions need scoped semantic review; generic-trigger warnings and acknowledged historical notices do not by themselves block execution. These are handling rules, not a claim that the CLI implements Error/Warning/Info levels. Report the exact supported repair command after inspecting the affected record, or name the missing decision. Avoid a repeated check loop.
+
+## Redundant Records And Git Noise
+
+For new evidence, reuse one durable topic record. For an actual changed conclusion, use the revision-guarded `record --supersedes` flow in [Conclusion records](records.md). The CLI has no knowledge merge/archive command; a summary covering several passing tests does not justify inventing a contradiction or overwriting their history. Omit covered validation from recovery and retain historical files until a supported, reviewed migration is available.
+
+Review `git status` and the relevant diff after a batch of meaningful writes, following repository commit policy. Formal nodes, source evidence, index, snapshots, and audit resolutions have continuity/integrity roles; current snapshots are append-only audit history, not disposable temporary backups. Pending handoffs and drafts may contain the only saved recovery information; applied/discarded state also has meaning. Do not blanket-ignore `.drafts/` or delete snapshots to make the worktree clean. Use `advanced discard ID` for obsolete drafts when appropriate; it retains the file and hides unchanged content from recall. The current CLI has no `clean`, `compact`, or `--no-snapshot`. A future transient-storage policy must distinguish expendable cache from evidence and recovery state.

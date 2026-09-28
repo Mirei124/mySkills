@@ -15,6 +15,9 @@ Reuse a saved isolated-network restriction within its customer/condition, withou
 | User explicitly asks to remember Orion's deployment choice | Save exact words with scope/origin; no second confirmation. |
 | Agent suspects every customer needs isolation | Uncertain inference/draft, not universal user agreement. |
 | A test used a temporary port | Keep in execution context unless recovery depends on it. |
+| User reports “everything works” after one browser check | Attribute the result in the existing batch document; no knowledge node. |
+| B047 and B049 UI passes are covered by a B046–B052 summary | Read the summary for recovery; retain distinct failures and untested limits, and omit redundant passes from the packet. |
+| Detailed overview lacks information and the user defers improvement | Save the scoped deferral and reopening condition if they cannot be recovered from the project documents. |
 
 Knowledge preserves missing answers and conditions with appropriate attribution, not credentials or transcripts.
 

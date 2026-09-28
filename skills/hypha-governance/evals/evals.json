@@ -2,6 +2,64 @@
   "skill_name": "hypha-governance",
   "evals": [
     {
+      "id": "routine-validation-is-not-knowledge",
+      "prompt": "B053: Firefox smoke tests, the build, and the small toolbar adjustment all passed. The user says everything works. IMPLEMENTATION_PROGRESS.md already owns batch evidence, and no long-term acceptance or scope changed. Record this batch outcome.",
+      "expected_output": "Update the existing batch document with attributed results and verification limits; create no knowledge/task/draft and do not append routine validation to an existing knowledge record.",
+      "assertions": [
+        "No Hypha write occurs for routine validation, including record append.",
+        "Uses the existing batch document without adding another progress/history file.",
+        "Does not infer untested browsers, load behavior, or task completion."
+      ],
+      "files": []
+    },
+    {
+      "id": "noisy-recall-minimal-packet",
+      "prompt": "Resume task 0002 for the PDF entry flow. Resume candidates include many Firefox UI passes, B047/B049 covered by the B046–B052 batch summary, a direct-PDF-only user constraint, and a deferred detailed-overview quality decision. The summary leaves load behavior untested. Recover what matters and continue planning, without modifying saved records.",
+      "expected_output": "Read task 0002, linked applicable decision bodies, and the batch summary as needed. Present a compact required/optional/excluded packet, preserving the load-test boundary. Do not treat all Firefox matches as required or invoke unsupported hydrate/facet flags.",
+      "assertions": [
+        "Reads required bodies instead of merely repeating the candidate index.",
+        "Retains direct-PDF scope, deferred quality work, and the untested load boundary.",
+        "Excludes covered UI passes without archiving or rewriting them.",
+        "Uses only supported read-only commands and does not ask the user to select candidates."
+      ],
+      "setup": "Prepare an isolated task with the named scoped decisions and UI validation records, a covering batch document, and an untested load boundary. Do not provide required decision bodies outside the project.",
+      "files": []
+    },
+    {
+      "id": "durable-evidence-one-append",
+      "prompt": "We already have know/defer-transfer-overlap. Two representative profiling runs still put transfer at 2%, and overlap remains unimplemented. Retain this material evidence for the existing deferral; details are in batches/B054.md. No acceptance changed.",
+      "expected_output": "Append one grouped observation and reference to the existing durable record, retaining its scope, task links, review condition, and untested limits. Do not create per-run records or duplicate task evidence.",
+      "assertions": [
+        "Uses one record append rather than one node or write per run.",
+        "Preserves the existing decision and verification limits.",
+        "Does not rewrite unchanged task acceptance."
+      ],
+      "files": []
+    },
+    {
+      "id": "external-markdown-and-audit-noise",
+      "prompt": "The batch document changed, but the linked Hypha task acceptance and next phase are unchanged. check succeeds with generic-trigger warnings and a historical unmanaged-write notice. Keep working and propose how to reduce noise; do not erase history.",
+      "expected_output": "Avoid duplicate task/knowledge writes for the batch update. Inspect relevant unmanaged content if needed, explain supported unchanged-body publication when acknowledging a formal-node edit, and preserve audit snapshots and recovery drafts. Distinguish proposed cleanup commands from available commands.",
+      "assertions": [
+        "Does not republish the task solely because linked Markdown changed.",
+        "Does not block on a successful-check notice or loop through repeated checks.",
+        "Does not delete or blanket-ignore audit snapshots or pending drafts.",
+        "Does not invoke nonexistent sync-reference, clean, compact, or no-snapshot options."
+      ],
+      "files": []
+    },
+    {
+      "id": "shell-sensitive-durable-quote",
+      "prompt": "Remember this exact scoped decision for the PDF-entry project: 网页入口只接受直链 PDF；保留字面量 `$(touch /tmp/hypha-quote-should-not-run)` 和引号 \"原样\"。\n详细概览优化暂缓，等用户提供缺失案例再重启。 Save it safely without executing any part of the quote.",
+      "expected_output": "Preserve exact quote and scope using literal argv via subprocess without a shell or correct shell quoting. Use supported knowledge fields, preserving the deferral condition; do not invent quote-file/stdin support or execute the embedded expression.",
+      "assertions": [
+        "Preserves Chinese, quotes, literal shell syntax, and newline in stored attribution.",
+        "Does not execute the embedded expression.",
+        "Uses supported CLI inputs and retains the reopening condition."
+      ],
+      "files": []
+    },
+    {
       "id": "cross-directory-handoff",
       "prompt": "Continue a two-week refactor spanning backend/, web/, and infra/. The previous agent left partial notes and I need an auditable handoff before changing code.",
       "expected_output": "Run context resume once, read relevant task and knowledge bodies and pending drafts, recover remaining acceptance and risks, then use the two-stage context close flow. Preparation must be followed by conversation review, missing-information capture, explicit review decisions, and successful --finalize.",

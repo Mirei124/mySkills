@@ -1,5 +1,7 @@
 # Conclusion Records
 
+First apply SKILL.md's durability test. Single test passes, browser checks, UI adjustments, and user acceptance events belong in the existing batch document. Repeated validation does not become durable knowledge merely because `record append` is available. Group material evidence about one durable decision into one append and link detailed artifacts.
+
 Use `record "Conclusion" --evidence "Observation and limits" --task ID`; repeat evidence/task flags as needed, or supply concrete `--when` for standalone knowledge. The CLI never guesses a task. Conditions/disposition are optional; do not invent form values.
 
 Observations support agent inference, not automatic proof. A passing probe plus failing integration does not invalidate the primitive; profiler-based deferral is not a failed implementation. Keep these limits in prose. Task Evidence receives brief links, not copied observations or completed acceptance. Old paragraphs remain; clean them only through guarded edits after checking that knowledge preserves their useful content.
@@ -7,7 +9,7 @@ Observations support agent inference, not automatic proof. A passing probe plus 
 ## Add Evidence Or Correct A Conclusion
 
 - **Same conclusion:** `record append know/path --evidence "New observation"`. Reads the latest node under the write lock and retains title, body, applicability, references, and task links. No preliminary `show` or revision copying is needed. Supply `--revision HASH` when the append must be conditional on a previously reviewed version. Explicit `--task` values replace the linked set; omit them to preserve it. Existing task Evidence links are reused.
-- **Current state changed:** add `--current-state "Browser passed; load testing remains"`. `show` presents this agent summary before observations/history, including with `--summary`. Previous explicit current states move to labeled history; the CLI does not infer that old prose is obsolete. Keep the title as a stable subject; a changed substantive claim still needs explicit supersession.
+- **Current state changed:** add `--current-state "Defer overlap until transfer becomes a bottleneck"`. `show` presents this agent summary before observations/history, including with `--summary`. Previous explicit current states move to labeled history; the CLI does not infer that old prose is obsolete. Keep the title as a stable subject; a changed substantive claim still needs explicit supersession.
 - **User observation plus inference:** add `--user-quote "Exact user words"` alongside `--evidence "What the observation supports and its limits"`. Quotes are stored in `user_observations` with user provenance; the record and current state remain `agent_inference`. This does not claim user confirmation of the analysis. Use separate user knowledge for a standalone user decision or constraint.
 - **Explicit guarded update:** `record "Exact existing conclusion" --update know/path --revision HASH --evidence "New observation"` remains available. Read `show` for the revision. Disposition changes record history.
 - **Changed conclusion:** `record "New scoped conclusion" --supersedes know/old --revision HASH --because "Correction reason" --evidence "New observation"`. Retains old knowledge/evidence and adds replacement links/correction references to old and new related tasks; no automatic semantic supersession.
@@ -26,6 +28,10 @@ python3 "$HYPHA_CLI" --workspace "$HYPHA_WORKSPACE" knowledge create "Version-sp
 Each source has separate evidence. `--source` cannot download URLs. For mixed-source synthesis, record observations/locators and say what each supports; local implementation evidence is not a universal API contract.
 
 Navigation-only records must state the limit, e.g. `record "API references to inspect" --when "Checking compatibility" --evidence "Candidate links, claims unverified" --reference https://example.org/api`. Never use unverified locators to bypass evidence requirements for factual claims.
+
+## Safe Input
+
+The current CLI has `--body-file` for task/knowledge bodies, but no `--quote-file`, `--evidence-file`, or `--stdin`. A body file does not replace required quote/evidence fields. For long Chinese text, quotes, newlines, backticks, or dollar expressions, prefer a small Python invocation with `subprocess.run([...], check=True)` and `shell=False` (the default), loading exact text from a UTF-8 file into a single argument. Use the project's Python interpreter and normal file-editing tools to prepare input. Never interpolate user text into shell source, use `eval`, or mistake JSON string escaping for shell quoting. Short literal arguments can use proper shell quoting. Preserve exact source text and authority checks.
 
 ## Source Snapshot Behavior
 
