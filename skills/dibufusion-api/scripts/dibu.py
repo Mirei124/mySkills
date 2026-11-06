@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DibuFusion API CLI. Python standard library only."""
+"""DibuFusion API 命令行工具，仅依赖 Python 3 标准库。"""
 
 import argparse
 import json
@@ -15,6 +15,18 @@ CAT = json.loads((ROOT / "references/operations.json").read_text())
 BASE = "http://10.249.187.159:32320"
 
 
+class ChineseArgumentParser(argparse.ArgumentParser):
+    def format_usage(self):
+        return super().format_usage().replace("usage: ", "用法：", 1)
+
+    def format_help(self):
+        return super().format_help().replace("usage: ", "用法：", 1)
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}：参数错误：{message}\n")
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -26,9 +38,17 @@ def load_json_file(path):
 
 def auth_config():
     base = os.environ.get("DIBU_BASE_URL", BASE).rstrip("/")
-    token = os.environ.get("DIBU_TOKEN", "").strip()
+    token_path = pathlib.Path.home() / ".cache" / "dibu_token"
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(
+            "无法读取 ~/.cache/dibu_token；请创建可读的 UTF-8 文件，内容为裸 token。"
+        ) from exc
     if not token:
-        raise ValueError("缺少认证：请设置 DIBU_TOKEN 环境变量（裸 token）。")
+        raise ValueError("认证文件 ~/.cache/dibu_token 为空。")
+    if any(character.isspace() for character in token):
+        raise ValueError("~/.cache/dibu_token 格式错误；请仅保存裸 token。")
     return base, "Token " + token
 
 
@@ -60,16 +80,20 @@ def prepare(name, params, body):
         q.update(params)
     else:
         b = {**(b or {}), **params} if params else b
-    if name in ["files", "shared-files"]:
-        if b.get("action") != "ls" or b.get("is_share_dir", False) != (
-            name == "shared-files"
-        ):
-            raise ValueError(
-                "列表操作不允许覆写 action/is_share_dir；请使用对应文件操作"
-            )
-    if name.startswith("file-") and op["body"]:
-        if b.get("action") != op["body"]["action"]:
-            raise ValueError("不允许覆写文件操作类型")
+    if (
+        name in ["files", "shared-files"]
+        and (
+            b.get("action") != "ls"
+            or b.get("is_share_dir", False) != (name == "shared-files")
+        )
+    ):
+        raise ValueError("列表操作不允许覆写 action/is_share_dir；请使用对应文件操作")
+    if (
+        name.startswith("file-")
+        and op["body"]
+        and b.get("action") != op["body"]["action"]
+    ):
+        raise ValueError("不允许覆写文件操作类型")
     if name == "dataset-update" and b is not None:
         b["data_id"] = urllib.parse.unquote(path.rstrip("/").rsplit("/", 1)[1])
     for key in op["required"]:
@@ -96,18 +120,17 @@ def request(base, auth, op, path, q, b, headers, output=None):
             raw = r.read()
             status = r.status
     except urllib.error.HTTPError as e:
+        detail = e.read(4000).decode(errors="replace")
+        for secret in (auth, auth[len("Token ") :]):
+            if secret:
+                detail = detail.replace(secret, "[REDACTED]")
         if e.code == 401:
             raise ValueError(
-                "HTTP 401：认证已失效，请用户更新 DIBU_TOKEN 环境变量后再试。"
+                "HTTP 401：认证已失效，请更新 ~/.cache/dibu_token 后再试。 " + detail
             )
         if e.code == 403:
-            raise ValueError("HTTP 403：权限不足，请检查当前账号的操作权限。")
-        raise ValueError(
-            "HTTP {}: {}".format(
-                e.code,
-                e.read(4000).decode(errors="replace").replace(auth, "[REDACTED]"),
-            )
-        )
+            raise ValueError("HTTP 403：服务端拒绝请求，请根据响应正文诊断。 " + detail)
+        raise ValueError(f"HTTP {e.code}: {detail}")
     if output:
         fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         os.fchmod(fd, 0o600)
@@ -126,22 +149,38 @@ def request(base, auth, op, path, q, b, headers, output=None):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("operation", choices=["list"] + list(CAT))
-    ap.add_argument("--param", action="append", default=[], metavar="KEY=VALUE")
-    ap.add_argument("--body-file")
-    ap.add_argument("--header", action="append", default=[])
+    ap = ChineseArgumentParser(description=__doc__, add_help=False)
+    ap._positionals.title = "位置参数"
+    ap._optionals.title = "选项"
+    ap.add_argument("-h", "--help", action="help", help="显示帮助并退出")
+    ap.add_argument(
+        "operation",
+        choices=["list"] + list(CAT),
+        help="要执行的操作；list 显示操作清单",
+    )
+    ap.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="请求参数，可重复传入",
+    )
+    ap.add_argument("--body-file", help="JSON 请求正文文件")
+    ap.add_argument(
+        "--header", action="append", default=[], help="估价指纹或幂等请求头，可重复传入"
+    )
     ap.add_argument(
         "--execute", action="store_true", help="提交已授权的写操作；否则仅预览"
     )
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--output")
+    ap.add_argument("--dry-run", action="store_true", help="仅预览请求，不发送")
+    ap.add_argument("--output", help="将响应保存到权限为 600 的文件")
     a = ap.parse_args()
     if a.operation == "list":
         for n, o in CAT.items():
             print(
-                "%-26s %-6s %-55s %s"
-                % (n, o["method"], o["path"], "写入" if o["write"] else "查询")
+                "{:<26s} {:<6s} {:<55s} {:s}".format(
+                    n, o["method"], o["path"], "写入" if o["write"] else "查询"
+                )
             )
         return
     params = {}

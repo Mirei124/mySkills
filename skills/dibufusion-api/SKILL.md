@@ -30,16 +30,16 @@ python3 "$CLI" usage --param page=1 --param size=20
 
 ## 认证
 
-认证仅从 `DIBU_TOKEN` 环境变量读取，值为裸 token；请求自动添加 `Authorization: Token <token>`。未设置或为空时直接报错。
+认证仅从 `~/.cache/dibu_token` 读取。文件使用 UTF-8，内容为裸 token；脚本去掉首尾空白，文件缺失、不可读、为空或格式错误时直接报错。请求自动添加 `Authorization: Token <token>`，不读取或回退到 `DIBU_TOKEN` 环境变量。
 
-先在运行环境中设置 `DIBU_TOKEN`，再执行上述命令。不在输出或仓库中记录 token。`DIBU_BASE_URL` 可指定站点地址，更换站点时使用对应 token。
+无需加载 shell 配置或导出环境变量。设置文件权限为 `600`，不在输出或仓库中记录 token。`DIBU_BASE_URL` 仍可覆盖站点地址；切换站点时使用对应的 token 文件。
 
-收到 401 时停止调用，明确提醒用户认证已失效，请更新 `DIBU_TOKEN` 环境变量；等待用户更新后再继续，不自动登录、刷新或索取聊天中的明文 token。
+收到 HTTP 401 时停止调用，请用户更新 `~/.cache/dibu_token`，更新后再继续；不自动登录、刷新凭据或索取聊天中的明文 token。
 
-## 验证范围
+## 失败处理
 
-[references/verification.json](references/verification.json) 记录 26 次实测查询/估价与响应顶层结构，全部通过。
+写入不自动重试。网络结果不确定时先查询状态和列表，保留原幂等键，不以新键重复创建。HTTP 403 应依据服务端响应正文诊断，不能仅凭状态码认定账号缺少权限；也不能直接重放浏览器请求中的旧估价指纹和幂等键。
 
-请求失败时，先核对请求和 skill 中的记录，不能盲目沿用旧 payload，如果 API 过时提醒用户检查并更新。 `scripts/dibu.py` 不自动重试写入；网络结果不确定时先查询状态和列表，保留原幂等键，不以新键重复创建。
+## 按需参考
 
-API 整理时间：2026-11-06
+日常操作读取上述接口清单和工作流。只有核对历史可用性、排查已知问题或维护本技能时，才读取 [maintenance/verification.md](maintenance/verification.md)；该文件集中记录测试结果、未测项、暂存问题、接口来源和维护方法。
