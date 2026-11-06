@@ -1,0 +1,697 @@
+{
+  "dashboard": {
+    "method": "GET",
+    "path": "/node/dashboard/",
+    "description": "仪表盘资源与工作负载汇总",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "config": {
+    "method": "GET",
+    "path": "/getFrontendConfig/",
+    "description": "前端配置与使用说明目录",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "gpu-inventory": {
+    "method": "GET",
+    "path": "/node/gpu-inventory/",
+    "description": "可用 GPU、节点与 DRA 配置",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "tasks": {
+    "method": "GET",
+    "path": "/container/get/",
+    "description": "任务/实验列表；operate_id 1运行中 0已完成 2待调度",
+    "query": {
+      "operate_id": 1,
+      "paginate": 1,
+      "is_VM": 0,
+      "page": 1,
+      "size": 10
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "experiments": {
+    "method": "GET",
+    "path": "/container/get/",
+    "description": "任务/实验列表；operate_id 1运行中 0已完成 2待调度",
+    "query": {
+      "operate_id": 1,
+      "paginate": 1,
+      "is_VM": 1,
+      "page": 1,
+      "size": 10
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "jobs": {
+    "method": "GET",
+    "path": "/job/get/",
+    "description": "分布式任务列表",
+    "query": {
+      "operate_id": 1,
+      "is_distributed": 1
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "container-create": {
+    "method": "POST",
+    "path": "/container/",
+    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": [
+      "Idempotency-Key",
+      "X-DibuFusion-Estimate-Fingerprint"
+    ]
+  },
+  "job-create": {
+    "method": "POST",
+    "path": "/job/",
+    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": [
+      "Idempotency-Key",
+      "X-DibuFusion-Estimate-Fingerprint"
+    ]
+  },
+  "container-convert": {
+    "method": "POST",
+    "path": "/container/toTask/",
+    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": [
+      "Idempotency-Key",
+      "X-DibuFusion-Estimate-Fingerprint"
+    ]
+  },
+  "container-delete": {
+    "method": "DELETE",
+    "path": "/container/",
+    "description": "删除工作负载或历史记录",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "container-history-delete": {
+    "method": "DELETE",
+    "path": "/container/get/",
+    "description": "删除工作负载或历史记录",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "job-delete": {
+    "method": "DELETE",
+    "path": "/job/",
+    "description": "删除工作负载或历史记录",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "job_id"
+    ],
+    "headers": []
+  },
+  "job-history-delete": {
+    "method": "DELETE",
+    "path": "/job/get/",
+    "description": "删除工作负载或历史记录",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "job_id"
+    ],
+    "headers": []
+  },
+  "experiment-stop": {
+    "method": "GET",
+    "path": "/container/containerStop/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "experiment-restart": {
+    "method": "POST",
+    "path": "/container/dockerRestart/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "restart-status": {
+    "method": "GET",
+    "path": "/container/dockerRestart/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "image-save": {
+    "method": "GET",
+    "path": "/image/save/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "image-save-status": {
+    "method": "GET",
+    "path": "/image/saveOperation/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "events": {
+    "method": "GET",
+    "path": "/container/getPodEvent/",
+    "description": "实验生命周期或诊断操作",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "container_id"
+    ],
+    "headers": []
+  },
+  "container-network": {
+    "method": "GET",
+    "path": "/container/{id}/network/",
+    "description": "容器网络与访问地址",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id"
+    ],
+    "headers": []
+  },
+  "job-network": {
+    "method": "GET",
+    "path": "/job/{id}/network/",
+    "description": "分布式任务网络",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id"
+    ],
+    "headers": []
+  },
+  "container-log": {
+    "method": "GET",
+    "path": "/container/downloadLog/{id}/",
+    "description": "下载容器日志，配合 --output",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id"
+    ],
+    "headers": []
+  },
+  "job-log": {
+    "method": "GET",
+    "path": "/job/downloadLog/{id}/",
+    "description": "下载分布式任务日志",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id"
+    ],
+    "headers": []
+  },
+  "extension-estimate": {
+    "method": "POST",
+    "path": "/container/{id}/extensions/estimate/",
+    "description": "续时估价",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id",
+      "additional_minutes"
+    ],
+    "headers": []
+  },
+  "extension-submit": {
+    "method": "POST",
+    "path": "/container/{id}/extensions/",
+    "description": "续时提交：quote_id additional_minutes reason",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "id",
+      "quote_id",
+      "additional_minutes",
+      "reason"
+    ],
+    "headers": [
+      "Idempotency-Key"
+    ]
+  },
+  "extension-status": {
+    "method": "GET",
+    "path": "/container/{id}/extensions/{operation}/",
+    "description": "续时状态",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "id",
+      "operation"
+    ],
+    "headers": []
+  },
+  "files": {
+    "method": "POST",
+    "path": "/file/",
+    "description": "个人目录列表，API / 对应界面 /workspace",
+    "query": {},
+    "body": {
+      "action": "ls",
+      "path": "/"
+    },
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "shared-files": {
+    "method": "POST",
+    "path": "/file/",
+    "description": "共享目录列表，API / 对应界面 /share",
+    "query": {},
+    "body": {
+      "action": "ls",
+      "path": "/",
+      "is_share_dir": true
+    },
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "file-mkdir": {
+    "method": "POST",
+    "path": "/file/",
+    "description": "个人文件目录操作",
+    "query": {},
+    "body": {
+      "action": "mkdir"
+    },
+    "write": true,
+    "required": [
+      "path"
+    ],
+    "headers": []
+  },
+  "file-remove": {
+    "method": "POST",
+    "path": "/file/",
+    "description": "个人文件目录操作",
+    "query": {},
+    "body": {
+      "action": "rm"
+    },
+    "write": true,
+    "required": [
+      "path"
+    ],
+    "headers": []
+  },
+  "file-move": {
+    "method": "POST",
+    "path": "/file/",
+    "description": "个人文件目录操作",
+    "query": {},
+    "body": {
+      "action": "mv"
+    },
+    "write": true,
+    "required": [
+      "path",
+      "to_path"
+    ],
+    "headers": []
+  },
+  "file-space": {
+    "method": "GET",
+    "path": "/file/get_userspace_size/",
+    "description": "空间占用统计",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "file-space-refresh": {
+    "method": "PATCH",
+    "path": "/file/get_userspace_size/",
+    "description": "重新计算空间",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [],
+    "headers": []
+  },
+  "datasets": {
+    "method": "GET",
+    "path": "/file/sharingData/",
+    "description": "数据集目录",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "dataset-create": {
+    "method": "POST",
+    "path": "/file/sharingData/",
+    "description": "登记数据集，权限由服务端判断",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": []
+  },
+  "dataset-update": {
+    "method": "PUT",
+    "path": "/file/sharingData/{id}/",
+    "description": "修改数据集元数据",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "id",
+      "body"
+    ],
+    "headers": []
+  },
+  "dataset-delete": {
+    "method": "DELETE",
+    "path": "/file/sharingData/{id}/",
+    "description": "删除数据集登记",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "id"
+    ],
+    "headers": []
+  },
+  "images": {
+    "method": "GET",
+    "path": "/image/",
+    "description": "镜像列表：opt 0全部 1个人 2公开 3基础；is_temporary 1临时",
+    "query": {
+      "opt": 0,
+      "paginate": 1,
+      "is_temporary": 0,
+      "page": 1,
+      "size": 9
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "image-visibility": {
+    "method": "GET",
+    "path": "/image/chmod/",
+    "description": "修改镜像属性（GET 也有副作用）",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "image_id",
+      "is_public"
+    ],
+    "headers": []
+  },
+  "image-permanent": {
+    "method": "GET",
+    "path": "/image/chmod/",
+    "description": "修改镜像属性（GET 也有副作用）",
+    "query": {
+      "is_temporary": 0
+    },
+    "body": null,
+    "write": true,
+    "required": [
+      "image_id"
+    ],
+    "headers": []
+  },
+  "image-note": {
+    "method": "GET",
+    "path": "/image/addNote/",
+    "description": "修改镜像属性（GET 也有副作用）",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "image_id",
+      "note"
+    ],
+    "headers": []
+  },
+  "image-register": {
+    "method": "POST",
+    "path": "/image/addRecord/",
+    "description": "登记镜像 image_name image_tag source is_public note",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "image_name",
+      "image_tag"
+    ],
+    "headers": []
+  },
+  "image-delete": {
+    "method": "DELETE",
+    "path": "/image/",
+    "description": "删除镜像",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "image_id"
+    ],
+    "headers": []
+  },
+  "profile": {
+    "method": "GET",
+    "path": "/user/personal/info/",
+    "description": "个人资料",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "profile-update": {
+    "method": "POST",
+    "path": "/user/personal/update_profile/",
+    "description": "修改个人资料 nickname email phone gender",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": []
+  },
+  "password-change": {
+    "method": "PATCH",
+    "path": "/user/changePwd/",
+    "description": "修改密码，正文仅通过文件传入",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [
+      "body"
+    ],
+    "headers": []
+  },
+  "access-token-info": {
+    "method": "GET",
+    "path": "/user/access-token/",
+    "description": "访问令牌是否存在及前缀",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "access-token-create": {
+    "method": "POST",
+    "path": "/user/access-token/",
+    "description": "创建访问令牌；响应包含秘密",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [],
+    "headers": []
+  },
+  "access-token-revoke": {
+    "method": "DELETE",
+    "path": "/user/access-token/",
+    "description": "撤销访问令牌",
+    "query": {},
+    "body": null,
+    "write": true,
+    "required": [],
+    "headers": []
+  },
+  "tailscale-status": {
+    "method": "GET",
+    "path": "/api/v1/tailscale/status",
+    "description": "Tailscale 接入状态",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "tailscale-enroll": {
+    "method": "POST",
+    "path": "/api/v1/tailscale/enrollments",
+    "description": "申请 Tailscale 接入配置",
+    "query": {},
+    "body": {
+      "refresh": false
+    },
+    "write": true,
+    "required": [],
+    "headers": []
+  },
+  "credits": {
+    "method": "GET",
+    "path": "/api/v1/site/billing/me/summary",
+    "description": "个人算元余额/用量/流水",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "usage": {
+    "method": "GET",
+    "path": "/api/v1/site/billing/me/usage",
+    "description": "个人算元余额/用量/流水",
+    "query": {
+      "page": 1,
+      "size": 20
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "ledger": {
+    "method": "GET",
+    "path": "/api/v1/site/billing/me/ledger",
+    "description": "个人算元余额/用量/流水",
+    "query": {
+      "page": 1,
+      "size": 20
+    },
+    "body": null,
+    "write": false,
+    "required": [],
+    "headers": []
+  },
+  "estimate": {
+    "method": "POST",
+    "path": "/api/v1/site/billing/estimate",
+    "description": "工作负载费用估价，无资源创建",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "body"
+    ],
+    "headers": []
+  },
+  "doc": {
+    "method": "GET",
+    "path": "/docs/{document}",
+    "description": "读取使用说明 Markdown",
+    "query": {},
+    "body": null,
+    "write": false,
+    "required": [
+      "document"
+    ],
+    "headers": []
+  }
+}

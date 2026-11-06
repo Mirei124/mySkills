@@ -1,0 +1,314 @@
+{
+  "date": "2026-11-06",
+  "cases": [
+    {
+      "operation": "dashboard",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "sampled_at_ms",
+        "nodes",
+        "overview",
+        "user_count",
+        "stale",
+        "refresh_pending",
+        "errors"
+      ]
+    },
+    {
+      "operation": "config",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "frontend_config"
+      ]
+    },
+    {
+      "operation": "gpu-inventory",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "nodes",
+        "sampled_at_ms",
+        "stale",
+        "refresh_pending",
+        "errors"
+      ]
+    },
+    {
+      "operation": "tasks",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "experiments",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "jobs",
+      "params": {},
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 0
+      }
+    },
+    {
+      "operation": "files",
+      "params": {},
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 3
+      }
+    },
+    {
+      "operation": "shared-files",
+      "params": {},
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 8
+      }
+    },
+    {
+      "operation": "file-space",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "dir_size",
+        "is_calculating"
+      ]
+    },
+    {
+      "operation": "datasets",
+      "params": {},
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 0
+      }
+    },
+    {
+      "operation": "images",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "profile",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "user_id",
+        "username",
+        "nickname",
+        "first_login",
+        "grade",
+        "email",
+        "gputime",
+        "gputime_used",
+        "gputime_all",
+        "date_joined",
+        "gender",
+        "phone",
+        "wechat_openid",
+        "wechat_avatar_url",
+        "wechat_username"
+      ]
+    },
+    {
+      "operation": "access-token-info",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "exists",
+        "token_prefix",
+        "created_at"
+      ]
+    },
+    {
+      "operation": "tailscale-status",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "enabled",
+        "enrollment_available",
+        "hostname",
+        "nodes",
+        "ports",
+        "auth_key_expiry_seconds",
+        "node_key_expiry_days",
+        "has_enrollment"
+      ]
+    },
+    {
+      "operation": "credits",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "api_version",
+        "request_id",
+        "observed_at",
+        "data",
+        "warnings",
+        "error"
+      ]
+    },
+    {
+      "operation": "usage",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "api_version",
+        "request_id",
+        "observed_at",
+        "data",
+        "warnings",
+        "error"
+      ]
+    },
+    {
+      "operation": "ledger",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "api_version",
+        "request_id",
+        "observed_at",
+        "data",
+        "warnings",
+        "error"
+      ]
+    },
+    {
+      "operation": "files",
+      "params": {
+        "path": "/dotfiles"
+      },
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 14
+      }
+    },
+    {
+      "operation": "shared-files",
+      "params": {
+        "path": "/datasets"
+      },
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 0
+      }
+    },
+    {
+      "operation": "images",
+      "params": {
+        "q": "ubuntu",
+        "opt": 0
+      },
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "images",
+      "params": {
+        "q": "pytorch",
+        "opt": 0
+      },
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "tasks",
+      "params": {
+        "operate_id": 0
+      },
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "jobs",
+      "params": {
+        "operate_id": 0
+      },
+      "status": "passed",
+      "shape": {
+        "type": "list",
+        "count": 0
+      }
+    },
+    {
+      "operation": "experiments",
+      "params": {
+        "operate_id": 0
+      },
+      "status": "passed",
+      "shape": [
+        "count",
+        "next",
+        "previous",
+        "results"
+      ]
+    },
+    {
+      "operation": "doc",
+      "params": {
+        "document": "1-instructions-for-use.md"
+      },
+      "status": "passed",
+      "shape": [
+        "status",
+        "text"
+      ]
+    },
+    {
+      "operation": "estimate",
+      "params": {},
+      "status": "passed",
+      "shape": [
+        "api_version",
+        "request_id",
+        "observed_at",
+        "data",
+        "warnings",
+        "error"
+      ]
+    }
+  ]
+}
