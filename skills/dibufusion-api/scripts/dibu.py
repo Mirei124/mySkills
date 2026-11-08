@@ -2,14 +2,18 @@
 """DibuFusion API CLI using only the Python standard library."""
 
 import argparse
+import getpass
 import json
 import os
 import pathlib
 import re
+import shlex
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CAT = json.loads((ROOT / "references/operations.json").read_text())
@@ -25,6 +29,73 @@ def load_json_file(path):
     return json.loads(pathlib.Path(path).read_text())
 
 
+def login_command():
+    return "python " + shlex.quote(str(pathlib.Path(__file__).resolve())) + " login"
+
+
+def login():
+    """Explicit interactive login; never expose credentials or the response token."""
+    try:
+        username = input("Username: ").strip()
+        if not username:
+            raise ValueError("Username cannot be empty; token file unchanged.")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            password = getpass.getpass("Password: ")
+    except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
+        raise ValueError("Login cancelled or hidden password input unavailable; token file unchanged.") from None
+    if not password:
+        raise ValueError("Password cannot be empty; token file unchanged.")
+    base = os.environ.get("DIBU_BASE_URL", BASE).rstrip("/")
+    req = urllib.request.Request(
+        base + "/user/login/",
+        data=json.dumps({"username": username, "password": password}).encode("utf-8"),
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Content-Type": "application/json",
+            "Referer": base + "/login?redirect=/dashboard",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"Login rejected (HTTP {exc.code}); token file unchanged.") from None
+    except (OSError, urllib.error.URLError):
+        raise ValueError("Could not reach the login endpoint; token file unchanged.") from None
+    try:
+        result = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise ValueError("Invalid login response; token file unchanged.") from None
+    token = result.get("token") if isinstance(result, dict) else None
+    if (
+        not isinstance(token, str)
+        or not token.strip()
+        or any(not 33 <= ord(c) <= 126 for c in token.strip())
+        or result.get("error")
+    ):
+        raise ValueError("Login response did not contain a valid token; token file unchanged.")
+    token_path = pathlib.Path.home() / ".cache" / "dibu_token"
+    token_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=token_path.parent, prefix=".dibu_token-", delete=False
+        ) as stream:
+            temporary = pathlib.Path(stream.name)
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(token.strip() + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, token_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    print("Login successful. Token saved to ~/.cache/dibu_token (mode 600).")
+
+
 def auth_config():
     base = os.environ.get("DIBU_BASE_URL", BASE).rstrip("/")
     token_path = pathlib.Path.home() / ".cache" / "dibu_token"
@@ -32,12 +103,12 @@ def auth_config():
         token = token_path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeError) as exc:
         raise ValueError(
-            "Cannot read ~/.cache/dibu_token; create a readable UTF-8 file containing only the bare token."
+            "Cannot read ~/.cache/dibu_token. Run this command manually to log in: " + login_command()
         ) from exc
     if not token:
-        raise ValueError("Authentication file ~/.cache/dibu_token is empty.")
+        raise ValueError("Authentication file is empty. Run manually: " + login_command())
     if any(character.isspace() for character in token):
-        raise ValueError("Invalid ~/.cache/dibu_token format; store only the bare token.")
+        raise ValueError("Invalid token file format. Run manually: " + login_command())
     return base, "Token " + token
 
 
@@ -116,7 +187,7 @@ def request(base, auth, op, path, q, b, headers, output=None):
             if secret:
                 detail = detail.replace(secret, "[REDACTED]")
         if e.code == 401:
-            raise ValueError("HTTP 401: authentication expired; update ~/.cache/dibu_token before retrying. " + detail)
+            raise ValueError("HTTP 401: authentication expired. Run manually: " + login_command() + "\n" + detail)
         if e.code == 403:
             raise ValueError("HTTP 403: request rejected; diagnose using the server response. " + detail)
         raise ValueError(f"HTTP {e.code}: {detail}")
@@ -341,8 +412,24 @@ IMAGE_SAVE_DETAILS = {
 }
 IMAGE_SAVE_FIELDS = {"auto", "node_name", "image_name", "is_temporary", "operation_id"}
 WORKLOAD_DISPLAY_FIELDS = {
-    "container_id", "lab_name", "status", "node_name", "gputype", "num_gpu", "cpu", "memory",
-    "create_time", "timing", "can_extend", "error", "errors", "warning", "warnings", "message", "reason", "events",
+    "container_id",
+    "lab_name",
+    "status",
+    "node_name",
+    "gputype",
+    "num_gpu",
+    "cpu",
+    "memory",
+    "create_time",
+    "timing",
+    "can_extend",
+    "error",
+    "errors",
+    "warning",
+    "warnings",
+    "message",
+    "reason",
+    "events",
 }
 
 
@@ -387,8 +474,12 @@ def compact_response(operation, result):
             return payload
         if any(not isinstance(row, dict) or not identities.intersection(row) or set(row) - keep - omit for row in rows):
             return payload
-        projected = [compact_workload_row(row) if operation in ("tasks", "experiments")
-                     else {key: val for key, val in row.items() if key in keep} for row in rows]
+        projected = [
+            compact_workload_row(row)
+            if operation in ("tasks", "experiments")
+            else {key: val for key, val in row.items() if key in keep}
+            for row in rows
+        ]
         return projected if isinstance(payload, list) else {**payload, "results": projected}
 
     if isinstance(result, dict) and "data" in result:
@@ -460,9 +551,18 @@ SUMMARY_OPS = {
     "resource-summary": {
         "description": "Compact Ready-node resources; --all includes other states, --raw returns the full dashboard",
         "required": [],
-        "cli": {"options": [{"flags": ["--all"], "field": "include_all", "type": "bool",
-                             "action": "store_true", "help": "Include nodes in every state in the compact view"}],
-                "examples": ["resource-summary", "resource-summary --all", "resource-summary --raw"]},
+        "cli": {
+            "options": [
+                {
+                    "flags": ["--all"],
+                    "field": "include_all",
+                    "type": "bool",
+                    "action": "store_true",
+                    "help": "Include nodes in every state in the compact view",
+                }
+            ],
+            "examples": ["resource-summary", "resource-summary --all", "resource-summary --raw"],
+        },
     },
     "task-summary": {
         "description": "Summarize all task pages; --id inspects one task with events",
@@ -666,12 +766,13 @@ def command_overview(group=None):
         lines = ["Usage: dibu.py GROUP ACTION [OPTIONS]", "", "Commands:"]
         lines += [f"  {name:<14s} {description}" for name, (description, _) in COMMAND_GROUPS.items()]
         lines += [
+            "  login          Enter username/password interactively and save the login token",
             "  config         Read frontend capabilities and presets",
             "  list           Show this command overview",
             "",
             "Use 'dibu.py GROUP --help' for actions and read/write labels.",
             "Use 'dibu.py GROUP ACTION --help' for parameters; --describe for JSON schema.",
-            "Writes preview by default; --execute submits a specifically authorized write.",
+            "Resource writes preview by default; --execute submits an authorized write. Login is explicitly interactive.",
             "Legacy flat operation names remain accepted but are omitted from this overview.",
         ]
     return "\n".join(lines)
@@ -684,7 +785,12 @@ def route_command(argv):
         raise SystemExit(0)
     group = argv[0]
     if group not in COMMAND_GROUPS:
-        if not group.startswith("-") and group not in CAT and group not in SUMMARY_OPS and group != "list":
+        if (
+            not group.startswith("-")
+            and group not in CAT
+            and group not in SUMMARY_OPS
+            and group not in ("list", "login")
+        ):
             raise ValueError("Unknown command: " + group + "; use dibu.py --help")
         return argv
     _, actions = COMMAND_GROUPS[group]
@@ -819,6 +925,12 @@ def parse_cli(argv=None):
         parents=[common],
     )
     commands = parser.add_subparsers(dest="operation", required=True)
+    commands.add_parser(
+        "login",
+        prog=parser.prog + " login",
+        help="Log in interactively and save the token",
+        description="Enter username and hidden password, POST /user/login/, and save the token to ~/.cache/dibu_token with mode 600. No credentials or tokens are printed.",
+    )
     commands.add_parser("list", help="List available API operations", parents=[common])
     for name, spec in {**SUMMARY_OPS, **CAT}.items():
         command = commands.add_parser(
@@ -907,7 +1019,7 @@ def parse_cli(argv=None):
         if key in params and params[key] != val:
             parser.error("Conflicting values for API field " + key)
         params[key] = val
-    if args.operation != "list":
+    if args.operation not in ("list", "login"):
         for option in operation_spec(args.operation)["cli"]["options"]:
             dest = "alias_" + option["field"]
             if not hasattr(args, dest):
@@ -924,6 +1036,9 @@ def parse_cli(argv=None):
 
 def main():
     a, params = parse_cli()
+    if a.operation == "login":
+        login()
+        return
     if a.template:
         spec = operation_spec(a.operation) if a.operation != "list" else {}
         if "body_template" not in spec:

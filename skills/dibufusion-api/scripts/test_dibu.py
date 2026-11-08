@@ -9,47 +9,250 @@ import pathlib
 import shlex
 import tempfile
 import unittest
+import warnings
 from unittest.mock import patch
 
 import dibu
 
 
+class LoginTests(unittest.TestCase):
+    def test_expired_auth_suggests_manual_login_without_prompting(self):
+        failure = dibu.urllib.error.HTTPError("http://fixture", 401, "fixture", {}, io.BytesIO(b"fixture-token"))
+        with patch("urllib.request.build_opener") as opener, patch("builtins.input") as prompt:
+            opener.return_value.open.side_effect = failure
+            with self.assertRaises(ValueError) as error:
+                dibu.request("http://fixture", "Token fixture-token", {"method": "GET"}, "/", {}, None, {})
+            self.assertIn(dibu.login_command(), str(error.exception))
+            self.assertNotIn("fixture-token", str(error.exception))
+            opener.return_value.open.assert_called_once()
+            prompt.assert_not_called()
+
+    def test_new_user_login_creates_cache_without_previous_authentication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            with (
+                patch("builtins.input", return_value="fixture-user"),
+                patch.object(dibu.getpass, "getpass", return_value="fixture-password"),
+                patch.object(dibu.pathlib.Path, "home", return_value=home),
+                patch.object(dibu, "auth_config", side_effect=AssertionError("Must not read old auth")),
+                patch("urllib.request.build_opener") as opener,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                opener.return_value.open.return_value.__enter__.return_value.read.return_value = (
+                    b'{"token":"fixture-token"}'
+                )
+                dibu.login()
+            target = home / ".cache" / "dibu_token"
+            self.assertEqual(target.read_text().strip(), "fixture-token")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_interactive_login_posts_without_auth_and_saves_private_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            target = home / ".cache" / "dibu_token"
+            target.parent.mkdir()
+            target.write_text("fixture-old-token")
+            target.chmod(0o644)
+            out = io.StringIO()
+            with (
+                patch("sys.argv", ["dibu", "login"]),
+                patch("builtins.input", return_value=" fixture-user "),
+                patch.object(dibu.getpass, "getpass", return_value="fixture-password"),
+                patch.object(dibu.pathlib.Path, "home", return_value=home),
+                patch.dict(os.environ, {"DIBU_BASE_URL": "http://fixture-site/"}),
+                patch("urllib.request.build_opener") as opener,
+                contextlib.redirect_stdout(out),
+            ):
+                opener.return_value.open.return_value.__enter__.return_value.read.return_value = (
+                    b'{"token":"fixture-new-token","email":"fixture@example.test"}'
+                )
+                dibu.main()
+                req = opener.return_value.open.call_args.args[0]
+                self.assertEqual(req.full_url, "http://fixture-site/user/login/")
+                self.assertEqual(req.get_method(), "POST")
+                self.assertEqual(json.loads(req.data), {"username": "fixture-user", "password": "fixture-password"})
+                self.assertIsNone(req.get_header("Authorization"))
+                self.assertIsNone(req.get_header("Cookie"))
+                self.assertEqual(req.get_header("Referer"), "http://fixture-site/login?redirect=/dashboard")
+                self.assertEqual(dibu.auth_config()[1], "Token fixture-new-token")
+            self.assertEqual(target.read_text().strip(), "fixture-new-token")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(target.parent.iterdir()), [target])
+            for secret in ("fixture-new-token", "fixture-password", "fixture@example.test"):
+                self.assertNotIn(secret, out.getvalue())
+
+    def test_invalid_login_responses_do_not_overwrite_existing_token(self):
+        for response in (
+            b"invalid JSON",
+            b"[]",
+            b"{}",
+            b'{"token":""}',
+            b'{"token":"contains space"}',
+            b'{"token":123}',
+            b'{"token":"fixture-token","error":"fixture-password"}',
+            b'{"token":"bad\\u0000token"}',
+        ):
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as directory:
+                home = pathlib.Path(directory)
+                target = home / ".cache" / "dibu_token"
+                target.parent.mkdir()
+                target.write_text("fixture-old-token")
+                with (
+                    patch("builtins.input", return_value="fixture-user"),
+                    patch.object(dibu.getpass, "getpass", return_value="fixture-password"),
+                    patch.object(dibu.pathlib.Path, "home", return_value=home),
+                    patch("urllib.request.build_opener") as opener,
+                ):
+                    opener.return_value.open.return_value.__enter__.return_value.read.return_value = response
+                    with self.assertRaises(ValueError) as error:
+                        dibu.login()
+                self.assertEqual(target.read_text(), "fixture-old-token")
+                self.assertNotIn("fixture-password", str(error.exception))
+
+    def test_login_http_and_network_errors_preserve_token_without_echoing_server(self):
+        errors = [
+            dibu.urllib.error.HTTPError("http://fixture", 401, "fixture", {}, io.BytesIO(b"fixture-password")),
+            dibu.urllib.error.URLError("fixture-password"),
+        ]
+        for failure in errors:
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory:
+                home = pathlib.Path(directory)
+                target = home / ".cache" / "dibu_token"
+                target.parent.mkdir()
+                target.write_text("fixture-old-token")
+                with (
+                    patch("builtins.input", return_value="fixture-user"),
+                    patch.object(dibu.getpass, "getpass", return_value="fixture-password"),
+                    patch.object(dibu.pathlib.Path, "home", return_value=home),
+                    patch("urllib.request.build_opener") as opener,
+                ):
+                    opener.return_value.open.side_effect = failure
+                    with self.assertRaises(ValueError) as error:
+                        dibu.login()
+                    opener.return_value.open.assert_called_once()
+                self.assertNotIn("fixture-password", str(error.exception))
+                self.assertEqual(target.read_text(), "fixture-old-token")
+
+    def test_atomic_save_failure_keeps_old_token_and_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            target = home / ".cache" / "dibu_token"
+            target.parent.mkdir()
+            target.write_text("fixture-old-token")
+            with (
+                patch("builtins.input", return_value="fixture-user"),
+                patch.object(dibu.getpass, "getpass", return_value="fixture-password"),
+                patch.object(dibu.pathlib.Path, "home", return_value=home),
+                patch("urllib.request.build_opener") as opener,
+                patch.object(dibu.os, "replace", side_effect=OSError("fixture write failed")),
+            ):
+                opener.return_value.open.return_value.__enter__.return_value.read.return_value = (
+                    b'{"token":"fixture-token"}'
+                )
+                with self.assertRaises(OSError):
+                    dibu.login()
+            self.assertEqual(target.read_text(), "fixture-old-token")
+            self.assertEqual(list(target.parent.iterdir()), [target])
+
+    def test_login_cancellation_or_echo_fallback_never_sends_credentials(self):
+        def echo_warning(*args):
+            warnings.warn("fixture echo fallback", dibu.getpass.GetPassWarning)
+
+        for failure in (EOFError(), KeyboardInterrupt(), echo_warning):
+            with (
+                patch("builtins.input", return_value="fixture-user"),
+                patch.object(dibu.getpass, "getpass", side_effect=failure),
+                patch("urllib.request.build_opener") as opener,
+            ):
+                with self.assertRaisesRegex(ValueError, "cancelled"):
+                    dibu.login()
+                opener.assert_not_called()
+
+    def test_missing_or_invalid_auth_gives_manual_login_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            target = home / ".cache" / "dibu_token"
+            target.parent.mkdir()
+            for token in (None, "", "contains space"):
+                if token is not None:
+                    target.write_text(token)
+                with (
+                    patch.object(dibu.pathlib.Path, "home", return_value=home),
+                    patch("builtins.input") as prompt,
+                    patch.object(dibu.getpass, "getpass") as password,
+                ):
+                    with self.assertRaises(ValueError) as error:
+                        dibu.auth_config()
+                    self.assertIn(dibu.login_command(), str(error.exception))
+                    prompt.assert_not_called()
+                    password.assert_not_called()
+
+    def test_login_help_is_offline_and_credentials_cannot_be_command_flags(self):
+        with (
+            patch("sys.argv", ["dibu", "login", "--help"]),
+            patch("builtins.input") as prompt,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit) as error:
+                dibu.main()
+            self.assertEqual(error.exception.code, 0)
+            prompt.assert_not_called()
+        for flags in (["--password", "fixture"], ["--username", "fixture"], ["-v"], ["--execute"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                dibu.parse_cli(["login", *flags])
+
+
 class DibuTests(unittest.TestCase):
     def test_resources_default_ready_only_all_and_raw(self):
-        dashboard = {'stale': True, 'sampled_at_ms': 100, 'errors': {'fixture': 'stale'},
-                     'nodes': [{'node_id': 1, 'node_status': 'Ready', 'gpu_remain_num': 2},
-                               {'node_id': 2, 'node_status': 'SchedulingDisabled', 'gpu_remain_num': 8}]}
-        for flags in ([], ['--all'], ['-v']):
+        dashboard = {
+            "stale": True,
+            "sampled_at_ms": 100,
+            "errors": {"fixture": "stale"},
+            "nodes": [
+                {"node_id": 1, "node_status": "Ready", "gpu_remain_num": 2},
+                {"node_id": 2, "node_status": "SchedulingDisabled", "gpu_remain_num": 8},
+            ],
+        }
+        for flags in ([], ["--all"], ["-v"]):
             out = io.StringIO()
-            with patch('sys.argv', ['dibu', 'resources', *flags]), \
-                 patch.object(dibu, 'auth_config', return_value=('fixture', 'fixture')), \
-                 patch.object(dibu, 'request', return_value=dashboard), contextlib.redirect_stdout(out):
+            with (
+                patch("sys.argv", ["dibu", "resources", *flags]),
+                patch.object(dibu, "auth_config", return_value=("fixture", "fixture")),
+                patch.object(dibu, "request", return_value=dashboard),
+                contextlib.redirect_stdout(out),
+            ):
                 dibu.main()
             result = json.loads(out.getvalue())
-            if flags == ['-v']:
+            if flags == ["-v"]:
                 self.assertEqual(result, dashboard)
             else:
-                self.assertEqual([x['node_id'] for x in result['nodes']], [1, 2] if flags else [1])
-                self.assertTrue(result['dashboard_stale'])
-                self.assertEqual(result['dashboard_errors'], dashboard['errors'])
-                self.assertTrue(all(x['schedulable_free_gpus'] is None for x in result['nodes']))
-        self.assertEqual(dibu.resource_summary({'nodes': [], 'stale': False})['nodes'], [])
+                self.assertEqual([x["node_id"] for x in result["nodes"]], [1, 2] if flags else [1])
+                self.assertTrue(result["dashboard_stale"])
+                self.assertEqual(result["dashboard_errors"], dashboard["errors"])
+                self.assertTrue(all(x["schedulable_free_gpus"] is None for x in result["nodes"]))
+        self.assertEqual(dibu.resource_summary({"nodes": [], "stale": False})["nodes"], [])
 
     def test_workload_display_omits_dra_and_reduces_timing_without_mutating_raw(self):
-        row = {'container_id': 1, 'status': 'Running', 'num_gpu': 2,
-               'timing': {'state': 'running', 'elapsed_seconds': 10, 'remaining_seconds': 590},
-               'dra_request': {'parameters': {'count': 2, 'memory_mib': 4096},
-                               'future_diagnostic': 'available in raw output'}}
-        response = {'count': 1, 'next': 'fixture-page2', 'results': [row]}
+        row = {
+            "container_id": 1,
+            "status": "Running",
+            "num_gpu": 2,
+            "timing": {"state": "running", "elapsed_seconds": 10, "remaining_seconds": 590},
+            "dra_request": {
+                "parameters": {"count": 2, "memory_mib": 4096},
+                "future_diagnostic": "available in raw output",
+            },
+        }
+        response = {"count": 1, "next": "fixture-page2", "results": [row]}
         original = copy.deepcopy(response)
-        for operation in ('tasks', 'experiments'):
+        for operation in ("tasks", "experiments"):
             result = dibu.compact_response(operation, response)
-            after = result['results'][0]
-            self.assertNotIn('dra_request', after)
-            self.assertEqual(after['timing'], {'state': 'running'})
-            self.assertEqual(after['status'], 'Running')
-            self.assertEqual(after['num_gpu'], 2)
-            self.assertEqual(result['next'], 'fixture-page2')
+            after = result["results"][0]
+            self.assertNotIn("dra_request", after)
+            self.assertEqual(after["timing"], {"state": "running"})
+            self.assertEqual(after["status"], "Running")
+            self.assertEqual(after["num_gpu"], 2)
+            self.assertEqual(result["next"], "fixture-page2")
         self.assertEqual(response, original)
 
     def test_grouped_commands_match_legacy_requests(self):
@@ -591,7 +794,14 @@ class DibuTests(unittest.TestCase):
                 self.assertEqual(after[key], row[key])
             self.assertNotIn("dra_request", after)
             self.assertEqual(after["timing"], {"state": None})
-            for key in ("duration", "requested_duration_minutes", "cur_duration", "add_hours", "is_VM", "manual_restart_used"):
+            for key in (
+                "duration",
+                "requested_duration_minutes",
+                "cur_duration",
+                "add_hours",
+                "is_VM",
+                "manual_restart_used",
+            ):
                 self.assertNotIn(key, after)
             self.assertEqual(result["next"], "page2")
 
@@ -632,9 +842,16 @@ class DibuTests(unittest.TestCase):
         self.assertEqual(dibu.compact_response("profile", profile), profile)
 
     def test_cli_raw_aliases_bypass_projection(self):
-        response = {"results": [{"container_id": 1, "cmd": "full command",
-                                  "dra_request": {"parameters": {"count": 2}},
-                                  "timing": {"state": "running", "elapsed_seconds": 10}}]}
+        response = {
+            "results": [
+                {
+                    "container_id": 1,
+                    "cmd": "full command",
+                    "dra_request": {"parameters": {"count": 2}},
+                    "timing": {"state": "running", "elapsed_seconds": 10},
+                }
+            ]
+        }
         for flags in ([], ["--raw"], ["-v"], ["--verbose"]):
             out = io.StringIO()
             with (

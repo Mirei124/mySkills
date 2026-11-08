@@ -274,3 +274,12 @@ Forty offline tests pass, including Ready-only defaults, all-state/raw modes, st
 ## 2026-11-09 list-level timing and allocation detail
 
 At user request, recognized task and experiment list rows now omit `dra_request` entirely and retain only `timing.state`. GPU type/count and actual workload status remain visible; raw output retains the allocation and complete timing data. Missing timing state remains null rather than being inferred from workload status. The prior selective DRA projection is superseded, and its unused field tables were removed. Existing unknown-top-level full-response fallback remains unchanged. Offline regressions cover both workload types, unchanged raw objects/pagination, and full `-v`/`--raw`/`--verbose` output. No online resources were queried or modified for this change.
+
+
+## 2026-11-09 explicit interactive login
+
+Added standalone `login` with terminal username input and hidden password input. It POSTs JSON `{username, password}` to `/user/login/` at the configured base URL, matching the supplied Accept, Accept-Language, Content-Type, and Referer headers. It does not read existing credentials, send Authorization/cookies, follow redirects, retry, or print the response. Only a valid token is saved, via an fsynced mode-600 temporary file and atomic replacement of `~/.cache/dibu_token`; failed input/authentication/response parsing/replacement preserves the old file. No command-line password/username, raw-response, or resource-execution flags are accepted. Inability to obtain hidden input stops login.
+
+Missing/unreadable/empty/malformed token files and HTTP 401 now provide the actual script's manual login command. Skill instructions ask the user to run the installed CLI themselves, never to send credentials in chat; automatic login/refresh remains prohibited. This explicit manual-login workflow supersedes older instructions that only asked users to edit the token file.
+
+Offline tests cover unauthenticated POST contents and headers, base-URL override, new cache creation and existing-token replacement, mode 600, no credential/profile output, invalid/failed responses, HTTP/network errors, hidden-input fallback/cancellation, atomic replacement failure cleanup, help/flag restrictions, and manual-login hints without automatic prompting. No real login was attempted and no real credentials or token files were changed.

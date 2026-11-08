@@ -43,7 +43,7 @@ python3 "$CLI" images note --id 42 --note "Sample image"
 | `billing` | Credits, usage, ledger, estimates, and extensions |
 | `docs` | Platform documentation |
 
-`config` reads frontend configuration; `list` repeats the command overview. Groups with a default action list it in group help. Routine query groups default to their list action; `resources` defaults to the compact Ready-node summary (`--all` includes other node states), `account` to profile, and `billing` to credits. Explicit actions are recommended in scripts.
+`login` interactively obtains and saves an authentication token; `config` reads frontend configuration; `list` repeats the command overview. Groups with a default action list it in group help. Routine query groups default to their list action; `resources` defaults to the compact Ready-node summary (`--all` includes other node states), `account` to profile, and `billing` to credits. Explicit actions are recommended in scripts.
 
 Consolidated forms are `resources summary --raw` for the full dashboard, `tasks summary --id ID` for one task plus events, `files list --shared` for shared listings, and `files space --refresh` for a storage recalculation (write). Existing `dashboard`, `task-status`, `shared-files`, and `file-space-refresh` calls keep their original behavior. Shared listing does not enable shared-directory writes. Deleting a current workload and deleting its history remain distinct actions.
 
@@ -91,9 +91,19 @@ Resource queries do not authorize creation, expansion, or stopping existing work
 
 ## Authentication and failures
 
-Authentication is read only from `~/.cache/dibu_token`: a readable UTF-8 file containing a nonempty bare token, with surrounding whitespace trimmed. Use mode `600`. The script adds `Authorization: Token <token>`; it does not read or fall back to `DIBU_TOKEN`. Do not print or commit credentials. `DIBU_BASE_URL` can override the site; use its matching token file. No shell configuration or environment export is required.
+API authentication is loaded only from `~/.cache/dibu_token`: a readable UTF-8 file containing a nonempty bare token, with surrounding whitespace trimmed. Use mode `600`. The script adds `Authorization: Token <token>`; it does not read or fall back to `DIBU_TOKEN`. Do not print or commit credentials. `DIBU_BASE_URL` can override the site; use its matching token file. No shell configuration or environment export is required.
 
-On HTTP 401, stop requests and ask the user to update the token file; do not log in, refresh credentials automatically, or request plaintext tokens in chat. Diagnose HTTP 403 from the response body rather than assuming a permission problem from the status alone. Do not replay old browser quote fingerprints or idempotency keys.
+When authentication is missing, unreadable, empty, malformed, or rejected with HTTP 401, stop authenticated requests and give the user a command to execute manually:
+
+```bash
+python ~/.agents/skills/dibufusion-api/scripts/dibu.py login
+```
+
+Use the actual installed script path if it differs. The CLI's error message also provides a command for its own script path. Do not run interactive login on the user's behalf, refresh credentials automatically, or ask for usernames/passwords or plaintext tokens in chat. Wait until the user completes login before retrying the requested authenticated operation.
+
+The user enters a username and a password with hidden terminal input. `login` sends an unauthenticated POST to `/user/login/` at the configured site, without an Authorization header or cookies. On success it validates the response token and atomically replaces `~/.cache/dibu_token` with mode `600`; token/password and profile response are never printed. Rejected/malformed responses, cancelled input, and failed replacement preserve the existing token. If hidden password input is unavailable, login stops rather than echoing it. Login accepts no credential flags, raw response options, or resource-write execution flags. `DIBU_BASE_URL` selects the login site as well as authenticated API requests; login is only performed when the user explicitly runs the command.
+
+ Diagnose HTTP 403 from the response body rather than assuming a permission problem from the status alone. Do not replay old browser quote fingerprints or idempotency keys.
 
 Writes are not retried automatically. After an uncertain network outcome, reconcile exact workload names, IDs, and state before retrying with the existing idempotency key. Do not generate a new key to repeat an uncertain creation.
 
