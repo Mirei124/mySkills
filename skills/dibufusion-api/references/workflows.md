@@ -98,7 +98,7 @@ python3 "$CLI" container-create --body-file payload.json \
   --header "X-DibuFusion-Estimate-Fingerprint:<估价指纹>" --execute
 ```
 
-创建后查询 tasks/experiments/jobs 确认真实 ID 与状态；创建响应成功不等于资源已就绪。获取不到 ID 时按唯一任务名、创建时间与稳定幂等键查证，不以新键重建。原始接口保留原输出；`task-summary`、`task-status` 提供不含密码/命令正文的摘要。
+创建后查询 tasks/experiments/jobs 确认真实 ID 与状态；创建响应成功不等于资源已就绪。获取不到 ID 时按唯一任务名、创建时间与稳定幂等键查证，不以新键重建。Recognized lists use compact JSON by default; use `--raw` for full API responses. `task-summary` and `task-status` omit password and command fields unless raw output is requested.
 
 在有限时间内复查启动（例如最多 3 次、间隔 10–20 秒），若仍排队，附事件和准确状态交付，不能称为已运行。事件为空时承认原因未知，不推断超时、OOM 或正常退出。Running 后还要查看应用日志确认 worker 数/GPU 使用与申请一致，不能以资源已分配代替多卡实际生效。
 
@@ -122,3 +122,10 @@ python3 "$CLI" container-create --body-file payload.json \
 - profile-update 正文 `nickname,email,phone,gender`（男/女/未知）；password-change 正文 `username,old_password,new_password`，用权限受限临时 JSON 文件传入，完成后删除，不在命令行或输出显示密码。
 - access-token-create 和 tailscale-enroll 必须给 `--output` 保存含秘密响应，文件应限制权限。脚本从 `~/.cache/dibu_token` 读取认证值。
 - 主题和语言保存在浏览器偏好中，不是本次观察到的业务 HTTP API。
+
+
+## Live-confirmed quote and pagination constraints
+
+CLI smoke tests confirmed that `usage` and `ledger` accept page sizes 20, 50, and 100; sizes 2, 10, 21, and 200 returned HTTP 400. Page 2 of an empty billing list returned HTTP 404. Begin at page 1 and follow response pagination. Typed `--limit` supports the three confirmed sizes; raw parameters remain available for future server behavior.
+
+CPU-only, DRA whole-GPU, and configured DRA estimate payloads returned successful quotes with fingerprints. A legacy full-GPU quote targeting a current DRA-managed node returned `node_requires_dra_gpu`; use DRA selection for those nodes. This does not establish whether another deployment supports legacy or vGPU allocation. Quote success and candidate counts do not prove that a workload can schedule: the sampled inventory was stale with unknown availability, and configured MIG nodes were not verified schedulable. No workload creation, GPU allocation, or billing extension was performed in this check.

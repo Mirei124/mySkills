@@ -1,66 +1,109 @@
 ---
 name: dibufusion-api
-description: 通过直接 HTTP API 操作内网 DibuFusion GPU 控制台（10.249.187.159:32320），查询资源、任务、实验、分布式任务、文件、共享目录、数据集、镜像、算元和个人设置，或执行用户授权的资源操作。用于此站点的后续自动化，免去重复浏览器点击。
+description: Operate the internal DibuFusion GPU console at 10.249.187.159:32320 through direct HTTP APIs. Query resources, workloads, files, datasets, images, billing, and settings, or perform specifically authorized resource operations without browser interaction.
 ---
 
-使用本 skill 内的 `scripts/dibu.py`，仅依赖 Python 3 标准库。默认站点为 `http://10.249.187.159:32320`。
+Use this skill's `scripts/dibu.py`; it requires only the Python standard library. The default site is `http://10.249.187.159:32320`. In the examples, `CLI` is the absolute path to that script.
 
-## 调用
+## Discover only the operation you need
 
-令 `CLI` 为本 skill 目录下 `scripts/dibu.py` 的绝对路径：
+Routine calls do not require reading the full API catalog or workflow reference. Use `--help` or `list` for the command overview, `GROUP --help` for actions and read/write labels, and `GROUP ACTION --help` for typed options, defaults, required fields/headers, and examples. Use `GROUP ACTION --describe` for the underlying operation entry as JSON, including body schemas. Public commands are grouped by resource; legacy flat operation names remain compatible but are omitted from the overview. Creation, conversion, job creation, workload estimates, and extension estimates/submissions also provide `--template` for an editable JSON body. Discovery works offline without authentication, even for write operations or operations with missing required fields. Examples contain illustrative IDs; resolve current IDs before execution.
 
 ```bash
 python3 "$CLI" list
-python3 "$CLI" resource-summary
-python3 "$CLI" task-summary
-python3 "$CLI" task-status --param container_id=<ID>
-python3 "$CLI" dashboard
-python3 "$CLI" tasks --param operate_id=1 --param size=20
-python3 "$CLI" experiments --param operate_id=0
-python3 "$CLI" jobs
-python3 "$CLI" images --param q=ubuntu --param opt=0
-python3 "$CLI" files --param path=/dotfiles
-python3 "$CLI" shared-files --param path=/datasets
-python3 "$CLI" credits
-python3 "$CLI" usage --param page=1 --param size=20
+python3 "$CLI" tasks list --help
+python3 "$CLI" workloads create --describe
+python3 "$CLI" workloads create --template
+python3 "$CLI" billing estimate --template
+python3 "$CLI" resources summary
+python3 "$CLI" tasks summary
+python3 "$CLI" tasks summary --id 276
+python3 "$CLI" tasks list --state running --limit 20
+python3 "$CLI" experiments list --state finished
+python3 "$CLI" images list --scope mine --temporary true --query ubuntu
+python3 "$CLI" files list --path /dotfiles
+python3 "$CLI" files list --shared --path /datasets
+python3 "$CLI" billing usage --page 1 --limit 20
+python3 "$CLI" images note --id 42 --note "Sample image"
 ```
 
-`--param KEY=VALUE` 使用服务端原始字段，数字、布尔、数组、对象按 JSON 解析，其余保留字符串；`--body-file payload.json` 提供 JSON 正文。返回原始响应，新的 API 常用 `data` 包裹，旧接口可能是数组或 `{count,results}`。不假设所有接口有相同响应结构。
+## Command groups and consolidated entrypoints
 
-查 [references/operations.json](references/operations.json) 获取命名操作、HTTP 方法、URL、默认参数、必填参数、写操作标记和必填请求头。读取 [references/workflows.md](references/workflows.md) 后再创建/转换工作负载、续时、删除或修改文件及镜像。
+| Group | Purpose |
+| --- | --- |
+| `resources` | Dashboard summaries and GPU configuration |
+| `tasks` | Task list, all-category summary, and one-task inspection |
+| `experiments` | Interactive experiment list, stop, restart, and conversion |
+| `jobs` | Distributed job list, creation, deletion, network, and logs |
+| `workloads` | Container task/experiment creation, deletion, events, network, and logs |
+| `images` | Image list, snapshots, metadata, registration, and deletion |
+| `files` | Personal/shared listings and personal path/storage operations |
+| `datasets` | Dataset registration metadata |
+| `account` | Profile, credentials, and Tailscale enrollment |
+| `billing` | Credits, usage, ledger, estimates, and extensions |
+| `docs` | Platform documentation |
 
-写操作默认预览；已得到用户对具体操作的授权后传 `--execute`。按现有会话授权执行，不重复索要确认。部分 GET 有副作用，以目录中的 `write` 为准。`--dry-run` 可预览任何操作。
+`config` reads frontend configuration; `list` repeats the command overview. Groups with a default action list it in group help. Routine query groups default to their list action; `resources` defaults to summary, `account` to profile, and `billing` to credits. Explicit actions are recommended in scripts.
 
-## GPU 申请默认策略
+Consolidated forms are `resources summary --raw` for the full dashboard, `tasks summary --id ID` for one task plus events, `files list --shared` for shared listings, and `files space --refresh` for a storage recalculation (write). Existing `dashboard`, `task-status`, `shared-files`, and `file-space-refresh` calls keep their original behavior. Shared listing does not enable shared-directory writes. Deleting a current workload and deleting its history remain distinct actions.
 
-申请前查询 `resource-summary`（只读取 dashboard）和当前任务。用户没有指定卡数时，若已确认程序支持并会实际使用多卡，**默认申请本次工作负载可调度、可有效利用的最大可用 GPU 数量**，以加快运行。用户明确卡数、预算或资源上限优先。
+Billing `usage`/`ledger` support `--limit 20|50|100`; start at page 1 and follow returned pagination (page 2 of an empty list returns HTTP 404).
 
-最大值受当前空闲 GPU、CPU/内存配比、显存、账号配额、任务并行度和拓扑共同限制；单机程序只能计算一个兼容节点内的卡，未验证跨节点分布式时不能把各节点卡数相加。多组任务同时提交时应联合分配，使总申请不超出可用资源，逐次刷新，不能每组重复使用同一份空闲数。多个 worker/数据分片需与卡数匹配；仅 `device_map=auto` 不证明会有效利用全部 GPU。详细预检见 [工作流](references/workflows.md#资源预检与最大有效卡数)。
+`--state` selects a list category (`running`, `pending`, or `finished`); it does not guarantee the actual state of returned rows. `--scope` selects `all`, `mine`, `public`, or `base` images. `--id` maps to the operation's actual identifier field. Other options are operation-specific; unsupported options are rejected. Creation options include `--image`, `--cpu`, `--memory`, `--duration` (positive seconds or integer `s`/`m`/`h` suffix), `--name`, `--command`, and `--mode task|experiment`. They supplement a body file and do not generate passwords, estimate costs, select resources, or submit automatically.
 
-只读查看资源不授权创建、扩容或停止任务。确认最大卡数后按实际配置估价，仍遵守用户已有预算和收费授权；资源不足时不要擅自停止其他任务。
+Templates are illustrative configurations, not automatic resource choices or quotes. Replace ID/name/command placeholders and generate a password in a mode-600 file before use; container templates intentionally leave passwords empty. `--template` prints only the body and cannot be combined with execution, request, response-output, or other discovery options. Use shell redirection to save a template, then protect the file before filling secrets. Body schemas document field types, required fields, units, conditional task commands, and GPU selection guidance; they do not replace server validation or restrict additional raw API fields.
 
-## 认证
+`--param KEY=VALUE` remains the raw API escape hatch. JSON numbers, booleans, arrays, objects, and null are parsed; other values stay strings. `--body-file payload.json` supplies an object. Conflicting named options and raw parameters/body-file fields are rejected; repeated conflicting raw parameters are rejected without printing their values. Legacy raw parameters still override body-file fields. Common options work before or after the operation.
 
-认证仅从 `~/.cache/dibu_token` 读取。文件使用 UTF-8，内容为裸 token；脚本去掉首尾空白，文件缺失、不可读、为空或格式错误时直接报错。请求自动添加 `Authorization: Token <token>`，不读取或回退到 `DIBU_TOKEN` 环境变量。
+[references/operations.json](references/operations.json) is the single source for operation metadata and typed option mappings; inspect it only when maintaining the catalog or investigating unsupported fields. Read [references/workflows.md](references/workflows.md) for resource selection, creation/conversion payloads, quoting, extensions, asynchronous lifecycle operations, or nontrivial file/image semantics. Simple queries and exact-ID operations can use focused CLI help.
 
-无需加载 shell 配置或导出环境变量。设置文件权限为 `600`，不在输出或仓库中记录 token。`DIBU_BASE_URL` 仍可覆盖站点地址；切换站点时使用对应的 token 文件。
+Writes default to a redacted preview. Once a specific operation is authorized, pass `--execute` without asking again. Some GET operations mutate state; use the catalog's `write` flag. `--dry-run` previews ordinary API operations without authentication or requests; summary commands do not accept it. Creation still requires a nonempty password in a protected body file, the estimate fingerprint, and an idempotency key. Use `--header NAME:VALUE` for required headers; see operation help. Header names are normalized case-insensitively. Identical duplicates are deduplicated; conflicting duplicates, empty values, and multiline values fail before authentication or submission, including in previews.
 
-收到 HTTP 401 时停止调用，请用户更新 `~/.cache/dibu_token`，更新后再继续；不自动登录、刷新凭据或索取聊天中的明文 token。
+## Response output
 
-## 失败处理
+Default output remains JSON. Recognized task, experiment, job, image, file, shared-file, and dataset lists omit known bulky configuration fields while preserving identifiers, actual status, resource values, pagination, and envelope diagnostics. Lists with unknown row fields, missing identifiers, or unfamiliar structures fall back to the full response. This conservative fallback can still produce large output; it does not indicate an error.
 
-写入不自动重试。网络结果不确定时先查询状态和列表，保留原幂等键，不以新键重复创建。HTTP 403 应依据服务端响应正文诊断，不能仅凭状态码认定账号缺少权限；也不能直接重放浏览器请求中的旧估价指纹和幂等键。
+- `--raw`, `-v`, and `--verbose` are equivalent: return the full API response without projection. They do not enable HTTP tracing.
+- `--output response.json` saves the full response with mode `600` and prints only a file receipt for API operations. It takes precedence over display options. A JSON business error is still reported as a failure after the complete response is saved; the CLI exits nonzero and prints no successful file receipt. Non-JSON logs and empty responses remain supported. Secret-returning operations still require this option.
+- `resource-summary --raw` returns the dashboard response. `task-summary --raw` and `task-status --raw` return a `responses` array containing each request's operation, query, and full response, including fetched pages and events. Summary `--output` saves this full representation with mode `600` without printing it.
+- Task and experiment lists retain timing, extension eligibility, DRA allocation, image-save, and restart state; connection addresses, ports, pod names, passwords, and command bodies are omitted from recognized rows. Image lists omit the redundant owner nickname. Profile output omits WeChat binding and avatar fields. File lists already contain only essential fields.
+- Image-save status omits recognized runtime identifiers from `client_data`, while preserving operation ID, image name, node, temporary/automatic flags, result, timestamps, and diagnostics. Unknown client fields trigger full-response fallback.
+- Write results, estimates, billing, dashboard, GPU inventory, config, other diagnostics, logs, documentation, and other unadapted operations retain their full responses, including IDs, fingerprints, warnings, and errors. Previews retain their existing redaction regardless of `--raw`.
 
-## 任务日志
+```bash
+python3 "$CLI" tasks list --param size=20
+python3 "$CLI" tasks list -v --param size=20
+python3 "$CLI" tasks list --output tasks.json
+```
 
-任务的 stdout、stderr、启动/退出记录及各 worker 日志统一保存到 `/workspace/task_run_logs/` 下按任务名和运行标识区分的独立子目录，避免不同实验或重试相互覆盖。
+Live workload-write sampling found creation receipts (`message`, `port`, `IP`), stop acceptance messages, and empty-body HTTP receipts already minimal; they remain complete by default. Creation may omit the workload ID, so reconcile the exact unique name in current/pending/history lists and check actual status. A stop acceptance can precede populated save status and workload termination. See [maintenance/verification.md](maintenance/verification.md) for sampled coverage and failures.
 
-## 状态与诊断
+Changing existing consumers to `--raw` preserves the previous response shape. Raw responses and fallback output may contain sensitive fields; do not paste or commit them.
 
-`task-summary` 分页汇总任务列表；`task-status --param container_id=ID` 按 ID 检索运行、排队和历史列表并附调度事件。交互实验另查 `experiments`，分布式任务另查 `jobs`；不要把任务摘要当全部工作负载。
+## GPU allocation policy
 
-创建成功后查真实 ID、实际 `status` 和事件。有时运行列表中会出现 Pending，应按行内状态报告。提交成功、Running、应用日志已启动、应用结果已验证是不同阶段；`Not exist or finished` 只能表明工作负载已结束/不存在。结果完整性与指标验证由项目脚本负责，不能由平台状态推断成功。
+Before allocation, query `resources summary` (dashboard only) and current workloads. If the user has not specified a GPU count and the program is verified to actually use multiple GPUs, request the largest currently schedulable count the workload can effectively use. Explicit counts, budgets, and resource limits take precedence.
 
-## 按需参考
+Bound the count by fresh free GPUs, CPU/memory ratios, VRAM, quota, parallelism, and topology. Single-node programs cannot sum GPUs across nodes; unverified cross-node support does not establish distributed capability. Allocate multiple workloads jointly, refresh availability between submissions, and do not reuse the same free-GPU snapshot for every allocation. Match workers/data shards to the allocation; `device_map=auto` alone does not prove effective multi-GPU use. See [resource preflight](references/workflows.md#资源预检与最大有效卡数).
 
-日常操作读取上述接口清单和工作流。只有核对历史可用性、排查已知问题或维护本技能时，才读取 [maintenance/verification.md](maintenance/verification.md)；该文件集中记录测试结果、未测项、暂存问题、接口来源和维护方法。
+Resource queries do not authorize creation, expansion, or stopping existing workloads. Estimate the actual chosen configuration and respect existing budget/charging authorization. Do not stop other workloads to resolve resource shortages.
+
+## Authentication and failures
+
+Authentication is read only from `~/.cache/dibu_token`: a readable UTF-8 file containing a nonempty bare token, with surrounding whitespace trimmed. Use mode `600`. The script adds `Authorization: Token <token>`; it does not read or fall back to `DIBU_TOKEN`. Do not print or commit credentials. `DIBU_BASE_URL` can override the site; use its matching token file. No shell configuration or environment export is required.
+
+On HTTP 401, stop requests and ask the user to update the token file; do not log in, refresh credentials automatically, or request plaintext tokens in chat. Diagnose HTTP 403 from the response body rather than assuming a permission problem from the status alone. Do not replay old browser quote fingerprints or idempotency keys.
+
+Writes are not retried automatically. After an uncertain network outcome, reconcile exact workload names, IDs, and state before retrying with the existing idempotency key. Do not generate a new key to repeat an uncertain creation.
+
+## Logs and actual state
+
+Keep workload stdout, stderr, startup/exit records, and worker logs in separate task/run directories under `/workspace/task_run_logs/`; avoid overwriting previous runs.
+
+`tasks summary` paginates task categories. `tasks summary --id ID` searches them and attaches scheduling events. Query experiments and distributed jobs separately; task summaries do not cover all workloads.
+
+After creation, resolve the real ID, actual status, and events. Running-category rows can be Pending. Submission acceptance, Running, application startup, and verified results are distinct stages. `Not exist or finished` only indicates that the workload ended or is absent. Project scripts must verify result completeness and metrics; platform state cannot establish application correctness.
+
+## Maintenance evidence
+
+Read [maintenance/verification.md](maintenance/verification.md) only for historical availability, known failures, sampling coverage, or skill maintenance. Installed skill directories are manually synchronized by the user; maintain source in this repository.

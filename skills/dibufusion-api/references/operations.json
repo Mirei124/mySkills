@@ -2,37 +2,58 @@
   "dashboard": {
     "method": "GET",
     "path": "/node/dashboard/",
-    "description": "仪表盘资源与工作负载汇总",
+    "description": "Resource and workload dashboard",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "dashboard"
+      ]
+    }
   },
   "config": {
     "method": "GET",
     "path": "/getFrontendConfig/",
-    "description": "前端配置与使用说明目录",
+    "description": "Frontend capabilities, presets, and documentation index",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "config"
+      ]
+    }
   },
   "gpu-inventory": {
     "method": "GET",
     "path": "/node/gpu-inventory/",
-    "description": "可用 GPU、节点与 DRA 配置",
+    "description": "GPU inventory, partition availability, and DRA configuration",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "gpu-inventory"
+      ]
+    }
   },
   "tasks": {
     "method": "GET",
     "path": "/container/get/",
-    "description": "任务/实验列表；operate_id 1运行中 0已完成 2待调度",
+    "description": "List task categories; inspect actual row status",
     "query": {
       "operate_id": 1,
       "paginate": 1,
@@ -43,12 +64,51 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--state"
+          ],
+          "field": "operate_id",
+          "type": "str",
+          "help": "List category, not actual row status (default: running)",
+          "mapping": {
+            "running": 1,
+            "pending": 2,
+            "finished": 0
+          }
+        },
+        {
+          "flags": [
+            "--page"
+          ],
+          "field": "page",
+          "type": "positive-int",
+          "help": "API page; default: 1"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "field": "size",
+          "type": "positive-int",
+          "help": "API size; default: 10"
+        }
+      ],
+      "notes": [
+        "List category does not guarantee actual row status; inspect each row."
+      ],
+      "examples": [
+        "tasks --state running --limit 20"
+      ]
+    }
   },
   "experiments": {
     "method": "GET",
     "path": "/container/get/",
-    "description": "任务/实验列表；operate_id 1运行中 0已完成 2待调度",
+    "description": "List experiment categories; inspect actual row status",
     "query": {
       "operate_id": 1,
       "paginate": 1,
@@ -59,12 +119,51 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--state"
+          ],
+          "field": "operate_id",
+          "type": "str",
+          "help": "List category, not actual row status (default: running)",
+          "mapping": {
+            "running": 1,
+            "pending": 2,
+            "finished": 0
+          }
+        },
+        {
+          "flags": [
+            "--page"
+          ],
+          "field": "page",
+          "type": "positive-int",
+          "help": "API page; default: 1"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "field": "size",
+          "type": "positive-int",
+          "help": "API size; default: 10"
+        }
+      ],
+      "notes": [
+        "List category does not guarantee actual row status; inspect each row."
+      ],
+      "examples": [
+        "experiments --state finished --limit 20"
+      ]
+    }
   },
   "jobs": {
     "method": "GET",
     "path": "/job/get/",
-    "description": "分布式任务列表",
+    "description": "List distributed job categories; inspect actual row status",
     "query": {
       "operate_id": 1,
       "is_distributed": 1
@@ -72,12 +171,35 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--state"
+          ],
+          "field": "operate_id",
+          "type": "str",
+          "help": "List category, not actual row status (default: running)",
+          "mapping": {
+            "running": 1,
+            "pending": 2,
+            "finished": 0
+          }
+        }
+      ],
+      "notes": [
+        "List category does not guarantee actual row status; inspect each row."
+      ],
+      "examples": [
+        "jobs"
+      ]
+    }
   },
   "container-create": {
     "method": "POST",
     "path": "/container/",
-    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "description": "Create a task or experiment with a quote and idempotency key",
     "query": {},
     "body": null,
     "write": true,
@@ -87,12 +209,289 @@
     "headers": [
       "Idempotency-Key",
       "X-DibuFusion-Estimate-Fingerprint"
-    ]
+    ],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--image"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        },
+        {
+          "flags": [
+            "--cpu"
+          ],
+          "field": "cpu",
+          "type": "positive-int",
+          "help": "CPU cores"
+        },
+        {
+          "flags": [
+            "--memory"
+          ],
+          "field": "memory",
+          "type": "str",
+          "help": "Host memory including unit, for example 4Gi"
+        },
+        {
+          "flags": [
+            "--duration"
+          ],
+          "field": "duration",
+          "type": "duration",
+          "help": "Positive seconds, or integer with s/m/h suffix; for example 600 or 10m"
+        },
+        {
+          "flags": [
+            "--name"
+          ],
+          "field": "lab_name",
+          "type": "str",
+          "help": "Unique workload name"
+        },
+        {
+          "flags": [
+            "--command"
+          ],
+          "field": "cmd",
+          "type": "str",
+          "help": "Task command; quote shell text"
+        },
+        {
+          "flags": [
+            "--mode"
+          ],
+          "field": "is_VM",
+          "type": "str",
+          "help": "Task or interactive experiment",
+          "mapping": {
+            "task": false,
+            "experiment": true
+          }
+        }
+      ],
+      "notes": [
+        "Use --body-file for remaining creation fields, including a nonempty generated password. CLI aliases do not choose resources, obtain a quote, generate credentials, or submit automatically. Read workflows.md for creation semantics.",
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state.",
+        "Execution requires headers: Idempotency-Key, X-DibuFusion-Estimate-Fingerprint. Supply each using --header NAME:VALUE.",
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use. Generate a nonempty password in a mode-600 file; the template password is intentionally empty."
+      ],
+      "examples": [
+        "container-create --body-file payload.json --mode task --image 42 --cpu 2 --memory 4Gi --duration 10m --name sample --command \"echo hello\" --dry-run",
+        "container-create --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "image_id",
+        "name",
+        "lab_name",
+        "is_VM",
+        "cpu",
+        "memory",
+        "num_gpu",
+        "duration",
+        "password"
+      ],
+      "properties": {
+        "image_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "description": "Resolve the actual current image ID; do not reuse illustrative IDs."
+        },
+        "name": {
+          "type": "string",
+          "description": "Current account username.",
+          "minLength": 1
+        },
+        "lab_name": {
+          "type": "string",
+          "description": "Unique workload name; use it to reconcile the resulting ID.",
+          "minLength": 1
+        },
+        "is_VM": {
+          "type": "boolean",
+          "description": "true for interactive experiment, false for task."
+        },
+        "cpu": {
+          "type": "integer",
+          "description": "CPU cores; must match the quote.",
+          "minimum": 1
+        },
+        "memory": {
+          "type": "string",
+          "description": "Host memory with unit, for example 4Gi; must match memory_gib in the quote."
+        },
+        "num_gpu": {
+          "type": "integer",
+          "description": "GPUs; 0 for CPU-only. Must match quote and DRA count.",
+          "minimum": 0
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Seconds; must match the quote. Legacy 0 is unlimited; experiments currently allow at most 43200 seconds.",
+          "minimum": 0
+        },
+        "password": {
+          "type": "string",
+          "description": "Generate a nonempty random password and save it in a mode-600 body file; never print it.",
+          "minLength": 1
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Required and nonempty for tasks; may be empty for experiments. Persist task logs under /workspace/task_run_logs/."
+        },
+        "path": {
+          "type": "string",
+          "description": "Container working directory, for example /workspace."
+        },
+        "shm": {
+          "type": "string",
+          "description": "Shared memory including unit, for example 1Gi; size it for the workload."
+        },
+        "capabilities": {
+          "type": "array",
+          "description": "Requested capabilities; [] when none are needed.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "is_test": {
+          "type": "boolean",
+          "description": "Frontend compatibility flag; true still creates REAL resources."
+        },
+        "use_ib": {
+          "type": "boolean",
+          "description": "Enable InfiniBand only for compatible workloads."
+        },
+        "use_master": {
+          "type": "boolean",
+          "description": "Master-node setting used by the platform."
+        },
+        "outer_ssh": {
+          "type": "boolean",
+          "description": "Request external SSH connectivity."
+        },
+        "auto_save_on_finish": {
+          "type": "boolean",
+          "description": "Save an image automatically at experiment completion."
+        },
+        "gputype": {
+          "type": "string",
+          "description": "Legacy GPU model; required for legacy GPU allocation."
+        },
+        "gpumem": {
+          "type": "number",
+          "description": "Legacy vgpu memory selection; use the platform selector value without inventing conversions."
+        },
+        "legacy_node_id": {
+          "type": "integer",
+          "description": "Selected legacy GPU node ID.",
+          "minimum": 1
+        },
+        "gpu_selection": {
+          "type": "object",
+          "description": "DRA selection; required when using DRA. Match count to num_gpu/gpu_count.",
+          "properties": {
+            "node_id": {
+              "type": "integer",
+              "description": "Current node ID from inventory.",
+              "minimum": 1
+            },
+            "gpu_type": {
+              "type": "string",
+              "description": "Current GPU type from inventory."
+            },
+            "count": {
+              "type": "integer",
+              "description": "GPU count; must match the workload GPU count.",
+              "minimum": 1
+            },
+            "allocation": {
+              "type": "string",
+              "description": "builtin_whole for whole GPUs, or config for configured allocation.",
+              "enum": [
+                "builtin_whole",
+                "config"
+              ]
+            },
+            "config_id": {
+              "type": "integer",
+              "description": "Required for configured allocation."
+            },
+            "preset_key": {
+              "type": "string",
+              "description": "Required for configured allocation; use the live inventory value."
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "is_VM": {
+                "const": false
+              }
+            },
+            "required": [
+              "is_VM"
+            ]
+          },
+          "then": {
+            "required": [
+              "cmd"
+            ],
+            "properties": {
+              "cmd": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "body_template": {
+      "capabilities": [],
+      "cpu": 2,
+      "duration": 600,
+      "image_id": "<IMAGE_ID>",
+      "is_VM": false,
+      "is_test": true,
+      "lab_name": "<UNIQUE_WORKLOAD_NAME>",
+      "memory": "4Gi",
+      "name": "<CURRENT_USERNAME>",
+      "num_gpu": 0,
+      "password": "",
+      "path": "/workspace",
+      "shm": "1Gi",
+      "use_ib": false,
+      "use_master": true,
+      "cmd": "<TASK_COMMAND_WITH_PERSISTENT_LOGGING>",
+      "outer_ssh": false,
+      "auto_save_on_finish": false
+    }
   },
   "job-create": {
     "method": "POST",
     "path": "/job/",
-    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "description": "Create a distributed job with a quote and idempotency key",
     "query": {},
     "body": null,
     "write": true,
@@ -102,12 +501,141 @@
     "headers": [
       "Idempotency-Key",
       "X-DibuFusion-Estimate-Fingerprint"
-    ]
+    ],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state.",
+        "Execution requires headers: Idempotency-Key, X-DibuFusion-Estimate-Fingerprint. Supply each using --header NAME:VALUE.",
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use."
+      ],
+      "examples": [
+        "job-create --body-file payload.json",
+        "job-create --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "name",
+        "task_name",
+        "image_id",
+        "worker_num",
+        "gpu_per_worker",
+        "cpu_per_worker",
+        "mem_per_worker",
+        "cmd",
+        "duration"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Current account username.",
+          "minLength": 1
+        },
+        "task_name": {
+          "type": "string",
+          "description": "Unique distributed workload name.",
+          "minLength": 1
+        },
+        "image_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "description": "Resolve the actual current image ID; do not reuse illustrative IDs."
+        },
+        "work_path": {
+          "type": "string",
+          "description": "Container working directory, for example /workspace."
+        },
+        "worker_num": {
+          "type": "integer",
+          "description": "Worker count; match worker_count in the quote.",
+          "minimum": 1
+        },
+        "gpu_per_worker": {
+          "type": "integer",
+          "description": "GPUs per worker; match gpu_count in the quote.",
+          "minimum": 0
+        },
+        "cpu_per_worker": {
+          "type": "integer",
+          "description": "CPU cores per worker; match cpu_cores in the quote.",
+          "minimum": 1
+        },
+        "mem_per_worker": {
+          "type": "string",
+          "description": "Host memory per worker including unit; match memory_gib in the quote."
+        },
+        "shm_per_worker": {
+          "type": "string",
+          "description": "Shared memory per worker including unit."
+        },
+        "gputype": {
+          "type": "string",
+          "description": "Legacy GPU model when requesting GPUs."
+        },
+        "gpumem": {
+          "type": "number",
+          "description": "Legacy vgpu memory selection; use the platform selector value without inventing conversions."
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Worker commands; with use_mpi=false, separate one command per worker using ;;. Persist worker logs.",
+          "minLength": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "description": "Requested capabilities; [] when none are needed.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "use_ib": {
+          "type": "boolean",
+          "description": "Enable InfiniBand only for compatible workloads."
+        },
+        "use_mpi": {
+          "type": "boolean",
+          "description": "true for centralized MPI startup; false for per-worker commands."
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Lifetime in seconds; match duration_seconds in the job quote.",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "body_template": {
+      "name": "<CURRENT_USERNAME>",
+      "task_name": "<UNIQUE_JOB_NAME>",
+      "image_id": "<IMAGE_ID>",
+      "work_path": "/workspace",
+      "worker_num": 1,
+      "gpu_per_worker": 0,
+      "cpu_per_worker": 2,
+      "mem_per_worker": "4Gi",
+      "shm_per_worker": "1Gi",
+      "cmd": "<WORKER_COMMANDS_WITH_PERSISTENT_LOGGING>",
+      "capabilities": [],
+      "use_ib": false,
+      "use_mpi": false,
+      "duration": 600
+    }
   },
   "container-convert": {
     "method": "POST",
     "path": "/container/toTask/",
-    "description": "创建或转换工作负载，先估价并传入指纹与幂等键",
+    "description": "Convert an experiment to a task with a quote and idempotency key",
     "query": {},
     "body": null,
     "write": true,
@@ -117,180 +645,737 @@
     "headers": [
       "Idempotency-Key",
       "X-DibuFusion-Estimate-Fingerprint"
-    ]
+    ],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--image"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        },
+        {
+          "flags": [
+            "--cpu"
+          ],
+          "field": "cpu",
+          "type": "positive-int",
+          "help": "CPU cores"
+        },
+        {
+          "flags": [
+            "--memory"
+          ],
+          "field": "memory",
+          "type": "str",
+          "help": "Host memory including unit, for example 4Gi"
+        },
+        {
+          "flags": [
+            "--duration"
+          ],
+          "field": "duration",
+          "type": "duration",
+          "help": "Positive seconds, or integer with s/m/h suffix; for example 600 or 10m"
+        },
+        {
+          "flags": [
+            "--name"
+          ],
+          "field": "lab_name",
+          "type": "str",
+          "help": "Unique workload name"
+        },
+        {
+          "flags": [
+            "--command"
+          ],
+          "field": "cmd",
+          "type": "str",
+          "help": "Task command; quote shell text"
+        },
+        {
+          "flags": [
+            "--mode"
+          ],
+          "field": "is_VM",
+          "type": "str",
+          "help": "Task or interactive experiment",
+          "mapping": {
+            "task": false,
+            "experiment": true
+          }
+        }
+      ],
+      "notes": [
+        "Use --body-file for remaining creation fields, including a nonempty generated password. CLI aliases do not choose resources, obtain a quote, generate credentials, or submit automatically. Read workflows.md for creation semantics.",
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state.",
+        "Execution requires headers: Idempotency-Key, X-DibuFusion-Estimate-Fingerprint. Supply each using --header NAME:VALUE.",
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use. Generate a nonempty password in a mode-600 file; the template password is intentionally empty."
+      ],
+      "examples": [
+        "container-convert --body-file payload.json",
+        "container-convert --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "name",
+        "lab_name",
+        "is_VM",
+        "cpu",
+        "memory",
+        "num_gpu",
+        "duration",
+        "password",
+        "container_id"
+      ],
+      "properties": {
+        "image_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "description": "Resolve the actual current image ID; do not reuse illustrative IDs. For conversion, the source container may determine the image."
+        },
+        "name": {
+          "type": "string",
+          "description": "Current account username.",
+          "minLength": 1
+        },
+        "lab_name": {
+          "type": "string",
+          "description": "Unique workload name; use it to reconcile the resulting ID.",
+          "minLength": 1
+        },
+        "is_VM": {
+          "type": "boolean",
+          "description": "true for interactive experiment, false for task."
+        },
+        "cpu": {
+          "type": "integer",
+          "description": "CPU cores; must match the quote.",
+          "minimum": 1
+        },
+        "memory": {
+          "type": "string",
+          "description": "Host memory with unit, for example 4Gi; must match memory_gib in the quote."
+        },
+        "num_gpu": {
+          "type": "integer",
+          "description": "GPUs; 0 for CPU-only. Must match quote and DRA count.",
+          "minimum": 0
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Seconds; must match the quote. Legacy 0 is unlimited; experiments currently allow at most 43200 seconds.",
+          "minimum": 0
+        },
+        "password": {
+          "type": "string",
+          "description": "Generate a nonempty random password and save it in a mode-600 body file; never print it.",
+          "minLength": 1
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Required and nonempty for tasks; may be empty for experiments. Persist task logs under /workspace/task_run_logs/."
+        },
+        "path": {
+          "type": "string",
+          "description": "Container working directory, for example /workspace."
+        },
+        "shm": {
+          "type": "string",
+          "description": "Shared memory including unit, for example 1Gi; size it for the workload."
+        },
+        "capabilities": {
+          "type": "array",
+          "description": "Requested capabilities; [] when none are needed.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "is_test": {
+          "type": "boolean",
+          "description": "Frontend compatibility flag; true still creates REAL resources."
+        },
+        "use_ib": {
+          "type": "boolean",
+          "description": "Enable InfiniBand only for compatible workloads."
+        },
+        "use_master": {
+          "type": "boolean",
+          "description": "Master-node setting used by the platform."
+        },
+        "outer_ssh": {
+          "type": "boolean",
+          "description": "Request external SSH connectivity."
+        },
+        "auto_save_on_finish": {
+          "type": "boolean",
+          "description": "Save an image automatically at experiment completion."
+        },
+        "gputype": {
+          "type": "string",
+          "description": "Legacy GPU model; required for legacy GPU allocation."
+        },
+        "gpumem": {
+          "type": "number",
+          "description": "Legacy vgpu memory selection; use the platform selector value without inventing conversions."
+        },
+        "legacy_node_id": {
+          "type": "integer",
+          "description": "Selected legacy GPU node ID.",
+          "minimum": 1
+        },
+        "gpu_selection": {
+          "type": "object",
+          "description": "DRA selection; required when using DRA. Match count to num_gpu/gpu_count.",
+          "properties": {
+            "node_id": {
+              "type": "integer",
+              "description": "Current node ID from inventory.",
+              "minimum": 1
+            },
+            "gpu_type": {
+              "type": "string",
+              "description": "Current GPU type from inventory."
+            },
+            "count": {
+              "type": "integer",
+              "description": "GPU count; must match the workload GPU count.",
+              "minimum": 1
+            },
+            "allocation": {
+              "type": "string",
+              "description": "builtin_whole for whole GPUs, or config for configured allocation.",
+              "enum": [
+                "builtin_whole",
+                "config"
+              ]
+            },
+            "config_id": {
+              "type": "integer",
+              "description": "Required for configured allocation."
+            },
+            "preset_key": {
+              "type": "string",
+              "description": "Required for configured allocation; use the live inventory value."
+            }
+          },
+          "additionalProperties": true
+        },
+        "container_id": {
+          "type": "integer",
+          "description": "Source experiment ID. Conversion does not bypass account quota.",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "is_VM": {
+                "const": false
+              }
+            },
+            "required": [
+              "is_VM"
+            ]
+          },
+          "then": {
+            "required": [
+              "cmd"
+            ],
+            "properties": {
+              "cmd": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "body_template": {
+      "capabilities": [],
+      "cpu": 2,
+      "duration": 600,
+      "image_id": "<IMAGE_ID>",
+      "is_VM": false,
+      "is_test": true,
+      "lab_name": "<UNIQUE_WORKLOAD_NAME>",
+      "memory": "4Gi",
+      "name": "<CURRENT_USERNAME>",
+      "num_gpu": 0,
+      "password": "",
+      "path": "/workspace",
+      "shm": "1Gi",
+      "use_ib": false,
+      "use_master": true,
+      "cmd": "<TASK_COMMAND_WITH_PERSISTENT_LOGGING>",
+      "outer_ssh": false,
+      "auto_save_on_finish": false,
+      "container_id": "<SOURCE_EXPERIMENT_ID>"
+    }
   },
   "container-delete": {
     "method": "DELETE",
     "path": "/container/",
-    "description": "删除工作负载或历史记录",
+    "description": "Delete a current workload",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "container-delete --id 123"
+      ]
+    }
   },
   "container-history-delete": {
     "method": "DELETE",
     "path": "/container/get/",
-    "description": "删除工作负载或历史记录",
+    "description": "Delete a workload history record",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "container-history-delete --id 123"
+      ]
+    }
   },
   "job-delete": {
     "method": "DELETE",
     "path": "/job/",
-    "description": "删除工作负载或历史记录",
+    "description": "Delete a current distributed job",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "job_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "job_id",
+          "type": "positive-int",
+          "help": "API field: job_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "job-delete --id 123"
+      ]
+    }
   },
   "job-history-delete": {
     "method": "DELETE",
     "path": "/job/get/",
-    "description": "删除工作负载或历史记录",
+    "description": "Delete a distributed job history record",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "job_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "job_id",
+          "type": "positive-int",
+          "help": "API field: job_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "job-history-delete --id 123"
+      ]
+    }
   },
   "experiment-stop": {
     "method": "GET",
     "path": "/container/containerStop/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Save a temporary image and stop an experiment asynchronously",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "experiment-stop --id 123"
+      ]
+    }
   },
   "experiment-restart": {
     "method": "POST",
     "path": "/container/dockerRestart/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Restart the original experiment Pod",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "experiment-restart --id 123"
+      ]
+    }
   },
   "restart-status": {
     "method": "GET",
     "path": "/container/dockerRestart/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Read original-Pod restart status",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "restart-status --id 123"
+      ]
+    }
   },
   "image-save": {
     "method": "GET",
     "path": "/image/save/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Save an experiment image asynchronously without stopping it",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-save --id 123"
+      ]
+    }
   },
   "image-save-status": {
     "method": "GET",
     "path": "/image/saveOperation/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Read asynchronous image-save status",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "image-save-status --id 123"
+      ]
+    }
   },
   "events": {
     "method": "GET",
     "path": "/container/getPodEvent/",
-    "description": "实验生命周期或诊断操作",
+    "description": "Read workload scheduling and Pod events",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "container_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "container_id",
+          "type": "positive-int",
+          "help": "API field: container_id"
+        },
+        {
+          "flags": [
+            "--job"
+          ],
+          "field": "is_job",
+          "type": "str",
+          "help": "Distributed job events (default: false)",
+          "mapping": {
+            "true": true,
+            "false": false
+          }
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "events --id 123"
+      ]
+    }
   },
   "container-network": {
     "method": "GET",
     "path": "/container/{id}/network/",
-    "description": "容器网络与访问地址",
+    "description": "Read container network and access addresses",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        },
+        {
+          "flags": [
+            "--refresh"
+          ],
+          "field": "refresh",
+          "type": "str",
+          "help": "Request fresh network information",
+          "mapping": {
+            "true": 1,
+            "false": 0
+          }
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "container-network --id 123"
+      ]
+    }
   },
   "job-network": {
     "method": "GET",
     "path": "/job/{id}/network/",
-    "description": "分布式任务网络",
+    "description": "Read distributed job network information",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        },
+        {
+          "flags": [
+            "--refresh"
+          ],
+          "field": "refresh",
+          "type": "str",
+          "help": "Request fresh network information",
+          "mapping": {
+            "true": 1,
+            "false": 0
+          }
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "job-network --id 123"
+      ]
+    }
   },
   "container-log": {
     "method": "GET",
     "path": "/container/downloadLog/{id}/",
-    "description": "下载容器日志，配合 --output",
+    "description": "Download container logs; use --output",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "container-log --id 123"
+      ]
+    }
   },
   "job-log": {
     "method": "GET",
     "path": "/job/downloadLog/{id}/",
-    "description": "下载分布式任务日志",
+    "description": "Download distributed job logs; use --output",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "job-log --id 123"
+      ]
+    }
   },
   "extension-estimate": {
     "method": "POST",
     "path": "/container/{id}/extensions/estimate/",
-    "description": "续时估价",
+    "description": "Quote an extension; does not extend the workload",
     "query": {},
     "body": null,
     "write": false,
@@ -298,12 +1383,57 @@
       "id",
       "additional_minutes"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        },
+        {
+          "flags": [
+            "--additional-minutes"
+          ],
+          "field": "additional_minutes",
+          "type": "positive-int",
+          "help": "API field: additional_minutes"
+        }
+      ],
+      "notes": [
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use."
+      ],
+      "examples": [
+        "extension-estimate --id 123 --additional-minutes 123",
+        "extension-estimate --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "additional_minutes"
+      ],
+      "properties": {
+        "additional_minutes": {
+          "type": "integer",
+          "description": "Extra lifetime in MINUTES; this request only quotes it.",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "body_template": {
+      "additional_minutes": 10
+    }
   },
   "extension-submit": {
     "method": "POST",
     "path": "/container/{id}/extensions/",
-    "description": "续时提交：quote_id additional_minutes reason",
+    "description": "Submit an extension using a quote and idempotency key",
     "query": {},
     "body": null,
     "write": true,
@@ -315,12 +1445,89 @@
     ],
     "headers": [
       "Idempotency-Key"
-    ]
+    ],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        },
+        {
+          "flags": [
+            "--quote-id"
+          ],
+          "field": "quote_id",
+          "type": "str",
+          "help": "API field: quote_id"
+        },
+        {
+          "flags": [
+            "--additional-minutes"
+          ],
+          "field": "additional_minutes",
+          "type": "positive-int",
+          "help": "API field: additional_minutes"
+        },
+        {
+          "flags": [
+            "--reason"
+          ],
+          "field": "reason",
+          "type": "str",
+          "help": "API field: reason"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state.",
+        "Execution requires headers: Idempotency-Key. Supply each using --header NAME:VALUE.",
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use."
+      ],
+      "examples": [
+        "extension-submit --id 123 --quote-id VALUE --additional-minutes 123 --reason VALUE",
+        "extension-submit --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "quote_id",
+        "additional_minutes",
+        "reason"
+      ],
+      "properties": {
+        "quote_id": {
+          "type": "string",
+          "description": "Current quote ID returned by extension-estimate.",
+          "minLength": 1
+        },
+        "additional_minutes": {
+          "type": "integer",
+          "description": "Extra minutes; must match the quoted extension.",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for the extension request.",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "body_template": {
+      "quote_id": "<CURRENT_QUOTE_ID>",
+      "additional_minutes": 10,
+      "reason": "<EXTENSION_REASON>"
+    }
   },
   "extension-status": {
     "method": "GET",
     "path": "/container/{id}/extensions/{operation}/",
-    "description": "续时状态",
+    "description": "Read an extension operation status",
     "query": {},
     "body": null,
     "write": false,
@@ -328,12 +1535,36 @@
       "id",
       "operation"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        },
+        {
+          "flags": [
+            "--operation-id"
+          ],
+          "field": "operation",
+          "type": "str",
+          "help": "API field: operation"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "extension-status --id 276 --operation-id OPERATION_ID"
+      ]
+    }
   },
   "files": {
     "method": "POST",
     "path": "/file/",
-    "description": "个人目录列表，API / 对应界面 /workspace",
+    "description": "List a personal directory; API / corresponds to UI /workspace",
     "query": {},
     "body": {
       "action": "ls",
@@ -341,12 +1572,28 @@
     },
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--path"
+          ],
+          "field": "path",
+          "type": "str",
+          "help": "API directory path; default: /"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "files --path /dotfiles"
+      ]
+    }
   },
   "shared-files": {
     "method": "POST",
     "path": "/file/",
-    "description": "共享目录列表，API / 对应界面 /share",
+    "description": "List a shared directory; API / corresponds to UI /share",
     "query": {},
     "body": {
       "action": "ls",
@@ -355,12 +1602,28 @@
     },
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--path"
+          ],
+          "field": "path",
+          "type": "str",
+          "help": "API directory path; default: /"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "shared-files --path /datasets"
+      ]
+    }
   },
   "file-mkdir": {
     "method": "POST",
     "path": "/file/",
-    "description": "个人文件目录操作",
+    "description": "Create a personal directory",
     "query": {},
     "body": {
       "action": "mkdir"
@@ -369,12 +1632,30 @@
     "required": [
       "path"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--path"
+          ],
+          "field": "path",
+          "type": "str",
+          "help": "API field: path"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "file-mkdir --path VALUE"
+      ]
+    }
   },
   "file-remove": {
     "method": "POST",
     "path": "/file/",
-    "description": "个人文件目录操作",
+    "description": "Remove an exact personal file or directory",
     "query": {},
     "body": {
       "action": "rm"
@@ -383,12 +1664,30 @@
     "required": [
       "path"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--path"
+          ],
+          "field": "path",
+          "type": "str",
+          "help": "API field: path"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "file-remove --path VALUE"
+      ]
+    }
   },
   "file-move": {
     "method": "POST",
     "path": "/file/",
-    "description": "个人文件目录操作",
+    "description": "Move a personal file or directory",
     "query": {},
     "body": {
       "action": "mv"
@@ -398,54 +1697,112 @@
       "path",
       "to_path"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--path"
+          ],
+          "field": "path",
+          "type": "str",
+          "help": "API field: path"
+        },
+        {
+          "flags": [
+            "--to"
+          ],
+          "field": "to_path",
+          "type": "str",
+          "help": "API field: to_path"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "file-move --path VALUE --to VALUE"
+      ]
+    }
   },
   "file-space": {
     "method": "GET",
     "path": "/file/get_userspace_size/",
-    "description": "空间占用统计",
+    "description": "Read personal storage usage",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "file-space"
+      ]
+    }
   },
   "file-space-refresh": {
     "method": "PATCH",
     "path": "/file/get_userspace_size/",
-    "description": "重新计算空间",
+    "description": "Request a storage-usage recalculation",
     "query": {},
     "body": null,
     "write": true,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "file-space-refresh"
+      ]
+    }
   },
   "datasets": {
     "method": "GET",
     "path": "/file/sharingData/",
-    "description": "数据集目录",
+    "description": "List dataset registrations",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "datasets"
+      ]
+    }
   },
   "dataset-create": {
     "method": "POST",
     "path": "/file/sharingData/",
-    "description": "登记数据集，权限由服务端判断",
+    "description": "Register a dataset; does not upload data",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "body"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "dataset-create --body-file payload.json"
+      ]
+    }
   },
   "dataset-update": {
     "method": "PUT",
     "path": "/file/sharingData/{id}/",
-    "description": "修改数据集元数据",
+    "description": "Update dataset registration metadata",
     "query": {},
     "body": null,
     "write": true,
@@ -453,24 +1810,60 @@
       "id",
       "body"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "dataset-update --id 123 --body-file payload.json"
+      ]
+    }
   },
   "dataset-delete": {
     "method": "DELETE",
     "path": "/file/sharingData/{id}/",
-    "description": "删除数据集登记",
+    "description": "Delete a dataset registration",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "id",
+          "type": "positive-int",
+          "help": "API field: id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "dataset-delete --id 123"
+      ]
+    }
   },
   "images": {
     "method": "GET",
     "path": "/image/",
-    "description": "镜像列表：opt 0全部 1个人 2公开 3基础；is_temporary 1临时",
+    "description": "List images by scope and temporary/permanent status",
     "query": {
       "opt": 0,
       "paginate": 1,
@@ -481,12 +1874,79 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--page"
+          ],
+          "field": "page",
+          "type": "positive-int",
+          "help": "API page; default: 1"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "field": "size",
+          "type": "positive-int",
+          "help": "API size; default: 9"
+        },
+        {
+          "flags": [
+            "--scope"
+          ],
+          "field": "opt",
+          "type": "str",
+          "help": "Image scope (default: all)",
+          "mapping": {
+            "all": 0,
+            "mine": 1,
+            "public": 2,
+            "base": 3
+          }
+        },
+        {
+          "flags": [
+            "--temporary"
+          ],
+          "field": "is_temporary",
+          "type": "str",
+          "help": "Temporary images (default: false)",
+          "mapping": {
+            "true": 1,
+            "false": 0
+          }
+        },
+        {
+          "flags": [
+            "--query",
+            "-q"
+          ],
+          "field": "q",
+          "type": "str",
+          "help": "Image name search text"
+        },
+        {
+          "flags": [
+            "--ordering"
+          ],
+          "field": "ordering",
+          "type": "str",
+          "help": "API field: ordering"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "images --scope mine --temporary true --query ubuntu"
+      ]
+    }
   },
   "image-visibility": {
     "method": "GET",
     "path": "/image/chmod/",
-    "description": "修改镜像属性（GET 也有副作用）",
+    "description": "Change image visibility (mutating GET)",
     "query": {},
     "body": null,
     "write": true,
@@ -494,12 +1954,42 @@
       "image_id",
       "is_public"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        },
+        {
+          "flags": [
+            "--visibility"
+          ],
+          "field": "is_public",
+          "type": "str",
+          "help": "API field: is_public",
+          "mapping": {
+            "private": 0,
+            "public": 1
+          }
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-visibility --id 123 --visibility private"
+      ]
+    }
   },
   "image-permanent": {
     "method": "GET",
     "path": "/image/chmod/",
-    "description": "修改镜像属性（GET 也有副作用）",
+    "description": "Make a temporary image permanent (mutating GET)",
     "query": {
       "is_temporary": 0
     },
@@ -508,12 +1998,30 @@
     "required": [
       "image_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-permanent --id 123"
+      ]
+    }
   },
   "image-note": {
     "method": "GET",
     "path": "/image/addNote/",
-    "description": "修改镜像属性（GET 也有副作用）",
+    "description": "Set an image note (mutating GET)",
     "query": {},
     "body": null,
     "write": true,
@@ -521,12 +2029,38 @@
       "image_id",
       "note"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        },
+        {
+          "flags": [
+            "--note"
+          ],
+          "field": "note",
+          "type": "str",
+          "help": "API field: note"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-note --id 42 --note \"Sample image\""
+      ]
+    }
   },
   "image-register": {
     "method": "POST",
     "path": "/image/addRecord/",
-    "description": "登记镜像 image_name image_tag source is_public note",
+    "description": "Register an external image",
     "query": {},
     "body": null,
     "write": true,
@@ -534,120 +2068,238 @@
       "image_name",
       "image_tag"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--image-name"
+          ],
+          "field": "image_name",
+          "type": "str",
+          "help": "API field: image_name"
+        },
+        {
+          "flags": [
+            "--tag"
+          ],
+          "field": "image_tag",
+          "type": "str",
+          "help": "API field: image_tag"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-register --image-name VALUE --tag VALUE"
+      ]
+    }
   },
   "image-delete": {
     "method": "DELETE",
     "path": "/image/",
-    "description": "删除镜像",
+    "description": "Delete an image",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "image_id"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--id"
+          ],
+          "field": "image_id",
+          "type": "positive-int",
+          "help": "API field: image_id"
+        }
+      ],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "image-delete --id 42",
+        "image-delete --id 42 --execute"
+      ]
+    }
   },
   "profile": {
     "method": "GET",
     "path": "/user/personal/info/",
-    "description": "个人资料",
+    "description": "Read personal profile",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "profile"
+      ]
+    }
   },
   "profile-update": {
     "method": "POST",
     "path": "/user/personal/update_profile/",
-    "description": "修改个人资料 nickname email phone gender",
+    "description": "Update personal profile",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "body"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "profile-update --body-file payload.json"
+      ]
+    }
   },
   "password-change": {
     "method": "PATCH",
     "path": "/user/changePwd/",
-    "description": "修改密码，正文仅通过文件传入",
+    "description": "Change account password; provide secrets through --body-file",
     "query": {},
     "body": null,
     "write": true,
     "required": [
       "body"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "password-change --body-file payload.json"
+      ]
+    }
   },
   "access-token-info": {
     "method": "GET",
     "path": "/user/access-token/",
-    "description": "访问令牌是否存在及前缀",
+    "description": "Read access-token presence and prefix",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "access-token-info"
+      ]
+    }
   },
   "access-token-create": {
     "method": "POST",
     "path": "/user/access-token/",
-    "description": "创建访问令牌；响应包含秘密",
+    "description": "Create an access token; requires --output for secret response",
     "query": {},
     "body": null,
     "write": true,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "access-token-create"
+      ]
+    }
   },
   "access-token-revoke": {
     "method": "DELETE",
     "path": "/user/access-token/",
-    "description": "撤销访问令牌",
+    "description": "Revoke the access token",
     "query": {},
     "body": null,
     "write": true,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "access-token-revoke"
+      ]
+    }
   },
   "tailscale-status": {
     "method": "GET",
     "path": "/api/v1/tailscale/status",
-    "description": "Tailscale 接入状态",
+    "description": "Read Tailscale enrollment status",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "tailscale-status"
+      ]
+    }
   },
   "tailscale-enroll": {
     "method": "POST",
     "path": "/api/v1/tailscale/enrollments",
-    "description": "申请 Tailscale 接入配置",
+    "description": "Request Tailscale enrollment; requires --output for secret response",
     "query": {},
     "body": {
       "refresh": false
     },
     "write": true,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Writes are previews unless --execute is supplied. Some GET operations mutate state."
+      ],
+      "examples": [
+        "tailscale-enroll"
+      ]
+    }
   },
   "credits": {
     "method": "GET",
     "path": "/api/v1/site/billing/me/summary",
-    "description": "个人算元余额/用量/流水",
+    "description": "Read credit balances without changing monetary precision",
     "query": {},
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [],
+      "examples": [
+        "credits"
+      ]
+    }
   },
   "usage": {
     "method": "GET",
     "path": "/api/v1/site/billing/me/usage",
-    "description": "个人算元余额/用量/流水",
+    "description": "Read paginated billing usage",
     "query": {
       "page": 1,
       "size": 20
@@ -655,12 +2307,43 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--page"
+          ],
+          "field": "page",
+          "type": "positive-int",
+          "help": "API page; default: 1"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "field": "size",
+          "type": "positive-int",
+          "help": "Records per page; supported sizes: 20, 50, 100 (default: 20)",
+          "choices": [
+            20,
+            50,
+            100
+          ]
+        }
+      ],
+      "notes": [
+        "Live checks accepted size 20/50/100 and rejected 2/10/21/200. Requesting page 2 of an empty list returned HTTP 404. Use page 1 initially, then follow returned pagination."
+      ],
+      "examples": [
+        "usage"
+      ]
+    }
   },
   "ledger": {
     "method": "GET",
     "path": "/api/v1/site/billing/me/ledger",
-    "description": "个人算元余额/用量/流水",
+    "description": "Read paginated billing ledger",
     "query": {
       "page": 1,
       "size": 20
@@ -668,30 +2351,212 @@
     "body": null,
     "write": false,
     "required": [],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--page"
+          ],
+          "field": "page",
+          "type": "positive-int",
+          "help": "API page; default: 1"
+        },
+        {
+          "flags": [
+            "--limit"
+          ],
+          "field": "size",
+          "type": "positive-int",
+          "help": "Records per page; supported sizes: 20, 50, 100 (default: 20)",
+          "choices": [
+            20,
+            50,
+            100
+          ]
+        }
+      ],
+      "notes": [
+        "Live checks accepted size 20/50/100 and rejected 2/10/21/200. Requesting page 2 of an empty list returned HTTP 404. Use page 1 initially, then follow returned pagination."
+      ],
+      "examples": [
+        "ledger"
+      ]
+    }
   },
   "estimate": {
     "method": "POST",
     "path": "/api/v1/site/billing/estimate",
-    "description": "工作负载费用估价，无资源创建",
+    "description": "Quote the exact workload configuration without creating resources",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "body"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [],
+      "notes": [
+        "Body schema documents the supported client workflow, not every server field. Templates are illustrative and do not select resources or create a quote. Replace placeholders before use."
+      ],
+      "examples": [
+        "estimate --body-file payload.json",
+        "estimate --template"
+      ]
+    },
+    "body_schema": {
+      "type": "object",
+      "description": "Client workflow guidance; server validation remains authoritative. Unknown API fields remain allowed.",
+      "required": [
+        "workload_kind",
+        "workload_mode",
+        "gpu_mode",
+        "gpu_type",
+        "gpu_count",
+        "cpu_cores",
+        "memory_gib",
+        "worker_count",
+        "duration_seconds"
+      ],
+      "properties": {
+        "workload_kind": {
+          "type": "string",
+          "description": "container for tasks/experiments; job for distributed jobs.",
+          "enum": [
+            "container",
+            "job"
+          ]
+        },
+        "workload_mode": {
+          "type": "string",
+          "description": "standard for container; distributed for job.",
+          "enum": [
+            "standard",
+            "distributed"
+          ]
+        },
+        "gpu_mode": {
+          "type": "string",
+          "description": "full for CPU-only or compatible legacy GPU nodes; vgpu for compatible legacy virtual GPUs; dra for DRA-managed nodes. Quote the same mode used for creation. Current DRA nodes reject legacy GPU requests with node_requires_dra_gpu.",
+          "enum": [
+            "full",
+            "vgpu",
+            "dra"
+          ]
+        },
+        "gpu_type": {
+          "type": "string",
+          "description": "GPU model; empty for CPU-only. Remove the -vgpu suffix for vgpu quotes."
+        },
+        "gpu_count": {
+          "type": "integer",
+          "description": "GPUs per worker; use 0 for CPU-only.",
+          "minimum": 0
+        },
+        "cpu_cores": {
+          "type": "integer",
+          "description": "CPU cores per worker.",
+          "minimum": 1
+        },
+        "memory_gib": {
+          "type": "number",
+          "description": "Host memory in GiB per worker.",
+          "exclusiveMinimum": 0
+        },
+        "worker_count": {
+          "type": "integer",
+          "description": "1 for container; actual worker count for job.",
+          "minimum": 1
+        },
+        "duration_seconds": {
+          "type": "integer",
+          "description": "Requested lifetime in seconds; quote the exact creation duration. Legacy 0 means unlimited.",
+          "minimum": 0
+        },
+        "legacy_node_id": {
+          "type": "integer",
+          "description": "Include only when selecting a node that supports legacy GPU allocation. Current DRA-managed nodes require gpu_mode=dra and gpu_selection instead.",
+          "minimum": 1
+        },
+        "gpu_selection": {
+          "type": "object",
+          "description": "DRA selection; required when using DRA. Match count to num_gpu/gpu_count.",
+          "properties": {
+            "node_id": {
+              "type": "integer",
+              "description": "Current node ID from inventory.",
+              "minimum": 1
+            },
+            "gpu_type": {
+              "type": "string",
+              "description": "Current GPU type from inventory."
+            },
+            "count": {
+              "type": "integer",
+              "description": "GPU count; must match the workload GPU count.",
+              "minimum": 1
+            },
+            "allocation": {
+              "type": "string",
+              "description": "builtin_whole for whole GPUs, or config for configured allocation.",
+              "enum": [
+                "builtin_whole",
+                "config"
+              ]
+            },
+            "config_id": {
+              "type": "integer",
+              "description": "Required for configured allocation."
+            },
+            "preset_key": {
+              "type": "string",
+              "description": "Required for configured allocation; use the live inventory value."
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "body_template": {
+      "workload_kind": "container",
+      "workload_mode": "standard",
+      "gpu_mode": "full",
+      "gpu_type": "",
+      "gpu_count": 0,
+      "cpu_cores": 2,
+      "memory_gib": 4,
+      "worker_count": 1,
+      "duration_seconds": 600
+    }
   },
   "doc": {
     "method": "GET",
     "path": "/docs/{document}",
-    "description": "读取使用说明 Markdown",
+    "description": "Read a platform Markdown document",
     "query": {},
     "body": null,
     "write": false,
     "required": [
       "document"
     ],
-    "headers": []
+    "headers": [],
+    "cli": {
+      "options": [
+        {
+          "flags": [
+            "--document"
+          ],
+          "field": "document",
+          "type": "str",
+          "help": "API field: document"
+        }
+      ],
+      "notes": [],
+      "examples": [
+        "doc --document VALUE"
+      ]
+    }
   }
 }

@@ -122,3 +122,137 @@
 本次维护验证：5 项离线回归测试通过，覆盖创建参数、预览脱敏、过期/未知/禁调度资源、分页检索及事件摘要；quick_validate 通过。未创建、取消、扩容或修改任何线上工作负载。
 
 后续用户修订：资源预检及 resource-summary 只读取 dashboard，不再自动读取 gpu-inventory；任务运行日志统一保存到 `/workspace/task_run_logs/` 的独立运行子目录。历史记录中的双来源方案已被此规则取代。
+
+
+## 2026-11-08 live output review
+
+Executed 35 bounded read-only requests: 34 succeeded; `container-network` returned HTTP 503. No resources, files, account settings, or credentials were modified. Responses stayed in process memory; only schema names, types, sizes, and aggregate comparisons were emitted. Authentication came from the existing token file. No raw samples were persisted.
+
+Initial sampling covered `dashboard`, `gpu-inventory`, `config`, `tasks`, `experiments`, `jobs`, `images`, `files`, `shared-files`, `datasets`, `file-space`, `profile`, `access-token-info`, `tailscale-status`, `credits`, `usage`, and `ledger`.
+
+After updating projections, sampled the first page of running, pending, and historical tasks, experiments, and jobs; rechecked images, files, shared files, and profile. Queried events, restart status, image-save status, and network for an ID discovered in the current experiment list. Read the known usage document. Did not guess IDs, download logs, generate estimates, or execute any catalog entry marked `write` (including mutating GET operations).
+
+| Operation/sample | Raw JSON bytes | Compact JSON bytes | Reduction | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Tasks, running | 2957 | 2315 | 21.7% | Omit command, password, pod name, addresses, ports |
+| Tasks, historical first page | 13960 | 9793 | 29.8% | Same projection; retain pagination |
+| Experiments, running | 927 | 728 | 21.5% | Same projection |
+| Experiments, historical first page | 9521 | 7483 | 21.4% | Same projection |
+| Images | 1776 | 1654 | 6.9% | Omit redundant owner nickname |
+| Profile | 379 | 256 | 32.5% | Omit WeChat binding and avatar fields |
+| Files / shared files | 638 / 842 | unchanged | 0% | Four essential fields already sufficient |
+
+Sizes compare the same in-memory response serialized as UTF-8 JSON with `ensure_ascii=False`, before and after projection; they are not HTTP transfer sizes or token counts. Live assertions verified unchanged pagination and preserved IDs, actual status, timing, DRA allocation, and extension eligibility. Offline fixtures use invented values.
+
+The earlier broad allowlist caused real task, experiment, image, and file schemas to fall back to full output. Added operation-specific observed fields rather than dropping unfamiliar fields. Timing, requested duration, DRA allocation details, image-save state, and restart state remain visible because they affect decisions. Unknown row fields still trigger full-response fallback.
+
+### Operations retaining full output
+
+- Resource/configuration: `dashboard`, `gpu-inventory`, `config`. Samples were approximately 1.8 KB, 4.0 KB, and 1.1 KB respectively. Preserve capacity, GPU partition/preset information, freshness, and errors. Use `resource-summary` for a focused dashboard view.
+- Billing: `credits`, `usage`, `ledger`, `estimate`, `extension-estimate`, `extension-status`. Balance and empty billing pages were approximately 0.3 KB. Keep units, monetary precision, warnings, pagination, quote IDs, and fingerprints. No new estimates were generated; extension operations were not sampled.
+- Small diagnostics: `file-space`, `access-token-info`, `tailscale-status`, `events`, `restart-status`, `image-save-status`. No useful redundancy in sampled responses. Nonempty event lists and Tailscale nodes were not observed.
+- Network: `container-network`, `job-network`. Container network failed with HTTP 503; no current job ID was available. No schema projection inferred from failures.
+- Content: `container-log`, `job-log`, `doc`. Preserve the requested content; logs were not downloaded. Documentation was approximately 6.2 KB.
+- All catalog operations marked `write`: preserve full results and existing preview/secret-output protections. They were not executed for output testing.
+- `jobs` and `datasets`: samples were empty; existing conservative list handling remains, but nonempty schema compatibility and reduction are unverified. Pending task/experiment samples were also empty.
+
+These measurements cover current samples only. They do not establish compatibility with every historical row, nonempty billing record, failed event, GPU partition configuration, or future server schema. Installed skill directories remain manually synchronized by the user.
+
+
+## 2026-11-08 controlled write sampling: awaiting capacity
+
+User authorized saving a disposable image followed by creating temporary experiments/tasks for response sampling. Saving the image from existing experiment `test1` (266) did not stop that experiment. The saved image is private, ID 42, tag `dad0c3e7-v1-v3`; save status reached `finished`. It is a disposable regular snapshot (`is_temporary=false`), rather than a pause-generated image, because pausing would interrupt the source workload.
+
+Observed writes:
+
+| Operation | Result | Output decision |
+| --- | --- | --- |
+| `image-save` | Accepted; response contains only `message` | Keep full response; acceptance is not completion |
+| `image-note` | HTTP 200, empty body | Keep `{status: 200, text: ""}` |
+| `image-visibility` with private flag | HTTP 200, empty body | Keep existing receipt |
+| `image-permanent` on disposable regular snapshot | HTTP 200, empty body | Keep existing receipt |
+| `container-create` | HTTP 403, `The container num is 3, cannot be larger than 3` | Preserve diagnostic; no successful-create schema inferred |
+
+The proposed workload uses the snapshot, 0 GPUs, 2 CPU cores, 4 GiB RAM, and 600 seconds. Two estimates returned `metering_only`, `will_charge=false`, `maximum_micro="0"`, and `billing_node_rate_missing`; no charge was inferred merely from historical pricing. Creation was submitted once with a fresh estimate fingerprint and stable idempotency key. All three task-list categories were checked afterward; no uniquely named sampling task was found. The server ignored the `search` parameter in observed responses, so exact local name matching was used.
+
+Current experiment 266 and tasks 267/268 occupied the three container slots. The user explicitly chose to wait without stopping any existing workload. Snapshot 42 must remain private and available until sampling resumes; it has not been deleted. There is no successful temporary-workload creation, conversion, stop/restart, deletion, or history-deletion sample from this attempt. Do not mark those operations validated or retry creation while the account remains at capacity.
+
+A credential-free, mode-600 checkpoint is saved under `/workspace/task_run_logs/dibu-output-sampling/<run>/checkpoint.json`. It contains the run name, snapshot/source IDs, attempted workload name, stable idempotency key, resource configuration, and deferred cleanup scope. Fresh pricing and current lists are required before a later submission; uncertain outcomes require reconciliation before any new creation key.
+
+The successful save-status sample included `client_data` with repeated runtime details. Added a projection retaining `operation_id`, `image_name`, `node_name`, `auto`, and `is_temporary`, while preserving all top-level fields, result digest/size, timestamps, and errors. Unrecognized client fields fall back to full output. The measured response decreased from 741 to 437 JSON bytes (41.0%). `--raw` and `--output` retain the complete response. This is a status-query improvement; sampled write results themselves were already minimal.
+
+
+## 2026-11-08 resumed write sampling: completed
+
+This section supersedes the capacity checkpoint above. On user request to continue, current lists showed that the two business tasks had ended, source experiment 266 remained Running, and private snapshot 42 was still available. No existing workload was stopped or restarted. The previously rejected sampling name was absent from running, pending, and historical lists. New task/experiment payloads used distinct names and new idempotency keys; these were new requests after a confirmed quota rejection, not blind retries after an uncertain outcome.
+
+Executed 57 API requests in the resumed sampling harness: 54 successful responses and three explicit HTTP failures. Initial read-only reconciliation is additional to this count. Each creation/conversion was preceded by an estimate for 0 GPUs, 2 CPU cores, 4 GiB RAM, and 600 seconds. All estimates reported `metering_only`, `will_charge=false`, `maximum_micro="0"`, with `billing_node_rate_missing`. No paid extension or permission/configuration changes were attempted.
+
+| Operation | Observed result | Default-output decision |
+| --- | --- | --- |
+| `container-create`, task 276 | `{message, port, IP}`, 61 JSON bytes; actual Running status verified separately | Keep full receipt, including connection details; do not invent ID or Running state |
+| `container-create`, experiment 277 | Same three fields, 61 bytes; actual Running status verified separately | Keep full receipt |
+| `container-delete`, task 276 | HTTP 204, `{status: 204, text: ""}`, 27 bytes | Keep HTTP receipt |
+| `container-history-delete`, task 276 and experiment 277 | HTTP 204, same 27-byte receipt | Keep HTTP receipt |
+| `experiment-stop`, experiment 277 | `{message}`, 42 bytes | Keep full acceptance message; poll completion separately |
+| `image-permanent`, new pause image 43 | HTTP 200, empty body, 27-byte receipt | Keep HTTP receipt |
+| `image-delete`, disposable images 43 and 42 | HTTP 204, empty body, 27-byte receipt | Keep HTTP receipt |
+| `experiment-restart`, experiment 277 | HTTP 409: original Pod restart service is not configured | Preserve error; no successful-response schema inferred |
+| `extension-estimate`, experiment 277 | HTTP 403, `SITE_SUPER_ADMIN_REQUIRED` | Preserve structured server diagnostic; no extension submitted |
+| `container-convert`, experiment 277 | HTTP 403: no resource rule for the user | Preserve diagnostic; no duplicate creation or workaround attempted |
+
+After conversion rejection, all three task-list categories were checked for the exact attempted name: no converted task existed, and the temporary experiment remained Running. Its stop request returned before save status was populated (`{}`), and its list row initially remained Running. A later status query reached `finished`, with result digest and size, `is_temporary=true`, and a matching image name. Only then was pause image 43 identified by its new ID and exact sampling experiment name. It was made permanent as a bounded write sample and subsequently deleted. This demonstrates why acceptance, populated status, save completion, and workload termination must not be collapsed into a single success state.
+
+Cleanup was verified through current, pending, and historical workload lists and both regular/temporary private-image lists. Task 276 and experiment 277 and their history records are absent; images 42 and 43 are absent. Existing experiment 266 remained Running. No unrelated history or images were deleted. Local sampling artifacts and checkpoint remain under `/workspace/task_run_logs/dibu-output-sampling/0ae6843891/`; response files have mode 600 and secret-named fields are redacted. No raw workload-list records or passwords were written to the repository. Application correctness was not tested; Running was used only as platform-state evidence.
+
+The sampled write responses are already minimal. No additional write-result projection was added: retain messages, real IDs if supplied, connection details, HTTP status, warnings, and errors. `--raw` remains available, while the existing image-save-status projection handles the larger asynchronous status response. Successful conversion/restart/extension submission, distributed-job writes, account changes, and unrelated file/dataset writes remain outside this sampling result.
+
+
+## CLI input discovery and named options
+
+Operation-specific `--help` and offline `--describe` are generated from the API catalog, including descriptions, defaults, required fields/headers, typed aliases, mappings, and examples. Named options cover list categories/pagination, image scopes/search, directory paths, required identifiers, and common container creation fields. Creation remains a manually prepared quote/body/header workflow; no password generation, automatic allocation, quoting, retries, or resource mutations are added by these aliases.
+
+Raw `--param`, `--body-file`, and `--header` remain supported. Conflicting alias/raw values or alias/body-file values fail before authentication, as do invalid typed values and operation-inappropriate flags. Raw parameters retain their body-file override behavior; conflicting repeated raw keys now fail instead of silently keeping the last value. Repeatable common options before and after the operation are combined, preserving legacy positioning. CLI-generated help, messages, and operation descriptions are now English.
+
+Validation covers alias-to-API equivalence, image scope and boolean mappings, positive values and duration conversion, escaped path IDs, conflict detection, offline discovery for every operation, all catalog examples, compatibility of mixed-position raw options, and unchanged write previews/secret redaction. This input-only revision did not make live API requests or create new resources.
+
+
+## Review follow-up: output errors, headers, and body discovery
+
+- `--output` still saves complete successful-HTTP response bytes privately, but no longer skips JSON business-error validation. An `error` envelope raises the same API error with or without the option; saved files remain available for diagnosis. Empty bodies, non-JSON text, and binary logs still produce file receipts. HTTP error handling is unchanged.
+- Additional request headers are normalized to canonical supported names before validation and preview. Case-insensitive identical duplicates collapse; conflicting duplicates, empty values, and CR/LF values fail before authentication or requests. Header values are not echoed in these validation errors.
+- Added catalog-owned JSON body schemas and offline `--template` support for `container-create`, `container-convert`, `job-create`, `estimate`, `extension-estimate`, and `extension-submit`. Operation help lists field types, required status, and unit/conditional guidance; `--describe` includes nested schema details. Templates contain illustrative values and placeholders; container passwords are empty to prevent accidental reuse. They cannot be combined with request, execution, or response-output options. Schema descriptions guide clients without changing raw-field compatibility or enforcing unverified server constraints.
+- Per the user's explicit instruction, unknown-field fallback and its existing password-output behavior were not modified.
+
+Validation: 31 offline regression tests pass, covering saved business errors, no successful CLI receipt on error, non-JSON/binary/empty saves, header normalization and actual wire values, rejection before authentication, and offline templates/placeholder handling. No live API calls or resource mutations were performed for this follow-up.
+
+
+## CLI online confirmation after parameter and schema changes
+
+Detailed credential-free report: `/workspace/task_run_logs/dibu-cli-verification/3cd77970c0/report.json` (mode 600). Executed 77 CLI invocations that called the API, including composite task-status invocations; the count is not the number of individual HTTP requests. Raw responses stayed in memory. No resource/account/file mutations, log downloads, token changes, or paid extensions were performed. Quotes only generated estimates; request fingerprints were not written to the report.
+
+Twenty successful named/raw query comparisons matched after excluding volatile sampling/request timestamps. Covered running/pending/finished task, experiment, and distributed-job categories; all/mine/public/base image scopes; temporary-image selection; image search and a deliberately nonexistent name; personal/shared root paths; event IDs; and task-status IDs resolved from current history. Public/temporary images and job lists were empty, so equality does not validate their nonempty contents. A separate image pagination check returned one different image on pages 1 and 2, with expected next/previous links; nonexistent-image search returned no rows.
+
+Initial billing page-2/size-2 checks returned HTTP 400. Follow-up comparisons isolated both named and raw behavior: page 1/size 20 succeeded, page 1/sizes 2 and 10 returned HTTP 400, and page 2/size 20 returned HTTP 404 on empty usage and ledger lists. Additional bounded probes accepted sizes 50 and 100 and rejected 21 and 200 on both endpoints. The catalog now advertises typed billing sizes 20/50/100, with local validation; raw fields retain passthrough behavior. Do not infer that every other conceivable size is permanently unsupported.
+
+Quote checks used the generated CPU template plus GPU selections derived from the live inventory and dashboard:
+
+| Quote | Result | Scope of confirmation |
+| --- | --- | --- |
+| CPU-only template | Success, fingerprint present | Basic estimate template accepted |
+| Legacy full GPU on a DRA node | HTTP 400, `node_requires_dra_gpu` | That node requires DRA; no workaround attempted |
+| DRA whole GPU | Success, fingerprint present | Current whole-GPU selection syntax accepted by estimate |
+| Configured DRA/MIG | Success, fingerprint present | Current config ID and preset key accepted by estimate |
+
+Successful quotes reported `metering_only`, `will_charge=false`, `minimum_micro="0"`, `maximum_micro="0"`, and `billing_node_rate_missing`. These are sample observations, not durable charging guarantees. Inventory was stale and availability unknown; success does not prove GPU capacity or schedulability. Current inventory exposed no legacy-vGPU configuration, so vGPU syntax was not fabricated or tested. Estimate schema guidance now explains the DRA-only-node rejection.
+
+Datasets, distributed jobs, usage records, and ledger records were still empty. Nonempty schema/output projection coverage remains open. Successful conversion, original-Pod restart, extension submission, and distributed-job creation were not retried: prior explicit configuration/account-rule failures remain the last evidence. This run does not claim those blockers were independently cleared or reconfirmed. Existing account/workloads were not changed.
+
+
+## Grouped command discovery and deduplication
+
+The public overview now presents 11 functional groups plus standalone `config` and `list`. Group help explains each action with a read/write label; action help retains detailed parameter guidance and renders canonical grouped examples. `--describe` includes the canonical command path while retaining the underlying operation ID. Old flat operation names remain accepted and retain existing request semantics, but are not repeated in the overview.
+
+Consolidated public forms: dashboard via `resources summary --raw`; single-task state/events via `tasks summary --id`; shared directory lists via `files list --shared`; and storage recalculation via `files space --refresh`. Explicit writes still preview unless executed. Shared-directory writes remain unavailable. Current-workload deletion and history deletion are distinct operations because their effects differ.
+
+Offline regression coverage checks grouped/legacy request equivalence, common options before and after grouped paths, offline group help, read-only shared listings, unchanged write previews for GET/PATCH/DELETE, and equality of consolidated task inspection. No live API calls or resources were used for this discovery-only change.
