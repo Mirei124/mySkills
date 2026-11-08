@@ -15,6 +15,43 @@ import dibu
 
 
 class DibuTests(unittest.TestCase):
+    def test_resources_default_ready_only_all_and_raw(self):
+        dashboard = {'stale': True, 'sampled_at_ms': 100, 'errors': {'fixture': 'stale'},
+                     'nodes': [{'node_id': 1, 'node_status': 'Ready', 'gpu_remain_num': 2},
+                               {'node_id': 2, 'node_status': 'SchedulingDisabled', 'gpu_remain_num': 8}]}
+        for flags in ([], ['--all'], ['-v']):
+            out = io.StringIO()
+            with patch('sys.argv', ['dibu', 'resources', *flags]), \
+                 patch.object(dibu, 'auth_config', return_value=('fixture', 'fixture')), \
+                 patch.object(dibu, 'request', return_value=dashboard), contextlib.redirect_stdout(out):
+                dibu.main()
+            result = json.loads(out.getvalue())
+            if flags == ['-v']:
+                self.assertEqual(result, dashboard)
+            else:
+                self.assertEqual([x['node_id'] for x in result['nodes']], [1, 2] if flags else [1])
+                self.assertTrue(result['dashboard_stale'])
+                self.assertEqual(result['dashboard_errors'], dashboard['errors'])
+                self.assertTrue(all(x['schedulable_free_gpus'] is None for x in result['nodes']))
+        self.assertEqual(dibu.resource_summary({'nodes': [], 'stale': False})['nodes'], [])
+
+    def test_workload_display_omits_dra_and_reduces_timing_without_mutating_raw(self):
+        row = {'container_id': 1, 'status': 'Running', 'num_gpu': 2,
+               'timing': {'state': 'running', 'elapsed_seconds': 10, 'remaining_seconds': 590},
+               'dra_request': {'parameters': {'count': 2, 'memory_mib': 4096},
+                               'future_diagnostic': 'available in raw output'}}
+        response = {'count': 1, 'next': 'fixture-page2', 'results': [row]}
+        original = copy.deepcopy(response)
+        for operation in ('tasks', 'experiments'):
+            result = dibu.compact_response(operation, response)
+            after = result['results'][0]
+            self.assertNotIn('dra_request', after)
+            self.assertEqual(after['timing'], {'state': 'running'})
+            self.assertEqual(after['status'], 'Running')
+            self.assertEqual(after['num_gpu'], 2)
+            self.assertEqual(result['next'], 'fixture-page2')
+        self.assertEqual(response, original)
+
     def test_grouped_commands_match_legacy_requests(self):
         cases = [
             (
@@ -550,8 +587,12 @@ class DibuTests(unittest.TestCase):
             after = result["results"][0]
             for key in ("password", "cmd", "node_ip", "port", "pod_name"):
                 self.assertNotIn(key, after)
-            for key in dibu.LIST_EXTRA_FIELDS["tasks"]:
+            for key in ("can_extend", "image_save"):
                 self.assertEqual(after[key], row[key])
+            self.assertNotIn("dra_request", after)
+            self.assertEqual(after["timing"], {"state": None})
+            for key in ("duration", "requested_duration_minutes", "cur_duration", "add_hours", "is_VM", "manual_restart_used"):
+                self.assertNotIn(key, after)
             self.assertEqual(result["next"], "page2")
 
     def test_observed_image_file_and_profile_fields(self):
@@ -591,7 +632,9 @@ class DibuTests(unittest.TestCase):
         self.assertEqual(dibu.compact_response("profile", profile), profile)
 
     def test_cli_raw_aliases_bypass_projection(self):
-        response = {"results": [{"container_id": 1, "cmd": "full command"}]}
+        response = {"results": [{"container_id": 1, "cmd": "full command",
+                                  "dra_request": {"parameters": {"count": 2}},
+                                  "timing": {"state": "running", "elapsed_seconds": 10}}]}
         for flags in ([], ["--raw"], ["-v"], ["--verbose"]):
             out = io.StringIO()
             with (
@@ -601,7 +644,7 @@ class DibuTests(unittest.TestCase):
                 contextlib.redirect_stdout(out),
             ):
                 dibu.main()
-            expected = response if flags else {"results": [{"container_id": 1}]}
+            expected = response if flags else {"results": [{"container_id": 1, "timing": {"state": "running"}}]}
             self.assertEqual(json.loads(out.getvalue()), expected)
 
     def test_raw_summary_keeps_page_responses(self):
@@ -715,7 +758,10 @@ class DibuTests(unittest.TestCase):
             ],
         }
         result = dibu.resource_summary(dashboard)
-        self.assertEqual([n["schedulable_free_gpus"] for n in result["nodes"]], [3, None, None])
+        self.assertEqual([n["node_id"] for n in result["nodes"]], [1, 3])
+        self.assertEqual([n["schedulable_free_gpus"] for n in result["nodes"]], [3, None])
+        all_nodes = dibu.resource_summary(dashboard, include_all=True)
+        self.assertEqual([n["schedulable_free_gpus"] for n in all_nodes["nodes"]], [3, None, None])
         stale = copy.deepcopy(dashboard)
         stale["stale"] = True
         self.assertTrue(all(n["schedulable_free_gpus"] is None for n in dibu.resource_summary(stale)["nodes"]))

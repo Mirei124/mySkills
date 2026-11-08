@@ -170,11 +170,13 @@ def redact(obj):
     return obj
 
 
-def resource_summary(dashboard):
+def resource_summary(dashboard, include_all=False):
     """Keep unknown availability unknown; never count disabled nodes as usable."""
     nodes = []
     for n in dashboard.get("nodes", []):
         ready = n.get("node_status") == "Ready"
+        if not ready and not include_all:
+            continue
         fresh = dashboard.get("stale") is False and not dashboard.get("errors")
         free = n.get("gpu_remain_num")
         usable = free if ready and fresh and isinstance(free, int) else None
@@ -184,7 +186,6 @@ def resource_summary(dashboard):
                 "node_name": n.get("node_name"),
                 "state": n.get("node_status"),
                 "gpu_type": n.get("gputype"),
-                "reported_free_gpus": free,
                 "schedulable_free_gpus": usable,
                 "free_cpu_cores": n.get("cpu_remain_num"),
                 "free_memory_gib": n.get("mem_remain_num"),
@@ -196,7 +197,7 @@ def resource_summary(dashboard):
         "dashboard_stale": dashboard.get("stale"),
         "dashboard_refresh_pending": dashboard.get("refresh_pending"),
         "dashboard_errors": dashboard.get("errors"),
-        "note": "Schedulable counts are preflight upper bounds; verify taints, GPU partition mode, CPU/memory, account quota, and scheduling events. null means unknown.",
+        "note": "Ready is not a scheduling guarantee; null GPU availability means unknown.",
     }
 
 
@@ -339,6 +340,22 @@ IMAGE_SAVE_DETAILS = {
     "container_name_or_id",
 }
 IMAGE_SAVE_FIELDS = {"auto", "node_name", "image_name", "is_temporary", "operation_id"}
+WORKLOAD_DISPLAY_FIELDS = {
+    "container_id", "lab_name", "status", "node_name", "gputype", "num_gpu", "cpu", "memory",
+    "create_time", "timing", "can_extend", "error", "errors", "warning", "warnings", "message", "reason", "events",
+}
+
+
+def compact_workload_row(row):
+    """Keep list-level state; GPU allocation and detailed timing require raw output."""
+    result = {key: val for key, val in row.items() if key in WORKLOAD_DISPLAY_FIELDS}
+    for key in ("image_save", "is_committing"):
+        if row.get(key):
+            result[key] = row[key]
+    timing = row.get("timing")
+    if isinstance(timing, dict):
+        result["timing"] = {"state": timing.get("state")}
+    return result
 
 
 def compact_response(operation, result):
@@ -370,7 +387,8 @@ def compact_response(operation, result):
             return payload
         if any(not isinstance(row, dict) or not identities.intersection(row) or set(row) - keep - omit for row in rows):
             return payload
-        projected = [{key: val for key, val in row.items() if key in keep} for row in rows]
+        projected = [compact_workload_row(row) if operation in ("tasks", "experiments")
+                     else {key: val for key, val in row.items() if key in keep} for row in rows]
         return projected if isinstance(payload, list) else {**payload, "results": projected}
 
     if isinstance(result, dict) and "data" in result:
@@ -390,10 +408,11 @@ def run_summary(operation, params, raw=False):
         return response
 
     if operation == "resource-summary":
+        include_all = params.pop("include_all", False)
         if params:
             raise ValueError("resource-summary does not accept parameters")
         dashboard = get("dashboard", {})
-        return dashboard if raw else resource_summary(dashboard)
+        return dashboard if raw else resource_summary(dashboard, include_all=include_all)
     target = params.pop("container_id", None)
     if operation == "task-status" and target is None:
         raise ValueError("task-status requires --id ID or --param container_id=ID")
@@ -439,9 +458,11 @@ def run_summary(operation, params, raw=False):
 
 SUMMARY_OPS = {
     "resource-summary": {
-        "description": "Summarize fresh dashboard resources; unknown availability stays unknown",
+        "description": "Compact Ready-node resources; --all includes other states, --raw returns the full dashboard",
         "required": [],
-        "cli": {"options": [], "examples": ["resource-summary"]},
+        "cli": {"options": [{"flags": ["--all"], "field": "include_all", "type": "bool",
+                             "action": "store_true", "help": "Include nodes in every state in the compact view"}],
+                "examples": ["resource-summary", "resource-summary --all", "resource-summary --raw"]},
     },
     "task-summary": {
         "description": "Summarize all task pages; --id inspects one task with events",
@@ -815,7 +836,10 @@ def parse_cli(argv=None):
                 "help": option["help"] + " (API: " + option["field"] + ")",
                 "metavar": option["field"].upper(),
             }
-            if option.get("mapping"):
+            if option.get("action") == "store_true":
+                kwargs.pop("metavar")
+                kwargs["action"] = "store_true"
+            elif option.get("mapping"):
                 kwargs.pop("metavar")
                 kwargs["choices"] = list(option["mapping"])
             else:

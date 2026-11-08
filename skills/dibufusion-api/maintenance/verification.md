@@ -256,3 +256,21 @@ The public overview now presents 11 functional groups plus standalone `config` a
 Consolidated public forms: dashboard via `resources summary --raw`; single-task state/events via `tasks summary --id`; shared directory lists via `files list --shared`; and storage recalculation via `files space --refresh`. Explicit writes still preview unless executed. Shared-directory writes remain unavailable. Current-workload deletion and history deletion are distinct operations because their effects differ.
 
 Offline regression coverage checks grouped/legacy request equivalence, common options before and after grouped paths, offline group help, read-only shared listings, unchanged write previews for GET/PATCH/DELETE, and equality of consolidated task inspection. No live API calls or resources were used for this discovery-only change.
+
+
+## 2026-11-09 tighter workload display and Ready-only resources
+
+The installed script matched repository source at inspection. Read-only samples showed that task rows had no unknown top-level fields: the prior projection was active, but retained many legacy counters and the entire nested DRA selector definition. The observed task response was 1515 raw JSON bytes versus 1187 with the old projection.
+
+Known task/experiment rows now keep core identity, actual status, resources, creation time, timing, and extension eligibility. Effective DRA parameters, allocation kind, preset/profile names, mode, memory, and MIG profile remain; selector count ranges and repeated node information are omitted. Nonempty save state and active commit state remain. Unknown nested DRA metadata is preserved in full, and the existing unknown-top-level fallback behavior is unchanged per user preference. Original objects are not modified; `--raw` remains full output.
+
+`resources` defaults to compact Ready nodes only. `--all` includes other states in the compact view; `--raw` and `--output` retain the complete dashboard. Sampling, stale, refresh, and error metadata remain visible; unknown schedulable GPU counts stay null. Removed the redundant reported GPU count from the compact node and shortened the explanatory note. These changes also apply to the legacy resource-summary entrypoint.
+
+Five read-only API requests verified current task/experiment samples and the three resource display modes. The task response decreased from 1515 to 699 JSON bytes (53.9%); the experiment response decreased from 932 to 476 bytes (48.9%). Sizes compare the same in-memory response serialized as UTF-8 JSON. Resources default returned 2 Ready nodes; `--all` and `-v` returned all 4 nodes including 2 SchedulingDisabled nodes. No credentials or raw workload samples were printed or persisted. No resources were modified.
+
+Forty offline tests pass, including Ready-only defaults, all-state/raw modes, stale/error preservation, unknown GPU availability, unchanged pagination, effective DRA settings versus selector ranges, and unknown nested diagnostics. Installed skill synchronization remains manual.
+
+
+## 2026-11-09 list-level timing and allocation detail
+
+At user request, recognized task and experiment list rows now omit `dra_request` entirely and retain only `timing.state`. GPU type/count and actual workload status remain visible; raw output retains the allocation and complete timing data. Missing timing state remains null rather than being inferred from workload status. The prior selective DRA projection is superseded, and its unused field tables were removed. Existing unknown-top-level full-response fallback remains unchanged. Offline regressions cover both workload types, unchanged raw objects/pagination, and full `-v`/`--raw`/`--verbose` output. No online resources were queried or modified for this change.
