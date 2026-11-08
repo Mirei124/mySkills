@@ -11,6 +11,9 @@ description: 通过直接 HTTP API 操作内网 DibuFusion GPU 控制台（10.24
 
 ```bash
 python3 "$CLI" list
+python3 "$CLI" resource-summary
+python3 "$CLI" task-summary
+python3 "$CLI" task-status --param container_id=<ID>
 python3 "$CLI" dashboard
 python3 "$CLI" tasks --param operate_id=1 --param size=20
 python3 "$CLI" experiments --param operate_id=0
@@ -28,6 +31,14 @@ python3 "$CLI" usage --param page=1 --param size=20
 
 写操作默认预览；已得到用户对具体操作的授权后传 `--execute`。按现有会话授权执行，不重复索要确认。部分 GET 有副作用，以目录中的 `write` 为准。`--dry-run` 可预览任何操作。
 
+## GPU 申请默认策略
+
+申请前查询 `resource-summary`（只读取 dashboard）和当前任务。用户没有指定卡数时，若已确认程序支持并会实际使用多卡，**默认申请本次工作负载可调度、可有效利用的最大可用 GPU 数量**，以加快运行。用户明确卡数、预算或资源上限优先。
+
+最大值受当前空闲 GPU、CPU/内存配比、显存、账号配额、任务并行度和拓扑共同限制；单机程序只能计算一个兼容节点内的卡，未验证跨节点分布式时不能把各节点卡数相加。多组任务同时提交时应联合分配，使总申请不超出可用资源，逐次刷新，不能每组重复使用同一份空闲数。多个 worker/数据分片需与卡数匹配；仅 `device_map=auto` 不证明会有效利用全部 GPU。详细预检见 [工作流](references/workflows.md#资源预检与最大有效卡数)。
+
+只读查看资源不授权创建、扩容或停止任务。确认最大卡数后按实际配置估价，仍遵守用户已有预算和收费授权；资源不足时不要擅自停止其他任务。
+
 ## 认证
 
 认证仅从 `~/.cache/dibu_token` 读取。文件使用 UTF-8，内容为裸 token；脚本去掉首尾空白，文件缺失、不可读、为空或格式错误时直接报错。请求自动添加 `Authorization: Token <token>`，不读取或回退到 `DIBU_TOKEN` 环境变量。
@@ -39,6 +50,16 @@ python3 "$CLI" usage --param page=1 --param size=20
 ## 失败处理
 
 写入不自动重试。网络结果不确定时先查询状态和列表，保留原幂等键，不以新键重复创建。HTTP 403 应依据服务端响应正文诊断，不能仅凭状态码认定账号缺少权限；也不能直接重放浏览器请求中的旧估价指纹和幂等键。
+
+## 任务日志
+
+任务的 stdout、stderr、启动/退出记录及各 worker 日志统一保存到 `/workspace/task_run_logs/` 下按任务名和运行标识区分的独立子目录，避免不同实验或重试相互覆盖。
+
+## 状态与诊断
+
+`task-summary` 分页汇总任务列表；`task-status --param container_id=ID` 按 ID 检索运行、排队和历史列表并附调度事件。交互实验另查 `experiments`，分布式任务另查 `jobs`；不要把任务摘要当全部工作负载。
+
+创建成功后查真实 ID、实际 `status` 和事件。有时运行列表中会出现 Pending，应按行内状态报告。提交成功、Running、应用日志已启动、应用结果已验证是不同阶段；`Not exist or finished` 只能表明工作负载已结束/不存在。结果完整性与指标验证由项目脚本负责，不能由平台状态推断成功。
 
 ## 按需参考
 

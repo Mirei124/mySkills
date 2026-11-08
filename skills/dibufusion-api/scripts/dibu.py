@@ -104,6 +104,14 @@ def prepare(name, params, body):
             continue
         elif key not in q and (b is None or key not in b):
             raise ValueError("缺少参数：" + key)
+    if name in ("container-create", "container-convert"):
+        if not isinstance(b.get("password"), str) or not b["password"].strip():
+            raise ValueError("password 必须为非空字符串；用 secrets.token_urlsafe 生成并存入权限 600 的正文文件，不在终端输出。")
+        if b.get("is_VM") is False and not str(b.get("cmd", "")).strip():
+            raise ValueError("任务必须提供非空 cmd。")
+        selection = b.get("gpu_selection")
+        if selection and selection.get("count") != b.get("num_gpu"):
+            raise ValueError("gpu_selection.count 必须与 num_gpu 一致。")
     return op, path, q, b
 
 
@@ -121,7 +129,7 @@ def request(base, auth, op, path, q, b, headers, output=None):
             status = r.status
     except urllib.error.HTTPError as e:
         detail = e.read(4000).decode(errors="replace")
-        for secret in (auth, auth[len("Token ") :]):
+        for secret in (auth, auth[len("Token ") :], (b or {}).get("password", "")):
             if secret:
                 detail = detail.replace(secret, "[REDACTED]")
         if e.code == 401:
@@ -148,6 +156,69 @@ def request(base, auth, op, path, q, b, headers, output=None):
         return {"status": status, "text": raw.decode(errors="replace")}
 
 
+def redact(obj):
+    if isinstance(obj, dict):
+        return {k: "[REDACTED]" if any(word in k.lower() for word in ("password", "token", "secret")) else redact(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact(v) for v in obj]
+    return obj
+
+
+def resource_summary(dashboard):
+    """Keep unknown availability unknown; never count disabled nodes as usable."""
+    nodes = []
+    for n in dashboard.get("nodes", []):
+        ready = n.get("node_status") == "Ready"
+        fresh = dashboard.get("stale") is False and not dashboard.get("errors")
+        free = n.get("gpu_remain_num")
+        usable = free if ready and fresh and isinstance(free, int) else None
+        nodes.append({
+            "node_id": n["node_id"], "node_name": n.get("node_name"),
+            "state": n.get("node_status"), "gpu_type": n.get("gputype"),
+            "reported_free_gpus": free, "schedulable_free_gpus": usable,
+            "free_cpu_cores": n.get("cpu_remain_num"), "free_memory_gib": n.get("mem_remain_num"),
+        })
+    return {"nodes": nodes, "dashboard_sampled_at_ms": dashboard.get("sampled_at_ms"),
+            "dashboard_stale": dashboard.get("stale"), "dashboard_refresh_pending": dashboard.get("refresh_pending"),
+            "dashboard_errors": dashboard.get("errors"),
+            "note": "可调度数量只是预检上界；仍需确认 taint、GPU 分区模式、CPU/内存、账号配额及实际调度事件。null 表示未知。"}
+
+
+def run_summary(operation, params):
+    base, auth = auth_config()
+    def get(name, query):
+        op, path, q, b = prepare(name, dict(query), None)
+        return request(base, auth, op, path, q, b, {})
+    if operation == "resource-summary":
+        if params:
+            raise ValueError("resource-summary 不接受 --param")
+        return resource_summary(get("dashboard", {}))
+    target = params.pop("container_id", None)
+    if operation == "task-status" and target is None:
+        raise ValueError("task-status 需要 --param container_id=ID")
+    if params:
+        raise ValueError("摘要仅支持 container_id")
+    found = {}
+    for mode in (1, 2, 0):
+        page = 1
+        while True:
+            data = get("tasks", {"operate_id": mode, "size": 100, "page": page})
+            for row in data.get("results", []):
+                if target is not None and str(row.get("container_id")) != str(target):
+                    continue
+                found.setdefault(row["container_id"], {k: row.get(k) for k in (
+                    "container_id", "lab_name", "status", "node_name", "num_gpu", "cpu", "memory", "create_time")})
+            if not data.get("next"):
+                break
+            page += 1
+    rows = list(found.values())
+    result = {"count": len(rows), "tasks": rows,
+              "note": "按实际 status 判断；列表类别不代表运行状态，finished 不代表应用结果通过验证。"}
+    if target is not None and rows:
+        result["events"] = get("events", {"container_id": target}).get("events")
+    return result
+
+
 def main():
     ap = ChineseArgumentParser(description=__doc__, add_help=False)
     ap._positionals.title = "位置参数"
@@ -155,7 +226,7 @@ def main():
     ap.add_argument("-h", "--help", action="help", help="显示帮助并退出")
     ap.add_argument(
         "operation",
-        choices=["list"] + list(CAT),
+        choices=["list", "resource-summary", "task-summary", "task-status"] + list(CAT),
         help="要执行的操作；list 显示操作清单",
     )
     ap.add_argument(
@@ -189,6 +260,18 @@ def main():
             raise ValueError("--param 格式为 KEY=VALUE")
         k, v = s.split("=", 1)
         params[k] = value(v)
+    if a.operation in ("resource-summary", "task-summary", "task-status"):
+        if a.body_file or a.header or a.execute or a.dry_run:
+            raise ValueError("摘要为只读查询，不接受 body/header/execute/dry-run")
+        result = run_summary(a.operation, params)
+        if a.output:
+            fd = os.open(a.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
     body = load_json_file(a.body_file) if a.body_file else None
     op, path, q, b = prepare(a.operation, params, body)
     headers = {}
@@ -208,7 +291,7 @@ def main():
                     "method": op["method"],
                     "path": path,
                     "query": q,
-                    "body": "[正文已隐藏]" if a.operation == "password-change" else b,
+                    "body": "[正文已隐藏]" if a.operation == "password-change" else redact(b),
                     "headers": headers,
                     "preview": True,
                 },

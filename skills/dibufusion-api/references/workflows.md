@@ -14,7 +14,17 @@
 
 ## 创建任务、实验、分布式任务
 
-先查 gpu-inventory 和 images 获取真实资源及镜像 ID。根据用户要求选择资源，不把查询结果或历史配置当作固定默认值。任务和实验通过 container-create；分布式通过 job-create；已有实验转任务通过 container-convert。
+先查 resource-summary、当前任务和 images 获取真实资源及镜像 ID。按下方最大有效卡数规则选择资源，不把历史配置当作固定默认值。任务和实验通过 container-create；分布式通过 job-create；已有实验转任务通过 container-convert。
+
+### 资源预检与最大有效卡数
+
+1. 查询 `resource-summary`，只读取 dashboard，保留采样时间、`stale`、`refresh_pending`、`errors`。使用新鲜的可调度节点数据；`SchedulingDisabled` 不计入可用量。GPU/CPU/内存剩余量为 null 表示未知，不能当作零，也不能以总量代替空闲量。dashboard 无法确认的 GPU 分区模式或可用量应明确说明，不能将整卡剩余数套用到 MIG/vGPU；资源预检不自动读取 gpu-inventory。
+2. 确认应用的并行方式：数据并行、互不重叠的样本分片、张量并行或已验证的模型切分。单纯增加 num_gpu 不会自动加速。单机任务选择一个满足型号/显存要求的节点；只有已支持跨节点的任务才考虑多节点。任务可处理的独立分片数也是卡数上限。
+3. 用户未指定卡数且程序可有效多卡时，默认最大化本次可用且有效的 GPU 数。单节点数据并行可按 `min(空闲兼容卡数, CPU 能支持的 worker 数, 主机内存能支持的 worker 数, 配额上限, 应用并行上限)` 计算；先为固定开销、/dev/shm 和系统负载留有根据的余量，资源配比由程序需求决定，不固化某次实验的数值。模型并行需按其实际资源模型计算。把选定卡数及限制因素简短告知用户，不因默认策略重复索要已授权操作的确认。
+4. 多组同时申请要联合分配不同卡/节点并考虑公平的任务完成时间，不能让每组都申请同一节点的全部空闲卡。逐次提交前刷新资源，不能依赖提交前较早的快照。若资源在竞态中减少，重新规划和估价；不自动新建重复请求。
+5. 检查 CPU、主机内存、shm 与 GPU 配比。申请内存不能高于节点剩余量；不要混淆 GPU 显存和主机内存。Ready 也不保证无 taint 或 DRA 错误。创建后若 Pending，通过事件检查 `Insufficient memory`、node affinity、untolerated taint、`FailedResourceClaimCreation` 等。CPU/内存不足可在用户授权范围内缩减并重新估价；taint/模板缺失不能靠反复建任务解决，不擅自移除 taint 或改集群配置。
+
+### 创建参数和估价
 
 创建前必须按相同资源配置调用 estimate，其正文：
 
@@ -56,7 +66,7 @@ python3 "$CLI" estimate --body-file estimate.json --output quote.json
   "memory": "16Gi",
   "name": "<当前用户名>",
   "num_gpu": 0,
-  "password": "",
+  "password": "<本次生成并安全保存的非空随机密码>",
   "path": "/workspace",
   "shm": "2Gi",
   "use_ib": false,
@@ -66,7 +76,9 @@ python3 "$CLI" estimate --body-file estimate.json --output quote.json
 }
 ```
 
-`duration` 单位为秒。本部署实验最长为 12 小时（`43200` 秒）；用户请求最长时长时使用该值。4 小时为 `14400` 秒，`0` 为旧版无限时长选项，不能用它代替最长时长。实验设置 `is_VM=true`，支持 `auto_save_on_finish`；任务必须提供 `cmd`，实验可留空。转换还需提供 `container_id`，镜像可由源容器确定。前端的 `is_test=true` 仍会创建真实资源，不代表预览。
+`password` 不能留空（本站点已返回 blank 校验错误）。用 `secrets.token_urlsafe(24)` 生成，正文文件权限设为 `600`，不要打印密码或放入 shell 参数；CLI 预览会脱敏。任务的 cmd 必须非空，DRA 的 `gpu_selection.count` 与 `num_gpu` 必须一致。估价和创建使用同一配置，修改配置后重新估价并生成新幂等键。
+
+`duration` 单位为秒。本部署实验最长为 12 小时（`43200` 秒）；用户请求最长时长时使用该值。4 小时为 `14400` 秒，`0` 为旧版无限时长选项，不能用它代替最长时长。实验设置 `is_VM=true`，支持 `auto_save_on_finish`；任务必须提供 `cmd`，实验可留空。转换还需提供 `container_id`，镜像可由源容器确定。转换曾同样被单容器配额拒绝，不能假设会先释放实验或绕过数量限制；失败后回查源实验和任务列表，不擅自停止源实验。前端的 `is_test=true` 仍会创建真实资源，不代表预览。
 
 GPU 旧路径：附 `gputype`，`num_gpu>0` 且有节点选择时附 `legacy_node_id`；vgpu 附 `gpumem`（前端选择值，不擅自换算单位）。DRA 路径改用：
 
@@ -86,7 +98,11 @@ python3 "$CLI" container-create --body-file payload.json \
   --header "X-DibuFusion-Estimate-Fingerprint:<估价指纹>" --execute
 ```
 
-创建后查询 tasks/experiments/jobs 确认真实 ID 与状态；创建响应成功不等于资源已就绪。
+创建后查询 tasks/experiments/jobs 确认真实 ID 与状态；创建响应成功不等于资源已就绪。获取不到 ID 时按唯一任务名、创建时间与稳定幂等键查证，不以新键重建。原始接口保留原输出；`task-summary`、`task-status` 提供不含密码/命令正文的摘要。
+
+在有限时间内复查启动（例如最多 3 次、间隔 10–20 秒），若仍排队，附事件和准确状态交付，不能称为已运行。事件为空时承认原因未知，不推断超时、OOM 或正常退出。Running 后还要查看应用日志确认 worker 数/GPU 使用与申请一致，不能以资源已分配代替多卡实际生效。
+
+任务启动命令应将 stdout 和 stderr 持续保存到 `/workspace/task_run_logs/<任务名>/<运行标识>/` 下的独立日志，并记录开始/结束时间和退出码；有多 worker 时保存各自日志。需要 `source` 时使用完整 shell 引用的 `bash -lc '<完整命令>'`；环境加载脚本会输出秘密变量时抑制其 stdout/stderr，不将环境转储写入日志。应用级的样本数、重复/缺失、内部错误、指标与产物验证留在项目运行脚本中，只有其验证通过才称为实验成功。
 
 ## 生命周期、诊断与续时
 
@@ -96,7 +112,7 @@ python3 "$CLI" container-create --body-file payload.json \
 - SSH 使用 `ssh -p <port> root@<node_ip>`，地址、端口和密码从当前实验读取；密码使用交互输入或受限文件，不放进命令参数和日志。
 - experiment-restart：POST `container_id`，之后 restart-status GET 轮询。镜像保存 image-save 是有副作用 GET，之后轮询 image-save-status 至 `state=finished`；仅受理不代表保存成功。
 - events：`container_id`；分布式附 `is_job=true`。network 操作使用 `id`，可传 `refresh=1`。返回可能包含敏感访问地址。
-- container-log/job-log 使用 `id` 和 `--output /path/log.txt` 下载。实时日志前端使用 `ws://<host>/search/log/`，连接后发送 `{container:<podName>,since:"all",tail:100,follow:true}`，分布式附 `is_job:true`；脚本只支持 HTTP 日志下载，实时日志需单独使用 WebSocket 客户端。
+- container-log/job-log 使用 `id` 和 `--output /workspace/task_run_logs/<运行标识>/platform.log` 下载。实时日志前端使用 `ws://<host>/search/log/`，连接后发送 `{container:<podName>,since:"all",tail:100,follow:true}`，分布式附 `is_job:true`；脚本只支持 HTTP 日志下载，实时日志需单独使用 WebSocket 客户端。
 - extension-estimate：`id,additional_minutes`；响应 `data.quote_id`。extension-submit 正文 `quote_id,additional_minutes,reason`，附 `Idempotency-Key`。读响应 `operation_id`，用 extension-status 的 `id,operation` 查询，不能重复新建请求代替查状态。
 
 ## 算元、个人设置
