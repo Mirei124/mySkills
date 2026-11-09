@@ -283,3 +283,15 @@ Added standalone `login` with terminal username input and hidden password input.
 Missing/unreadable/empty/malformed token files and HTTP 401 now provide the actual script's manual login command. Skill instructions ask the user to run the installed CLI themselves, never to send credentials in chat; automatic login/refresh remains prohibited. This explicit manual-login workflow supersedes older instructions that only asked users to edit the token file.
 
 Offline tests cover unauthenticated POST contents and headers, base-URL override, new cache creation and existing-token replacement, mode 600, no credential/profile output, invalid/failed responses, HTTP/network errors, hidden-input fallback/cancellation, atomic replacement failure cleanup, help/flag restrictions, and manual-login hints without automatic prompting. No real login was attempted and no real credentials or token files were changed.
+
+
+## 2026-11-09 explicit distributed-task command name
+
+Renamed the public `jobs` group to `distributed` so multi-node/worker workloads are clearly distinct from single-container `tasks`. Overview, group/action help, canonical examples, and `--describe` command paths use `distributed`; legacy `jobs` (bare, with actions, or with prefixed global options) remains compatible. Underlying API operation IDs, paths, payloads, and `job_id` fields are unchanged. This is a CLI naming change only; no online resources were queried or modified.
+
+
+## 2026-11-09 private account display fields
+
+Default account/profile responses now replace `nickname`, `grade`, `email`, `gender`, and `phone` with `*`. A local `--show-private` flag explicitly reveals them. Masking precedes compact/full display and response-file writing, so `--raw`, `--output`, and unknown-field fallback do not reveal these five fields by themselves. Saved masked responses retain full JSON fields with mode 600; they are not byte-identical to the server response unless private values are explicitly enabled. Structured HTTP errors are masked too; non-JSON private profile responses are not displayed or saved. Other operations and existing password fallback behavior are unchanged.
+
+Offline coverage checks masked/revealed standard, raw, and saved output; local-only option handling; null/nested fields; unchanged source objects; unknown-field fallback; file permissions; malformed responses; and HTTP-error diagnostics. No live profile requests or account mutations were made.

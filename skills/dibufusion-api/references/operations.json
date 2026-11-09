@@ -163,7 +163,7 @@
   "jobs": {
     "method": "GET",
     "path": "/job/get/",
-    "description": "List distributed job categories; inspect actual row status",
+    "description": "List distributed task categories; inspect actual row status",
     "query": {
       "operate_id": 1,
       "is_distributed": 1
@@ -491,7 +491,7 @@
   "job-create": {
     "method": "POST",
     "path": "/job/",
-    "description": "Create a distributed job with a quote and idempotency key",
+    "description": "Create a distributed task with a quote and idempotency key",
     "query": {},
     "body": null,
     "write": true,
@@ -993,7 +993,7 @@
   "job-delete": {
     "method": "DELETE",
     "path": "/job/",
-    "description": "Delete a current distributed job",
+    "description": "Delete a current distributed task",
     "query": {},
     "body": null,
     "write": true,
@@ -1023,7 +1023,7 @@
   "job-history-delete": {
     "method": "DELETE",
     "path": "/job/get/",
-    "description": "Delete a distributed job history record",
+    "description": "Delete a distributed task history record",
     "query": {},
     "body": null,
     "write": true,
@@ -1279,7 +1279,7 @@
   "job-network": {
     "method": "GET",
     "path": "/job/{id}/network/",
-    "description": "Read distributed job network information",
+    "description": "Read distributed task network information",
     "query": {},
     "body": null,
     "write": false,
@@ -1347,7 +1347,7 @@
   "job-log": {
     "method": "GET",
     "path": "/job/downloadLog/{id}/",
-    "description": "Download distributed job logs; use --output",
+    "description": "Download distributed task logs; use --output",
     "query": {},
     "body": null,
     "write": false,
@@ -2137,10 +2137,24 @@
     "required": [],
     "headers": [],
     "cli": {
-      "options": [],
-      "notes": [],
+      "options": [
+        {
+          "flags": [
+            "--show-private"
+          ],
+          "field": "show_private",
+          "type": "bool",
+          "action": "store_true",
+          "local": true,
+          "help": "Reveal nickname, grade, email, gender, and phone; also applies to --raw and --output"
+        }
+      ],
+      "notes": [
+        "nickname, grade, email, gender, and phone are * by default, even with --raw or --output. Use --show-private to reveal them explicitly. This flag is local and is never sent to the API."
+      ],
       "examples": [
-        "profile"
+        "profile",
+        "profile --show-private"
       ]
     }
   },

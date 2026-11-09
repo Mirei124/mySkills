@@ -169,7 +169,7 @@ def prepare(name, params, body):
     return op, path, q, b
 
 
-def request(base, auth, op, path, q, b, headers, output=None):
+def request(base, auth, op, path, q, b, headers, output=None, mask_private=False):
     url = base + path + ("?" + urllib.parse.urlencode(q, doseq=True) if q else "")
     hs = {"Accept": "application/json", "Authorization": auth, **headers}
     data = None
@@ -183,6 +183,11 @@ def request(base, auth, op, path, q, b, headers, output=None):
             status = r.status
     except urllib.error.HTTPError as e:
         detail = e.read(4000).decode(errors="replace")
+        if mask_private:
+            try:
+                detail = json.dumps(mask_profile(json.loads(detail)), ensure_ascii=False)
+            except ValueError:
+                detail = "Non-JSON profile error response omitted; use --show-private to inspect it."
         for secret in (auth, auth[len("Token ") :], (b or {}).get("password", "")):
             if secret:
                 detail = detail.replace(secret, "[REDACTED]")
@@ -191,6 +196,13 @@ def request(base, auth, op, path, q, b, headers, output=None):
         if e.code == 403:
             raise ValueError("HTTP 403: request rejected; diagnose using the server response. " + detail)
         raise ValueError(f"HTTP {e.code}: {detail}")
+    if mask_private:
+        try:
+            raw = json.dumps(mask_profile(json.loads(raw)), ensure_ascii=False).encode("utf-8")
+        except (ValueError, UnicodeError):
+            raise ValueError(
+                "Profile response is not valid JSON; no private response was displayed or saved."
+            ) from None
     if output:
         fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         os.fchmod(fd, 0o600)
@@ -205,6 +217,18 @@ def request(base, auth, op, path, q, b, headers, output=None):
     if output:
         return {"status": status, "output": str(output), "bytes": len(raw)}
     return result
+
+
+def mask_profile(value):
+    """Mask selected account fields in both displayed and saved responses."""
+    if isinstance(value, dict):
+        return {
+            key: "*" if key in {"nickname", "grade", "email", "gender", "phone"} else mask_profile(val)
+            for key, val in value.items()
+        }
+    if isinstance(value, list):
+        return [mask_profile(item) for item in value]
+    return value
 
 
 def parse_headers(entries):
@@ -604,7 +628,7 @@ COMMAND_GROUPS = {
         {"summary": "resource-summary", "inventory": "gpu-inventory"},
     ),
     "tasks": (
-        "List tasks, summarize history, or inspect one task",
+        "List single-container tasks, summarize history, or inspect one task",
         {"list": "tasks", "summary": "task-summary"},
     ),
     "experiments": (
@@ -617,8 +641,8 @@ COMMAND_GROUPS = {
             "convert": "container-convert",
         },
     ),
-    "jobs": (
-        "List and manage distributed jobs",
+    "distributed": (
+        "List and manage distributed tasks across nodes/workers",
         {
             "list": "jobs",
             "create": "job-create",
@@ -702,7 +726,7 @@ DEFAULT_ACTIONS = {
     "resources": "summary",
     "tasks": "list",
     "experiments": "list",
-    "jobs": "list",
+    "distributed": "list",
     "images": "list",
     "files": "list",
     "datasets": "list",
@@ -783,7 +807,7 @@ def route_command(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(command_overview())
         raise SystemExit(0)
-    group = argv[0]
+    group = "distributed" if argv[0] == "jobs" else argv[0]
     if group not in COMMAND_GROUPS:
         if (
             not group.startswith("-")
@@ -945,7 +969,8 @@ def parse_cli(argv=None):
             kwargs = {
                 "dest": "alias_" + option["field"],
                 "default": argparse.SUPPRESS,
-                "help": option["help"] + " (API: " + option["field"] + ")",
+                "help": option["help"]
+                + (" (local option)" if option.get("local") else " (API: " + option["field"] + ")"),
                 "metavar": option["field"].upper(),
             }
             if option.get("action") == "store_true":
@@ -978,7 +1003,11 @@ def parse_cli(argv=None):
         index += 1 if "=" in argv[index] or action.nargs == 0 else 2
     if index < len(argv) and not argv[index].startswith("-"):
         length = 1
-        if argv[index] in COMMAND_GROUPS and index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+        if (
+            (argv[index] in COMMAND_GROUPS or argv[index] == "jobs")
+            and index + 1 < len(argv)
+            and not argv[index + 1].startswith("-")
+        ):
             length = 2
         argv = [*argv[index : index + length], *argv[:index], *argv[index + length :]]
     argv = route_command(argv)
@@ -1021,6 +1050,8 @@ def parse_cli(argv=None):
         params[key] = val
     if args.operation not in ("list", "login"):
         for option in operation_spec(args.operation)["cli"]["options"]:
+            if option.get("local"):
+                continue
             dest = "alias_" + option["field"]
             if not hasattr(args, dest):
                 continue
@@ -1085,6 +1116,8 @@ def main():
         return
     body = load_json_file(a.body_file) if a.body_file else None
     for option in CAT[a.operation]["cli"]["options"]:
+        if option.get("local"):
+            continue
         key = option["field"]
         if hasattr(a, "alias_" + key) and isinstance(body, dict) and key in body and body[key] != params[key]:
             raise ValueError("Conflicting alias and --body-file for API field " + key)
@@ -1113,7 +1146,12 @@ def main():
     if a.operation in ["access-token-create", "tailscale-enroll"] and not a.output:
         raise ValueError("This operation returns secrets; --output is required.")
     base, auth = auth_config()
-    result = request(base, auth, op, path, q, b, headers, a.output)
+    if a.operation == "profile":
+        result = request(
+            base, auth, op, path, q, b, headers, a.output, mask_private=not getattr(a, "alias_show_private", False)
+        )
+    else:
+        result = request(base, auth, op, path, q, b, headers, a.output)
     print(
         json.dumps(
             result if a.raw or a.output else compact_response(a.operation, result),

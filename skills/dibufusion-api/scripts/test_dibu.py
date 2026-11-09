@@ -203,6 +203,99 @@ class LoginTests(unittest.TestCase):
 
 
 class DibuTests(unittest.TestCase):
+    def test_account_private_fields_require_explicit_reveal_even_raw_and_output(self):
+        private = {key: "fixture-" + key for key in ("nickname", "grade", "email", "gender", "phone")}
+        response = {"user_id": 1, "username": "fixture-user", **private, "future_field": "preserve"}
+        for reveal in (False, True):
+            for mode in ([], ["-v"], ["--output"]):
+                with self.subTest(reveal=reveal, mode=mode), tempfile.TemporaryDirectory() as directory:
+                    target = pathlib.Path(directory) / "profile.json"
+                    flags = ["--show-private"] if reveal else []
+                    flags += mode + ([str(target)] if mode == ["--output"] else [])
+                    out = io.StringIO()
+                    with (
+                        patch("sys.argv", ["dibu", "account", *flags]),
+                        patch.object(dibu, "auth_config", return_value=("http://fixture", "Token fixture")),
+                        patch("urllib.request.build_opener") as opener,
+                        contextlib.redirect_stdout(out),
+                    ):
+                        reply = opener.return_value.open.return_value.__enter__.return_value
+                        reply.read.return_value = json.dumps(response).encode()
+                        reply.status = 200
+                        dibu.main()
+                        request = opener.return_value.open.call_args.args[0]
+                        self.assertNotIn("show_private", request.full_url)
+                    result = json.loads(target.read_text() if mode == ["--output"] else out.getvalue())
+                    for key, actual in private.items():
+                        self.assertEqual(result[key], actual if reveal else "*")
+                        if not reveal:
+                            self.assertNotIn(actual, out.getvalue())
+                    self.assertEqual(result["username"], "fixture-user")
+                    self.assertEqual(result["future_field"], "preserve")
+                    if target.exists():
+                        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_private_flag_is_local_and_masking_does_not_change_original(self):
+        args, params = dibu.parse_cli(["account", "profile", "--show-private"])
+        self.assertTrue(args.alias_show_private)
+        self.assertEqual(params, {})
+        original = {"data": {"email": None, "nickname": "fixture"}, "items": [{"phone": "fixture"}]}
+        snapshot = copy.deepcopy(original)
+        masked = dibu.mask_profile(original)
+        self.assertEqual(masked["data"], {"email": "*", "nickname": "*"})
+        self.assertEqual(masked["items"][0]["phone"], "*")
+        self.assertEqual(original, snapshot)
+
+    def test_non_json_private_profile_is_not_displayed_or_saved(self):
+        with tempfile.TemporaryDirectory() as directory, patch("urllib.request.build_opener") as opener:
+            target = pathlib.Path(directory) / "profile.json"
+            reply = opener.return_value.open.return_value.__enter__.return_value
+            reply.read.return_value = b"fixture-private-non-json"
+            reply.status = 200
+            with self.assertRaisesRegex(ValueError, "not valid JSON") as error:
+                dibu.request(
+                    "http://fixture",
+                    "Token fixture",
+                    {"method": "GET"},
+                    "/",
+                    {},
+                    None,
+                    {},
+                    str(target),
+                    mask_private=True,
+                )
+            self.assertNotIn("fixture-private", str(error.exception))
+            self.assertFalse(target.exists())
+
+    def test_profile_http_errors_also_mask_private_fields(self):
+        failure = dibu.urllib.error.HTTPError(
+            "http://fixture", 403, "fixture", {}, io.BytesIO(b'{"email":"fixture-email","code":"permission_denied"}')
+        )
+        with patch("urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = failure
+            with self.assertRaises(ValueError) as error:
+                dibu.request("http://fixture", "Token fixture", {"method": "GET"}, "/", {}, None, {}, mask_private=True)
+        self.assertNotIn("fixture-email", str(error.exception))
+        self.assertIn("permission_denied", str(error.exception))
+
+    def test_distributed_group_replaces_jobs_in_public_help_and_preserves_legacy(self):
+        self.assertIn("distributed", dibu.COMMAND_GROUPS)
+        self.assertNotIn("jobs", dibu.COMMAND_GROUPS)
+        for action, operation in dibu.COMMAND_GROUPS["distributed"][1].items():
+            current, params = dibu.parse_cli(["distributed", action])
+            legacy, legacy_params = dibu.parse_cli(["jobs", action])
+            self.assertEqual(current.operation, operation)
+            self.assertEqual(legacy.operation, operation)
+            self.assertEqual(params, legacy_params)
+            self.assertTrue(dibu.canonical_command(operation).startswith("distributed "))
+        for command in ("distributed", "jobs"):
+            args, params = dibu.parse_cli(["-v", command, "list", "--state", "pending"])
+            self.assertEqual(args.operation, "jobs")
+            self.assertTrue(args.raw)
+            self.assertEqual(params, {"operate_id": 2})
+            args, _ = dibu.parse_cli([command])
+            self.assertEqual(args.operation, "jobs")
+
     def test_resources_default_ready_only_all_and_raw(self):
         dashboard = {
             "stale": True,

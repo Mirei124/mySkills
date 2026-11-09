@@ -34,7 +34,7 @@ python3 "$CLI" images note --id 42 --note "Sample image"
 | `resources` | Dashboard summaries and GPU configuration |
 | `tasks` | Task list, all-category summary, and one-task inspection |
 | `experiments` | Interactive experiment list, stop, restart, and conversion |
-| `jobs` | Distributed job list, creation, deletion, network, and logs |
+| `distributed` | Distributed task list, creation, deletion, network, and logs |
 | `workloads` | Container task/experiment creation, deletion, events, network, and logs |
 | `images` | Image list, snapshots, metadata, registration, and deletion |
 | `files` | Personal/shared listings and personal path/storage operations |
@@ -43,7 +43,7 @@ python3 "$CLI" images note --id 42 --note "Sample image"
 | `billing` | Credits, usage, ledger, estimates, and extensions |
 | `docs` | Platform documentation |
 
-`login` interactively obtains and saves an authentication token; `config` reads frontend configuration; `list` repeats the command overview. Groups with a default action list it in group help. Routine query groups default to their list action; `resources` defaults to the compact Ready-node summary (`--all` includes other node states), `account` to profile, and `billing` to credits. Explicit actions are recommended in scripts.
+`login` interactively obtains and saves an authentication token; `config` reads frontend configuration; `list` repeats the command overview. Groups with a default action list it in group help. Routine query groups default to their list action; `resources` defaults to the compact Ready-node summary (`--all` includes other node states), `account` to profile, and `billing` to credits. Explicit actions are recommended in scripts. Use `distributed` for multi-node/worker tasks and `tasks` for single-container tasks. The old `jobs` group remains a compatibility alias and is hidden from the overview; API operation names and fields such as `job_id` remain unchanged.
 
 Consolidated forms are `resources summary --raw` for the full dashboard, `tasks summary --id ID` for one task plus events, `files list --shared` for shared listings, and `files space --refresh` for a storage recalculation (write). Existing `dashboard`, `task-status`, `shared-files`, and `file-space-refresh` calls keep their original behavior. Shared listing does not enable shared-directory writes. Deleting a current workload and deleting its history remain distinct actions.
 
@@ -67,7 +67,7 @@ Default output remains JSON. Recognized task, experiment, job, image, file, shar
 - `--output response.json` saves the full response with mode `600` and prints only a file receipt for API operations. It takes precedence over display options. A JSON business error is still reported as a failure after the complete response is saved; the CLI exits nonzero and prints no successful file receipt. Non-JSON logs and empty responses remain supported. Secret-returning operations still require this option.
 - `resources` / `resources summary` default to Ready nodes only, with compact availability fields and sampling/stale/error metadata. `--all` includes all node states in the compact view. `-v` / `--raw` returns the complete dashboard without filtering; `--output` also saves the complete dashboard. Stale or disabled nodes do not gain known schedulable GPU counts. The older `reported_free_gpus` field is available in dashboard form as `gpu_remain_num`.
 - `resource-summary --raw` returns the dashboard response. `task-summary --raw` and `task-status --raw` return a `responses` array containing each request's operation, query, and full response, including fetched pages and events. Summary `--output` saves this full representation with mode `600` without printing it.
-- Task and experiment lists show workload ID/name, actual status, node, GPU type/count, CPU/memory, creation time, timing state only, and extension eligibility. DRA request details and elapsed/remaining timing values are omitted; use `-v` / `--raw` when diagnosing GPU allocation or timers. Nonempty image-save state and active commits remain visible. Legacy duration counters, image/account details, restart flags, connection addresses, ports, pod names, passwords, and commands require `--raw`. Unknown top-level row fields still trigger the existing full-response fallback. Image lists omit the redundant owner nickname. Profile output omits WeChat binding and avatar fields. File lists already contain only essential fields.
+- Task and experiment lists show workload ID/name, actual status, node, GPU type/count, CPU/memory, creation time, timing state only, and extension eligibility. DRA request details and elapsed/remaining timing values are omitted; use `-v` / `--raw` when diagnosing GPU allocation or timers. Nonempty image-save state and active commits remain visible. Legacy duration counters, image/account details, restart flags, connection addresses, ports, pod names, passwords, and commands require `--raw`. Unknown top-level row fields still trigger the existing full-response fallback. Image lists omit the redundant owner nickname. Profile output omits WeChat binding and avatar fields. `account` / `account profile` (and legacy `profile`) replace `nickname`, `grade`, `email`, `gender`, and `phone` values with `*`, including raw output, unknown-field fallback, and saved responses. Only the local `--show-private` option reveals these values: `account --show-private`. It is not sent to the API; `-v` alone does not reveal these fields. File lists already contain only essential fields.
 - Image-save status omits recognized runtime identifiers from `client_data`, while preserving operation ID, image name, node, temporary/automatic flags, result, timestamps, and diagnostics. Unknown client fields trigger full-response fallback.
 - Write results, estimates, billing, dashboard, GPU inventory, config, other diagnostics, logs, documentation, and other unadapted operations retain their full responses, including IDs, fingerprints, warnings, and errors. Previews retain their existing redaction regardless of `--raw`.
 
@@ -111,7 +111,7 @@ Writes are not retried automatically. After an uncertain network outcome, reconc
 
 Keep workload stdout, stderr, startup/exit records, and worker logs in separate task/run directories under `/workspace/task_run_logs/`; avoid overwriting previous runs.
 
-`tasks summary` paginates task categories. `tasks summary --id ID` searches them and attaches scheduling events. Query experiments and distributed jobs separately; task summaries do not cover all workloads.
+`tasks summary` paginates task categories. `tasks summary --id ID` searches them and attaches scheduling events. Query `experiments list` and `distributed list` separately; task summaries do not cover all workloads.
 
 After creation, resolve the real ID, actual status, and events. Running-category rows can be Pending. Submission acceptance, Running, application startup, and verified results are distinct stages. `Not exist or finished` only indicates that the workload ended or is absent. Project scripts must verify result completeness and metrics; platform state cannot establish application correctness.
 
