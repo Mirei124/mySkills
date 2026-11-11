@@ -24,6 +24,28 @@
 4. 多组同时申请要联合分配不同卡/节点并考虑公平的任务完成时间，不能让每组都申请同一节点的全部空闲卡。逐次提交前刷新资源，不能依赖提交前较早的快照。若资源在竞态中减少，重新规划和估价；不自动新建重复请求。
 5. 检查 CPU、主机内存、shm 与 GPU 配比。申请内存不能高于节点剩余量；不要混淆 GPU 显存和主机内存。Ready 也不保证无 taint 或 DRA 错误。创建后若 Pending，通过事件检查 `Insufficient memory`、node affinity、untolerated taint、`FailedResourceClaimCreation` 等。CPU/内存不足可在用户授权范围内缩减并重新估价；taint/模板缺失不能靠反复建任务解决，不擅自移除 taint 或改集群配置。
 
+### Quota rejections and replacements
+
+Free node GPUs, per-workload limits, account-wide limits, and container-slot limits are separate constraints. A successful estimate does not check all of them. When a submission is explicitly rejected, retain the exact diagnostic, reconcile tasks, experiments, and distributed workloads, and distinguish these cases:
+
+| Observed diagnostic | Next decision |
+| --- | --- |
+| `The number of GPUs cannot be larger than N` | Bound this workload by the reported limit. Do not publish N as a permanent site default. |
+| `The total number of GPUs cannot be larger than N` | Check account-wide workloads as well as pending/deleting work. An empty task list does not prove that quota accounting has cleared. |
+| `The container num is N, cannot be larger than N` | Reconcile active container slots. Conversion has also hit this check; it is not a verified workaround. |
+
+If the user permits a smaller allocation, a changed request may use fewer GPUs with a new estimate/key and matching worker count. If the user explicitly requested a count, do not silently reduce it. Do not binary-search card counts or repeatedly submit the same quota rejection without new evidence; when visibility does not explain the rejection, report the unresolved account/platform constraint. Historical acceptance of a smaller request does not establish why a larger request failed.
+
+Stopping a workload and freeing quota are distinct observations. A stop/delete acceptance does not guarantee immediate release, and a continuing quota error does not by itself prove delayed release. Retain the exact old workload ID and reconcile before replacing an authorized run. Never cancel unrelated experiments or delete history to try to clear quota.
+
+### Runtime planning and durable execution
+
+Estimate total wall time from model/environment startup, smoke tests, full inference, retries, and aggregation; compare it with the requested duration before submitting a long run. A per-rank progress display such as `766/1350` describes one shard, not the full 2700-question dataset. Plan the slowest shard and allow startup/validation margin; increasing cards need not scale perfectly. If completion is unlikely within the permitted duration, prefer resumable per-sample outputs, independently completed shards, or an authorized extension instead of another identical run that discards partial work.
+
+The previously observed experiment maximum is 12 hours; do not infer the same maximum for every task or deployment. Log silence near a requested 12-hour duration is consistent with a time limit, but empty events and a missing exit record do not confirm the termination cause. Save partial artifacts and report completion separately from the suspected cause. A pruning/statistics record can be written before generation completes and is not a completed prediction.
+
+Keep scripts, dependencies, checkpoints, and outputs needed by replacement pods on verified persistent mounts (normally `/workspace` or `/share`) or in a verified image/snapshot. Do not assume packages installed outside shared mounts will exist in a new pod. Put the project's required `source`/activation command inside the submitted script; preserve it when changing GPU count or frame settings. Before diagnosing decoder/model errors, verify that the task uses the intended interpreter and tools. Project-specific model, dataset, retention, and frame settings belong in project configuration, not this skill.
+
 ### 创建参数和估价
 
 创建前必须按相同资源配置调用 estimate，其正文：
@@ -78,7 +100,7 @@ python3 "$CLI" estimate --body-file estimate.json --output quote.json
 
 `password` 不能留空（本站点已返回 blank 校验错误）。用 `secrets.token_urlsafe(24)` 生成，正文文件权限设为 `600`，不要打印密码或放入 shell 参数；CLI 预览会脱敏。任务的 cmd 必须非空，DRA 的 `gpu_selection.count` 与 `num_gpu` 必须一致。估价和创建使用同一配置，修改配置后重新估价并生成新幂等键。
 
-`duration` 单位为秒。本部署实验最长为 12 小时（`43200` 秒）；用户请求最长时长时使用该值。4 小时为 `14400` 秒，`0` 为旧版无限时长选项，不能用它代替最长时长。实验设置 `is_VM=true`，支持 `auto_save_on_finish`；任务必须提供 `cmd`，实验可留空。转换还需提供 `container_id`，镜像可由源容器确定。转换曾同样被单容器配额拒绝，不能假设会先释放实验或绕过数量限制；失败后回查源实验和任务列表，不擅自停止源实验。前端的 `is_test=true` 仍会创建真实资源，不代表预览。
+`duration` is in seconds; `43200` is 12 hours. `0` is the legacy unlimited option, not a maximum-duration shortcut. See runtime planning above for the observed experiment limit and task/deployment uncertainty. 实验设置 `is_VM=true`，支持 `auto_save_on_finish`；任务必须提供 `cmd`，实验可留空。转换还需提供 `container_id`，镜像可由源容器确定。转换曾同样被单容器配额拒绝，不能假设会先释放实验或绕过数量限制；失败后回查源实验和任务列表，不擅自停止源实验。前端的 `is_test=true` 仍会创建真实资源，不代表预览。
 
 GPU 旧路径：附 `gputype`，`num_gpu>0` 且有节点选择时附 `legacy_node_id`；vgpu 附 `gpumem`（前端选择值，不擅自换算单位）。DRA 路径改用：
 
