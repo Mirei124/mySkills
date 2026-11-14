@@ -568,43 +568,60 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     } else {
         shared.cancel();
     }
-    drop(listener);
-    if !prepared {
-        preparing.abort();
-        let _ = preparing.await;
-    }
-    let _serial = shared.serial.lock().await;
-    let mut engine = shared.engine.lock().await;
-    let mut errors = engine.cleanup().await;
-    shared.worker_pid.store(0, Ordering::Release);
-    let _ = std::fs::remove_file(root.join("socket"));
-    drop(lock);
-    if engine.started
-        && let Err(error) = probe::notify(
-            if errors.is_empty() {
-                "Computer Use has ended"
-            } else {
-                "Computer Use needs attention"
-            },
-            if errors.is_empty() {
-                if *shared.reason.lock().unwrap() == "normal" {
-                    "Desktop control has stopped."
+    // Keep accepting stop/status while cleanup and its final notification are
+    // pending. Closing the listener earlier leaves a gap before stopped.json.
+    let finishing = async {
+        if !prepared {
+            preparing.abort();
+            let _ = preparing.await;
+        }
+        let _serial = shared.serial.lock().await;
+        let mut engine = shared.engine.lock().await;
+        let mut errors = engine.cleanup().await;
+        shared.worker_pid.store(0, Ordering::Release);
+        drop(lock);
+        if engine.started
+            && let Err(error) = probe::notify(
+                if errors.is_empty() {
+                    "Computer Use has ended"
                 } else {
-                    "Task interrupted; desktop control has stopped."
-                }
-            } else {
-                "Cleanup could not be verified. Check the session state."
-            },
-        )
-        .await
-    {
-        errors.push(format!("END_NOTIFICATION_FAILED: {error:#}"));
+                    "Computer Use needs attention"
+                },
+                if errors.is_empty() {
+                    if *shared.reason.lock().unwrap() == "normal" {
+                        "Desktop control has stopped."
+                    } else {
+                        "Task interrupted; desktop control has stopped."
+                    }
+                } else {
+                    "Cleanup could not be verified. Check the session state."
+                },
+            )
+            .await
+        {
+            errors.push(format!("END_NOTIFICATION_FAILED: {error:#}"));
+        }
+        let result = json!({"status":"stopped","errors":errors});
+        publish(&root.join("stopped.json"), &result)?;
+        shared.finished.send_replace(Some(result));
+        drop(engine);
+        drop(_serial);
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::pin!(finishing);
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut finishing => { result?; break; },
+            socket = listener.accept() => {
+                let (socket, _) = socket?;
+                let state = shared.clone();
+                clients.spawn(async move { client(state, socket).await; });
+            }
+        }
     }
-    let result = json!({"status":"stopped","errors":errors});
-    publish(&root.join("stopped.json"), &result)?;
-    shared.finished.send_replace(Some(result));
-    drop(engine);
-    drop(_serial);
+    drop(listener);
+    let _ = std::fs::remove_file(root.join("socket"));
     let _ = tokio::time::timeout(Duration::from_secs(3), async {
         while clients.join_next().await.is_some() {}
     })

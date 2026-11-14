@@ -24,7 +24,7 @@ Start returns session_id, observation_id, screenshot_path, dimensions, output an
 {"request_id":"r-1","session_id":"COPY_FROM_START","observation_id":"COPY_FROM_START","action":{"type":"click","x":300,"y":213,"button":"left"}}
 ```
 
-Read the result and actually view its new screenshot before deciding the next action. `validate` accepts an action object alone on stdin and sends no input. `status` and `capabilities` report the current session. `release_all` (also accepted as release-all) is a management recovery command. `stop` waits for cleanup and notification submission attempts, returning an errors array; check it even when status is stopped.
+Read the result and actually view its new screenshot before deciding the next action. `validate` accepts an action object alone on stdin and sends no input. `status` and `capabilities` report the current session. `release_all` (also accepted as release-all) is a management recovery command. `stop` waits for cleanup and notification submission attempts, including when it arrives after cleanup has already started. The control socket continues accepting stop/status until the final result is published; check it even when status is stopped.
 
 Identical request IDs return the cached response without replaying input. IDs with different content fail. Non-BMP text is rejected as a whole before input with UNSUPPORTED_NON_BMP_TEXT; clipboard fallback is disabled. A failed action can be partially executed: action_executed is conservative, not a guarantee that every event completed. Observe before deciding further work; the skill workflow stops/restarts on mapping or capture failure. A successful screenshot is never fabricated for an executed action whose capture failed.
 

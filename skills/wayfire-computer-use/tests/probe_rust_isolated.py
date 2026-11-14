@@ -34,7 +34,17 @@ def reliability_case(root,env,processes,target):
     def request(ready,action):
         return {'request_id':'reliability-'+str(time.monotonic_ns()),'session_id':ready['session_id'],'observation_id':ready['observation_id'],'action':action}
     ready=start();report={'case':case,'live_desktop_connected':False};runtime=Path(ready['screenshot_path']).parent
-    if case=='cycles':
+    if case=='cleanup-gap':
+        (root/'notification-failure').write_text('delay-end')
+        first=subprocess.Popen([binary,'stop'],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        deadline=time.monotonic()+5
+        while '"summary": "Computer Use has ended"' not in (root/'notifications.log').read_text() and time.monotonic()<deadline:time.sleep(.01)
+        if first.poll() is not None:raise RuntimeError('RELIABILITY_END_DELAY_NOT_REACHED')
+        second=cli(['stop'])
+        original=json.loads(first.communicate(timeout=5)[0])
+        if original!={'status':'stopped','errors':[]} or second!=original:raise RuntimeError('RELIABILITY_LATE_STOP_FAILED: '+repr(second))
+        report.update(first=original,late=second)
+    elif case=='cycles':
         rss=[];fds=[]
         for index in range(10):
             if index:ready=start()
@@ -337,7 +347,7 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
-    parser.add_argument('--reliability-case',choices=['cycles','layout','pipewire','portal','portal-active','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
+    parser.add_argument('--reliability-case',choices=['cleanup-gap','cycles','layout','pipewire','portal','portal-active','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
     parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')

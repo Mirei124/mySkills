@@ -10,12 +10,14 @@ from dbus_next.service import ServiceInterface,method
 class Notifications(ServiceInterface):
     def __init__(self): super().__init__('org.freedesktop.Notifications')
     @method()
-    def Notify(self,app:'s',replaces:'u',icon:'s',summary:'s',body:'s',actions:'as',hints:'a{sv}',expire:'i')->'u':
+    async def Notify(self,app:'s',replaces:'u',icon:'s',summary:'s',body:'s',actions:'as',hints:'a{sv}',expire:'i')->'u':
         print(json.dumps({'summary':summary,'body':body}),flush=True)
         control=os.environ.get('WF_NOTIFY_FAILURE_FILE')
         mode=Path(control).read_text() if control and Path(control).exists() else ''
         if (mode=='start' and summary=='Computer Use is preparing desktop control') or (mode=='end' and summary in {'Computer Use has ended','Computer Use needs attention'}):
             raise DBusError('org.example.IsolatedNotificationFailure','Injected notification failure')
+        if mode=='delay-end' and summary in {'Computer Use has ended','Computer Use needs attention'}:
+            await asyncio.sleep(.5)
         return 1
 
 async def main():
