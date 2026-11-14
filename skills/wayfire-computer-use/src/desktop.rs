@@ -178,23 +178,7 @@ impl Desktop {
         )
     }
     pub fn select(&self, name: Option<&str>) -> Result<(u32, Output)> {
-        if name.is_none() {
-            ensure!(
-                self.state.outputs.len() == 1,
-                "OUTPUT_CONFIRMATION_REQUIRED"
-            );
-        }
-        let (id, output) = self
-            .state
-            .outputs
-            .iter()
-            .find(|(_, o)| name.is_none_or(|name| o.name == name))
-            .context("UNKNOWN_OUTPUT")?;
-        ensure!(
-            !output.name.is_empty() && output.size.0 > 0 && output.size.1 > 0,
-            "OUTPUT_GEOMETRY_UNAVAILABLE"
-        );
-        Ok((*id, output.clone()))
+        select_output(&self.state.outputs, name)
     }
 }
 
@@ -546,5 +530,56 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "WAYLAND_RESPONSE_TIMEOUT");
         assert!(before.elapsed() < Duration::from_secs(1));
+    }
+}
+
+fn select_output(outputs: &BTreeMap<u32, Output>, name: Option<&str>) -> Result<(u32, Output)> {
+    if name.is_none() {
+        ensure!(outputs.len() == 1, "OUTPUT_CONFIRMATION_REQUIRED");
+    }
+    let candidates: Vec<_> = outputs
+        .iter()
+        .filter(|(_, output)| name.is_none_or(|name| output.name == name))
+        .collect();
+    ensure!(!candidates.is_empty(), "UNKNOWN_OUTPUT");
+    ensure!(candidates.len() == 1, "AMBIGUOUS_OUTPUT_NAME");
+    let (id, output) = candidates[0];
+    ensure!(
+        !output.name.is_empty() && output.size.0 > 0 && output.size.1 > 0,
+        "OUTPUT_GEOMETRY_UNAVAILABLE"
+    );
+    Ok((*id, output.clone()))
+}
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn multiple_outputs_require_an_explicit_valid_name() {
+        let first = Output {
+            name: "A".into(),
+            position: (0, 0),
+            size: (1920, 1080),
+            scale: 1,
+            transform: 0,
+        };
+        let second = Output {
+            name: "B".into(),
+            position: (1920, 0),
+            ..first.clone()
+        };
+        let mut outputs = BTreeMap::from([(1, first.clone())]);
+        assert_eq!(select_output(&outputs, None).unwrap().0, 1);
+        outputs.insert(2, second);
+        assert_eq!(
+            select_output(&outputs, None).unwrap_err().to_string(),
+            "OUTPUT_CONFIRMATION_REQUIRED"
+        );
+        assert_eq!(select_output(&outputs, Some("B")).unwrap().0, 2);
+        assert!(select_output(&outputs, Some("missing")).is_err());
+        outputs.insert(3, first);
+        assert_eq!(
+            select_output(&outputs, Some("A")).unwrap_err().to_string(),
+            "AMBIGUOUS_OUTPUT_NAME"
+        );
     }
 }

@@ -22,14 +22,14 @@ enum Command {
     Start {
         #[arg(long)]
         output: Option<String>,
-        #[arg(long)]
+        #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
     },
     #[command(hide = true)]
     Serve {
         #[arg(long)]
         output: Option<String>,
-        #[arg(long)]
+        #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
     },
     Act,

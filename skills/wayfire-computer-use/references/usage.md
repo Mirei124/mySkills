@@ -8,15 +8,15 @@ cargo build --locked --release
 ./target/release/wayfire-computer-use start
 ```
 
-For an authorized single-output Portal selection click:
+For one authorized Portal selection click (with explicit selection when several outputs exist):
 
 ```bash
-./target/release/wayfire-computer-use start --auto-select-single-output
+./target/release/wayfire-computer-use start --output HEADLESS-8 --auto-select-output
 ```
 
-This uses a pointer-only Wayland device, not wlrctl. It checks for one output and a new same-user slurp monitor-selector process, allows setup time, then sends one click. The start notification precedes the click. Selector process discovery is not input-grab acknowledgment; concurrent selectors or disappearance prevent a reliable association. Never silently repeat a click. selector_click_may_have_executed conservatively records an uncertain startup side effect.
+This uses a pointer-only Wayland device, not wlrctl. It requires an explicit output name when multiple outputs exist, checks for a new same-user slurp monitor-selector process, allows setup time, moves within the selected output using output binding, then sends one click. The old --auto-select-single-output spelling remains an alias. The start notification precedes the click. Selector process discovery is not input-grab acknowledgment; concurrent selectors or disappearance prevent a reliable association. Never silently repeat a click. selector_click_may_have_executed conservatively records an uncertain startup side effect.
 
-The initial production runtime accepts exactly one normal-orientation output at scale 1. Multiple outputs and other transforms/scales are explicitly rejected before ordinary input. Historical eDP-1/HEADLESS-8 testing used the archived implementation and does not enable arbitrary configurations in the Rust runtime.
+The runtime controls one selected normal-orientation output at scale 1. A sole output is automatic; with several outputs, --output NAME is mandatory. Duplicate output names, overlapping identical output geometry, missing virtual-pointer v2 output binding, and unsupported selected-output transform/scale fail before ordinary input. The full layout is still tracked to reject stale observations after changes. Rust explicit secondary-output selection has passed private real dual-output integration; the current desktop retry was blocked by Portal CreateSession timeout, so shared-session acceptance remains pending.
 
 Start returns session_id, observation_id, screenshot_path, dimensions, output and layout_version. View the screenshot, then pass one envelope on stdin to `act`:
 
@@ -57,4 +57,4 @@ From the repository root, optional isolated integration tests use the repository
 
 The private integration test starts its own D-Bus, headless Wayfire, PipeWire, policy-only WirePlumber, notification sink, permission store and wlr Portal. It does not restart or connect to the current desktop's Portal services. Logs/screenshots remain in its reported /tmp/wf-rust-isolated-* directory for inspection; remove that directory after review.
 
-`probe-capture --output NAME --path FILE [--auto-select]` is a diagnostic capture-only command. Its explicit selector automation can target a confirmed named output, including a headless test output; it does not enable multi-output input in ordinary sessions. It acquires the per-display lock and closes its Portal session on exit.
+`probe-capture --output NAME --path FILE [--auto-select]` is a diagnostic capture-only command. Its explicit selector automation can target a confirmed named output, including a headless test output; ordinary sessions use the same explicit-selection and geometry checks, with the selected transform/scale limits above. It acquires the per-display lock and closes its Portal session on exit.

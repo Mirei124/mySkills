@@ -56,3 +56,7 @@ The harness owns a private runtime directory, D-Bus with activation disabled, he
 Verified: direct PipeWire packed-pixel capture with header timestamps and PNG inspection; Rust input-worker click, ASCII/chord/Chinese text; session CLI all nine actions, double-click/scroll event reception, deduplication, stale-observation rejection, wait cancellation, repeated stop and screenshot cleanup; start-notification denial, end-notification failure reporting, and input-worker crash cleanup/interruption notice. Scope is a single unrotated 1920x1080 headless output at scale 1. The two-output geometry-only probe now reads the Rust doctor's output; it still does not establish Portal/input mapping for those transforms.
 
 No current desktop service is restarted or used by this test. The Rust production multi-output/transform gates remain in place.
+
+## Rust explicit secondary-output selection
+
+The Rust runtime now accepts --output NAME when multiple outputs exist, while requiring normal orientation/scale 1 on the selected output, virtual-pointer v2 binding and unique geometry. Add --multi-output to the isolated session probe to create HEADLESS-1 at (0,0) and HEADLESS-2 at (1920,0), move only the private fixture to HEADLESS-2 and exercise explicit selection there. This integration passed capture, input and session lifecycle checks. The current eDP-1/HEADLESS-8 attempt stopped at PORTAL_CREATE_TIMEOUT before any selection click or ordinary input. It has not established current shared-desktop acceptance.

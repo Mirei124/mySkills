@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import select
 import subprocess
 import sys
@@ -23,6 +24,7 @@ def wait_for(check,processes,timeout=8):
 def inside(root):
     root=Path(root)
     env=os.environ.copy()
+    target_output=env.get('WF_ISOLATED_TARGET_OUTPUT','HEADLESS-1')
     processes=[]
     logs=[]
     def launch(name,args):
@@ -48,12 +50,32 @@ def inside(root):
         launch('portal',['/usr/lib/xdg-desktop-portal'])
         wait_for(lambda:bus_has('org.freedesktop.portal.Desktop'),processes)
         launch('fixture',[sys.executable,str(SKILL/'tests/desktop_fixture.py'),'--state',str(root/'fixture-state.json'),'--animate'])
-        command=[str(SKILL/'target/debug/wayfire-computer-use'),'probe-capture','--output','HEADLESS-1','--path',str(root/'frame.png'),'--auto-select']
+        if target_output!='HEADLESS-1':
+            wait_for(lambda:(root/'fixture-state.json').exists() and bool(list(root.glob('wayfire-*.socket'))),processes)
+            def ipc(method,data=None):
+                with socket.socket(socket.AF_UNIX) as client:
+                    client.settimeout(3);client.connect(str(next(root.glob('wayfire-*.socket'))))
+                    payload=json.dumps({'method':method,'data':data or {}}).encode()
+                    client.sendall(len(payload).to_bytes(4,'little')+payload)
+                    def exact(n):
+                        value=b''
+                        while len(value)<n:
+                            part=client.recv(n-len(value))
+                            if not part:raise RuntimeError('ISOLATED_IPC_CLOSED')
+                            value+=part
+                        return value
+                    return json.loads(exact(int.from_bytes(exact(4),'little')))
+            target=next(o for o in ipc('window-rules/list-outputs') if o['name']==target_output)
+            state=json.loads((root/'fixture-state.json').read_text())
+            view=next(v for v in ipc('window-rules/list-views') if v.get('title')==state['title'])
+            moved=ipc('window-rules/configure-view',{'id':view['id'],'output_id':target['id'],'geometry':{'x':100,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
+            if moved.get('result')!='ok':raise RuntimeError('ISOLATED_FIXTURE_MOVE_FAILED')
+        command=[str(SKILL/'target/debug/wayfire-computer-use'),'probe-capture','--output',target_output,'--path',str(root/'frame.png'),'--auto-select']
         result=subprocess.run(command,env=env,capture_output=True,text=True,timeout=80)
         input_verified=False
         after=None
         if result.returncode==0 and env.get('WF_ISOLATED_INPUT_TEST')=='1':
-            worker=subprocess.Popen([str(SKILL/'target/debug/wayfire-computer-use'),'worker','--output','HEADLESS-1'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(root/'worker.log').open('w'),text=True)
+            worker=subprocess.Popen([str(SKILL/'target/debug/wayfire-computer-use'),'worker','--output',target_output],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(root/'worker.log').open('w'),text=True)
             processes.append(('input-worker',worker))
             def response():
                 if not select.select([worker.stdout],[],[],5)[0]:raise RuntimeError('INPUT_WORKER_RESPONSE_TIMEOUT')
@@ -90,12 +112,17 @@ def inside(root):
                 response=subprocess.run([binary,*args],env=env,input=input,capture_output=True,text=True,timeout=timeout)
                 value=json.loads(response.stdout)
                 return value
+            if target_output!='HEADLESS-1':
+                before_notices=(root/'notifications.log').read_text()
+                unselected=cli(['start','--auto-select-output'],timeout=75)
+                if unselected.get('code')!='OUTPUT_CONFIRMATION_REQUIRED':raise RuntimeError('RUST_MULTIPLE_OUTPUTS_NOT_CONFIRMED')
+                if (root/'notifications.log').read_text()!=before_notices:raise RuntimeError('RUST_UNSELECTED_OUTPUT_SENT_NOTICE')
             failure=root/'notification-failure'
             failure.write_text('start')
-            denied=cli(['start','--auto-select-single-output'],timeout=75)
+            denied=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             failure.unlink()
             if denied.get('status')!='error':raise RuntimeError('RUST_START_NOTIFICATION_FAILURE_NOT_ENFORCED')
-            first=cli(['start','--auto-select-single-output'],timeout=75)
+            first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if first.get('status')!='ready':raise RuntimeError('RUST_SESSION_START_FAILED: '+repr(first))
             latest=first
             def envelope(action,identifier):
@@ -143,14 +170,14 @@ def inside(root):
             if elapsed>2:raise RuntimeError('RUST_STOP_TOO_SLOW')
             if cli(['stop'])!=stopped:raise RuntimeError('RUST_REPEAT_STOP_FAILED')
             if Path(typed['screenshot_path']).exists():raise RuntimeError('RUST_SCREENSHOT_NOT_CLEANED')
-            next_ready=cli(['start','--auto-select-single-output'],timeout=75)
+            next_ready=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if next_ready.get('status')!='ready':raise RuntimeError('RUST_SECOND_START_FAILED')
             failure.write_text('end')
             failed_notice=cli(['stop'])
             failure.unlink()
             if failed_notice.get('status')!='stopped' or not any('END_NOTIFICATION_FAILED' in e for e in failed_notice.get('errors',[])):
                 raise RuntimeError('RUST_END_NOTIFICATION_FAILURE_NOT_REPORTED')
-            third=cli(['start','--auto-select-single-output'],timeout=75)
+            third=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if third.get('status')!='ready':raise RuntimeError('RUST_THIRD_START_FAILED')
             import hashlib
             runtime=root/('wf-computer-'+hashlib.sha256(env['WAYLAND_DISPLAY'].encode()).hexdigest()[:16])
@@ -185,6 +212,7 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
+    parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
     args=parser.parse_args()
@@ -215,6 +243,10 @@ context.modules = [
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'
+    if args.multi_output:
+        env['WF_ISOLATED_TARGET_OUTPUT']='HEADLESS-2';env['WLR_HEADLESS_OUTPUTS']='2'
+        config=root/'wayfire.ini'
+        config.write_text(config.read_text().replace('plugins =\n','plugins = ipc ipc-rules\n')+'\n[output:HEADLESS-2]\nmode = 1920x1080\nposition = 1920,0\nscale = 1\ntransform = normal\n')
     command=['dbus-run-session','--config-file',str(root/'bus.conf'),'--',sys.executable,str(Path(__file__).resolve()),'--inside',str(root)]
     process=subprocess.Popen(command,env=env,start_new_session=True)
     try:return process.wait(timeout=100)

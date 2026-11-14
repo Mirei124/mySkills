@@ -256,10 +256,16 @@ impl Engine {
         let (selected, layout) = tokio::task::spawn_blocking(move || {
             let desktop = Desktop::connect()?;
             let (_, output) = desktop.select(name.as_deref())?;
-            ensure!(
-                desktop.state.outputs.len() == 1,
-                "MULTI_OUTPUT_INPUT_UNVERIFIED"
-            );
+            validate_mapping(
+                &desktop.state.outputs,
+                &output,
+                desktop
+                    .state
+                    .globals
+                    .get("zwlr_virtual_pointer_manager_v1")
+                    .copied()
+                    .unwrap_or(0),
+            )?;
             Ok::<_, anyhow::Error>((output, serde_json::to_value(desktop.state.outputs)?))
         })
         .await??;
@@ -274,7 +280,7 @@ impl Engine {
             let baseline = probe::selectors();
             probe::notify(
                 "Computer Use is preparing desktop control",
-                "Selecting the sole display with one authorized click. Please avoid desktop input.",
+                "Selecting the explicitly chosen display with one authorized click. Please avoid desktop input.",
             )
             .await?;
             self.started = true;
@@ -466,7 +472,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine) -> Value {
-    json!({"status":"active","session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_verified":false,"clipboard":false,"runtime":"Rust","unicode":"GTK-tested with experimental settling delays"}})
+    json!({"status":"active","session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"GTK-tested with experimental settling delays"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();
@@ -651,7 +657,7 @@ pub async fn start(output: Option<String>, auto_select: bool) -> Result<Value> {
         command.args(["--output", &output]);
     }
     if auto_select {
-        command.arg("--auto-select-single-output");
+        command.arg("--auto-select-output");
     }
     let child = command
         .stdin(std::process::Stdio::null())
@@ -779,5 +785,67 @@ mod tests {
         assert_eq!(result, expected);
         server.await.unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+fn validate_mapping(
+    outputs: &std::collections::BTreeMap<u32, Output>,
+    selected: &Output,
+    pointer_version: u32,
+) -> Result<()> {
+    ensure!(
+        outputs
+            .values()
+            .filter(|other| other.position == selected.position && other.size == selected.size)
+            .count()
+            == 1,
+        "AMBIGUOUS_OUTPUT_GEOMETRY"
+    );
+    if outputs.len() > 1 {
+        ensure!(pointer_version >= 2, "OUTPUT_BINDING_UNAVAILABLE");
+    }
+    ensure!(
+        selected.scale == 1 && selected.transform == 0,
+        "UNSUPPORTED_OUTPUT_TRANSFORM_OR_SCALE"
+    );
+    Ok(())
+}
+#[cfg(test)]
+mod mapping_tests {
+    use super::*;
+    #[test]
+    fn selected_output_requires_unambiguous_geometry_and_binding() {
+        let first = Output {
+            name: "A".into(),
+            position: (0, 0),
+            size: (1920, 1080),
+            scale: 1,
+            transform: 0,
+        };
+        let second = Output {
+            name: "B".into(),
+            position: (1920, 0),
+            ..first.clone()
+        };
+        let mut outputs =
+            std::collections::BTreeMap::from([(1, first.clone()), (2, second.clone())]);
+        assert!(validate_mapping(&outputs, &second, 2).is_ok());
+        assert_eq!(
+            validate_mapping(&outputs, &second, 1)
+                .unwrap_err()
+                .to_string(),
+            "OUTPUT_BINDING_UNAVAILABLE"
+        );
+        outputs.get_mut(&1).unwrap().position = (1920, 0);
+        assert_eq!(
+            validate_mapping(&outputs, &second, 2)
+                .unwrap_err()
+                .to_string(),
+            "AMBIGUOUS_OUTPUT_GEOMETRY"
+        );
+        let mut only = std::collections::BTreeMap::from([(1, first)]);
+        let rotated = only.get_mut(&1).unwrap();
+        rotated.transform = 1;
+        assert!(validate_mapping(&only, &only[&1], 2).is_err());
     }
 }

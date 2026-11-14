@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 pub async fn doctor() -> Result<Value> {
     let mut report=tokio::task::spawn_blocking(||{
         let desktop=crate::desktop::Desktop::connect()?;
-        Ok::<_,anyhow::Error>(json!({"status":"diagnostic","runtime":"Rust","sends_input":false,"outputs":desktop.state.outputs,"protocol_versions":desktop.state.globals,"supported_input_configuration":"one output, scale 1, normal orientation","verification":"See IMPLEMENTATION.md for tested configurations; doctor does not execute actions."}))
+        Ok::<_,anyhow::Error>(json!({"status":"diagnostic","runtime":"Rust","sends_input":false,"outputs":desktop.state.outputs,"protocol_versions":desktop.state.globals,"supported_input_configuration":"one explicitly selected output, scale 1, normal orientation","verification":"See IMPLEMENTATION.md for tested configurations; doctor does not execute actions."}))
     }).await??;
     let services = tokio::time::timeout(Duration::from_secs(3), async {
         let connection = zbus::Connection::session().await?;

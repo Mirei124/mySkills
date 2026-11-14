@@ -7,7 +7,8 @@ Run `target/release/wayfire-computer-use doctor` inside the intended Wayfire ses
 | WAYLAND_UNAVAILABLE | Check the intended session's Wayland socket/access. Permission errors do not prove missing protocols. |
 | WAYLAND_RESPONSE_TIMEOUT | The compositor did not answer within the bounded roundtrip. Stop; do not replay input blindly. |
 | OUTPUT_CONFIRMATION_REQUIRED | Confirm the desired output. Automatic single-output selection does not apply to multiple outputs. |
-| MULTI_OUTPUT_INPUT_UNVERIFIED | The initial production runtime keeps multi-output input disabled; historical test results have limited scope. |
+| UNKNOWN_OUTPUT / AMBIGUOUS_OUTPUT_NAME | Choose one existing unique output name. |
+| AMBIGUOUS_OUTPUT_GEOMETRY / OUTPUT_BINDING_UNAVAILABLE | Capture identity or native output binding cannot be verified; stop rather than guessing coordinates. |
 | UNSUPPORTED_OUTPUT_TRANSFORM_OR_SCALE | Initial input support requires normal orientation and scale 1. Other geometry tests do not prove click mapping. |
 | PORTAL_CREATE_TIMEOUT / PORTAL_SOURCE_SELECTION_TIMEOUT / PORTAL_START_TIMEOUT | The named phase failed. Stop and inspect Portal state before a deliberate retry; do not automatically repeat clicks. |
 | PIPEWIRE_STREAM_ERROR | Inspect the bounded error detail. Diagnose format/policy/buffer negotiation in the private test environment before affecting the real desktop. |
