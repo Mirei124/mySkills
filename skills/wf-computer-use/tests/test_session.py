@@ -128,3 +128,14 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['action_executed'])
         self.session.finished.set()
         await stop
+
+    async def test_rotation_or_scale_change_invalidates_old_observation(self):
+        for field,value in [('transform','180'),('scale',2)]:
+            with self.subTest(field=field):
+                self.session.observation='old'
+                self.session.cache.clear()
+                self.session.outputs=AsyncMock(return_value=[dict(self.session.geometry[0],**{field:value})])
+                result=await self.session.request(self.request())
+                self.assertEqual(result['code'],'LAYOUT_CHANGED')
+                self.assertFalse(result['action_executed'])
+                self.session.input.execute.assert_not_awaited()

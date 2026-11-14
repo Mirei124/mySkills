@@ -19,6 +19,18 @@ def parse_outputs(text):
         raise MappingError('OUTPUT_GEOMETRY_UNAVAILABLE')
     if len({o['name'] for o in outputs}) != len(outputs):
         raise MappingError('AMBIGUOUS_OUTPUT_NAMES')
+    # wl_output metadata must participate in layout invalidation even when
+    # xdg-output logical bounds do not change (for example a 180-degree turn).
+    for block in re.split(r"interface: 'wl_output',[^\n]*\n", text)[1:]:
+        block='\n'+block.split('\ninterface:')[0]
+        name=re.search(r"\n\s*name: ([^\n]+)",block)
+        scale=re.search(r'scale: (\d+)',block)
+        transform=re.search(r'output_transform: ([^,\n]+)',block)
+        if not name: continue
+        for output in outputs:
+            if output['name']==name[1].strip():
+                if scale: output['scale']=int(scale[1])
+                if transform: output['transform']=transform[1].strip()
     return outputs
 
 def select_output(outputs, name=None):
