@@ -132,6 +132,60 @@ def reliability_case(root,env,processes,target,ipc=None):
             if report['replacement_stop']!={'status':'stopped','errors':[]}:raise RuntimeError('RELIABILITY_REPLACEMENT_CLEANUP_FAILED')
     return report
 
+def toplevel_case(root,env,processes,cli,ipc,ready,latest):
+    """Exercise real window identity, focus serialization and stale observations."""
+    primary=json.loads((root/'fixture-state.json').read_text())
+    secondary_path=root/'secondary-fixture.json'
+    with (root/'secondary-fixture.log').open('w') as log:
+        secondary=subprocess.Popen([sys.executable,str(SKILL/'tests/desktop_fixture.py'),'--state',str(secondary_path),'--animate'],env=env,stdout=log,stderr=log)
+    processes.append(('secondary-fixture',secondary))
+    wait_for(secondary_path.exists,processes)
+    views=cli(['toplevel','list'])
+    if views.get('status')!='ok':raise RuntimeError('TOPLEVEL_LIST_FAILED: '+repr(views))
+    first=next(v for v in views['toplevels'] if v['pid']==primary['pid'] and v['title']==primary['title'])
+    second=next(v for v in views['toplevels'] if v['pid']==secondary.pid)
+    output=next(o for o in ipc('window-rules/list-outputs') if o['name']=='HEADLESS-2')
+    moved=ipc('window-rules/configure-view',{'id':second['id'],'output_id':output['id'],'geometry':{'x':850,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
+    if moved.get('result')!='ok':raise RuntimeError('TOPLEVEL_FIXTURE_MOVE_FAILED')
+    def focus(view):return cli(['toplevel','focus','--id',str(view['id']),'--pid',str(view['pid'])])
+    def confirmed(view):
+        result=focus(view)
+        if result.get('status')!='focused' or result.get('focus_confirmed') is not True or result.get('session_id')!=ready['session_id'] or result.get('observation_id') is not None:
+            raise RuntimeError('TOPLEVEL_FOCUS_NOT_CONFIRMED: '+repr(result))
+        return result
+    def fresh():
+        response=cli(['act'],json.dumps({'request_id':'focus-observe-'+str(time.monotonic_ns()),'session_id':ready['session_id'],'observation_id':None,'action':{'type':'screenshot'}}))
+        if response.get('status')!='ok':raise RuntimeError('TOPLEVEL_FRESH_CAPTURE_FAILED: '+repr(response))
+        return response
+    confirmed(second)
+    stale=cli(['act'],json.dumps({'request_id':'focus-stale','session_id':ready['session_id'],'observation_id':latest['observation_id'],'action':{'type':'click','x':300,'y':213,'button':'left'}}))
+    if stale.get('code')!='STALE_OBSERVATION' or stale.get('action_executed') is not False:raise RuntimeError('TOPLEVEL_FOCUS_REUSED_OLD_OBSERVATION')
+    confirmed(first)
+    latest=fresh()
+    # Focus queued after text starts must not redirect its remaining characters.
+    before=json.loads((root/'fixture-state.json').read_text())['text']
+    suffix=' serialized focus aA'
+    pending=subprocess.Popen([str(SKILL/'target/debug/wayfire-computer-use'),'act'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    request={'request_id':'focus-serial-text','session_id':ready['session_id'],'observation_id':latest['observation_id'],'action':{'type':'type','text':suffix}}
+    pending.stdin.write(json.dumps(request));pending.stdin.close()
+    wait_for(lambda:json.loads((root/'fixture-state.json').read_text())['text']!=before,processes)
+    confirmed(second)
+    typed=json.loads(pending.stdout.read());pending.wait(timeout=3)
+    if typed.get('status')!='ok' or json.loads((root/'fixture-state.json').read_text())['text']!=before+suffix or json.loads(secondary_path.read_text())['text']:
+        raise RuntimeError('TOPLEVEL_FOCUS_REDIRECTED_ACTIVE_TEXT')
+    confirmed(first)
+    other=next(o for o in ipc('window-rules/list-outputs') if o['name']=='HEADLESS-1')
+    moved=ipc('window-rules/configure-view',{'id':second['id'],'output_id':other['id'],'geometry':{'x':100,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
+    if moved.get('result')!='ok':raise RuntimeError('TOPLEVEL_OTHER_OUTPUT_MOVE_FAILED')
+    rejected=focus(second)
+    if rejected.get('code')!='TOPLEVEL_OUTPUT_MISMATCH' or rejected.get('focus_request_may_have_executed') is not False:raise RuntimeError('TOPLEVEL_CROSS_OUTPUT_FOCUS_NOT_BLOCKED: '+repr(rejected))
+    secondary.terminate();secondary.wait(timeout=4)
+    processes.remove(('secondary-fixture',secondary))
+    missing=focus(second)
+    if missing.get('code')!='TOPLEVEL_NOT_FOUND' or missing.get('focus_request_may_have_executed') is not False:raise RuntimeError('TOPLEVEL_CLOSED_WINDOW_NOT_REJECTED: '+repr(missing))
+    confirmed(first)
+    return fresh(),first
+
 def inside(root):
     root=Path(root)
     env=os.environ.copy()
@@ -164,6 +218,7 @@ def inside(root):
         launch('fixture',[sys.executable,str(SKILL/'tests/desktop_fixture.py'),'--state',str(root/'fixture-state.json'),'--animate'])
         if target_output!='HEADLESS-1':
             wait_for(lambda:(root/'fixture-state.json').exists() and bool(list(root.glob('wayfire-*.socket'))),processes)
+            env['WAYFIRE_SOCKET']=str(next(root.glob('wayfire-*.socket')))
             def ipc(method,data=None):
                 with socket.socket(socket.AF_UNIX) as client:
                     client.settimeout(3);client.connect(str(next(root.glob('wayfire-*.socket'))))
@@ -220,6 +275,7 @@ def inside(root):
         if result.returncode==0 and env.get('WF_RELIABILITY_CASE'):
             reliability=reliability_case(root,env,processes,target_output,ipc if target_output!='HEADLESS-1' else None)
         session_verified=False
+        toplevel_verified=False
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
             binary=str(SKILL/'target/debug/wayfire-computer-use')
@@ -275,6 +331,8 @@ def inside(root):
             duplicate=cli(['act'],json.dumps(request))
             if duplicate!=typed:raise RuntimeError('RUST_DEDUP_RESULT_MISMATCH')
             if json.loads((root/'fixture-state.json').read_text())['text']!=expected:raise RuntimeError('RUST_SESSION_TEXT_MISMATCH')
+            if env.get('WF_ISOLATED_TOPLEVEL_TEST')=='1':
+                latest,toplevel_primary=toplevel_case(root,env,processes,cli,ipc,first,latest)
             for index,action in enumerate([
                 {'type':'move','x':300,'y':213},
                 {'type':'double_click','x':300,'y':213},
@@ -304,6 +362,13 @@ def inside(root):
             if elapsed>2:raise RuntimeError('RUST_STOP_TOO_SLOW')
             if cli(['stop'])!=stopped:raise RuntimeError('RUST_REPEAT_STOP_FAILED')
             if Path(typed['screenshot_path']).exists():raise RuntimeError('RUST_SCREENSHOT_NOT_CLEANED')
+            if env.get('WF_ISOLATED_TOPLEVEL_TEST')=='1':
+                wait_for(lambda:not (Path(typed['screenshot_path']).parent/'socket').exists(),processes)
+                standalone=cli(['toplevel','focus','--id',str(toplevel_primary['id']),'--pid',str(toplevel_primary['pid'])])
+                if standalone.get('status')!='focused' or 'session_id' in standalone:raise RuntimeError('TOPLEVEL_STANDALONE_FOCUS_FAILED: '+repr(standalone))
+                mismatch=cli(['toplevel','focus','--id',str(toplevel_primary['id']),'--pid','1'])
+                if mismatch.get('code')!='TOPLEVEL_IDENTITY_CHANGED' or mismatch.get('focus_request_may_have_executed') is not False:raise RuntimeError('TOPLEVEL_PID_GUARD_FAILED')
+                toplevel_verified=True
             next_ready=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if next_ready.get('status')!='ready':raise RuntimeError('RUST_SECOND_START_FAILED')
             failure.write_text('end')
@@ -352,7 +417,7 @@ def inside(root):
             if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RUST_TEXT_CONTINUED_AFTER_STOP')
             if list(runtime.glob('o-*.png')):raise RuntimeError('RUST_TEXT_CANCEL_SCREENSHOT_LEAK')
             session_verified=True
-        report={'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
+        report={'toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
         print(json.dumps(report))
         return result.returncode
@@ -388,9 +453,11 @@ def main():
     parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
+    parser.add_argument('--toplevel-test',action='store_true',help='Also exercise IPC window listing, focus and action serialization (requires --multi-output --session-test)')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
     args=parser.parse_args()
     if args.inside:return inside(args.inside)
+    if args.toplevel_test and not (args.multi_output and args.session_test):parser.error('--toplevel-test requires --multi-output --session-test')
     root=Path(tempfile.mkdtemp(prefix='wf-rust-isolated-'))
     (root/'bus.conf').write_text(f'<busconfig><type>session</type><listen>unix:tmpdir={root}</listen><policy context="default"><allow own="*"/><allow send_destination="*"/><allow receive_sender="*"/><allow send_type="error" send_requested_reply="false"/><allow receive_type="error" receive_requested_reply="false"/></policy></busconfig>')
     portals=root/'portals';portals.mkdir()
@@ -419,6 +486,7 @@ context.modules = [
     if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'
+    if args.toplevel_test:env['WF_ISOLATED_TOPLEVEL_TEST']='1'
     if args.launcher_boundary_test:env['WF_LAUNCHER_BOUNDARY_TEST']='1'
     if args.multi_output:
         env['WF_ISOLATED_TARGET_OUTPUT']='HEADLESS-2';env['WLR_HEADLESS_OUTPUTS']='2'

@@ -34,9 +34,32 @@ There is no dedicated lock-screen status or automatic lock-specific notification
 
 Normal stop, cancellation and idle/worker failure attempt one end notification after device cleanup and lock release. Start notification failure prevents ordinary input. SIGKILL of the owner or entire process group, compositor failure, bus loss and system shutdown cannot guarantee notification delivery. Notification submission is not proof of user acknowledgment.
 
+## Window management
+
+The Rust executable directly implements Wayfire IPC window discovery and focus requests; no Python or wlrctl is used:
+
+```bash
+./target/release/wayfire-computer-use toplevel list
+./target/release/wayfire-computer-use toplevel focus --id 123 --pid 456
+```
+
+These optional commands require Wayfire's ipc and ipc-rules plugins and an absolute WAYFIRE_SOCKET inherited from the intended desktop. The socket and server peer must belong to the current user. Missing/unavailable IPC fails explicitly; the CLI does not discover other sessions, alter compositor configuration or fall back to another tool. Existing capture/input commands do not require these plugins.
+
+`list` is read-only and returns status=ok and a toplevels array sorted by ID. Each item includes id, title, app_id, pid (null when unknown), output_name/output_id, logical geometry when available, activated, minimized, fullscreen and focusable. Only mapped application toplevels are included; shell/layer surfaces and unmapped windows are excluded. Empty lists are valid. Same-title windows remain separate IDs. IDs refer to the current compositor lifetime; list again after compositor restart or window closure. `--pid` optionally pins process identity and rejects a mismatch before requesting focus.
+
+`focus` requests one exact ID, then checks both its activated state and Wayfire's get-focused-view result. A successful result has status=focused, focus_confirmed=true and the current toplevel metadata. This confirms compositor active-view state at observation time, not future key delivery or the absence of a popup, input-method grab or lock screen. The window manager may switch workspaces or restore a minimized window as part of its focus policy. These commands create no Portal session or virtual input device and submit no control notification on their own. IPC operations have a three-second deadline and a four-MiB response limit.
+
+Without a control owner, focus acquires the per-display control lock. With an owner, it goes through the same action queue as native input, so it cannot redirect an in-progress text action. Owner-managed focus only accepts a window on the selected output. Every owner-managed focus attempt reaching IPC invalidates the previous observation, including rejection or uncertain completion, and returns session_id with observation_id=null. Request and view a new screenshot before ordinary input:
+
+```json
+{"request_id":"after-focus-1","session_id":"COPY_FROM_FOCUS","observation_id":null,"action":{"type":"screenshot"}}
+```
+
+Focus is a management command, not an additional standard action type. It does not use act's request-ID deduplication. On error, inspect focus_request_may_have_executed; true means the request may have affected the desktop despite missing confirmation. Never retry automatically. Preparing/stopping/busy owners fail explicitly, with no standalone fallback after an owner has been contacted. Window metadata and successful focus do not replace the required PNG observation for mouse/keyboard work.
+
 ## Dependencies
 
-Runtime: the compiled Rust executable, libpipewire-0.3 and its SPA support, libxkbcommon/keymap data, the Linux C/system libraries linked by the build, a Wayfire session exposing the virtual-pointer/keyboard protocols, D-Bus, a notification service, PipeWire and a Screenshot/ScreenCast-capable desktop portal. The session's PipeWire policy manager must connect capture streams. Python, pip, GStreamer, notify-send, wayland-info, wlrctl, a compiler and a separate C helper are not runtime requirements.
+Runtime: the compiled Rust executable, libpipewire-0.3 and its SPA support, libxkbcommon/keymap data, the Linux C/system libraries linked by the build, a Wayfire session exposing the virtual-pointer/keyboard protocols, D-Bus, a notification service, PipeWire and a Screenshot/ScreenCast-capable desktop portal. Window-management commands additionally use Wayfire IPC as described above. The session's PipeWire policy manager must connect capture streams. Python, pip, GStreamer, notify-send, wayland-info, wlrctl, a compiler and a separate C helper are not runtime requirements.
 
 Build: a compatible Rust/Cargo toolchain, a C compiler for native binding build steps, pkg-config, PipeWire/SPA and xkbcommon development files, and libclang for generated PipeWire bindings. Cargo.lock pins the dependency resolution. Binaries target the build machine's Linux ABI; this is not a promise of a universally static executable. Check `ldd target/release/wayfire-computer-use` when packaging.
 
@@ -55,6 +78,7 @@ From the repository root, optional isolated integration tests use the repository
 ```bash
 .venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --input-test --session-test
 .venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --session-test --launcher-boundary-test
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --session-test --toplevel-test --launcher-boundary-test
 .venv/bin/python3 skills/wayfire-computer-use/tests/probe_headless.py
 ```
 

@@ -9,6 +9,7 @@ mod execute;
 mod portal;
 mod probe;
 mod session;
+mod toplevel;
 mod worker;
 
 #[derive(Parser)]
@@ -45,6 +46,11 @@ enum Command {
     },
     Validate,
     Doctor,
+    /// List application windows or request focus through Wayfire IPC.
+    Toplevel {
+        #[command(subcommand)]
+        command: ToplevelCommand,
+    },
     ProbeCapture {
         #[arg(long)]
         output: Option<String>,
@@ -52,6 +58,19 @@ enum Command {
         path: std::path::PathBuf,
         #[arg(long)]
         auto_select: bool,
+    },
+}
+#[derive(Subcommand)]
+enum ToplevelCommand {
+    /// List mapped application toplevels without changing focus.
+    List,
+    /// Request focus for one listed window and verify the resulting focus.
+    Focus {
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        id: u64,
+        /// Require the window to still belong to this PID.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        pid: Option<u32>,
     },
 }
 #[tokio::main]
@@ -109,6 +128,12 @@ async fn main() {
             auto_select,
         } => probe::capture(output, path, auto_select).await,
         Command::Doctor => diagnostics::doctor().await,
+        Command::Toplevel { command } => match command {
+            ToplevelCommand::List => toplevel::list().await,
+            ToplevelCommand::Focus { id, pid } => {
+                session::focus_toplevel(toplevel::FocusTarget { id, pid }).await
+            }
+        },
         Command::Validate => stdin_json()
             .and_then(|value| serde_json::from_value::<action::Action>(value).map_err(Into::into))
             .and_then(|action| {

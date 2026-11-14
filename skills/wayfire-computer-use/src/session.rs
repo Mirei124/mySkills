@@ -416,6 +416,32 @@ impl Shared {
         );
         *self.last.lock().unwrap() = Instant::now();
         let mut engine = self.engine.lock().await;
+        if request.get("command").and_then(Value::as_str) == Some("focus_toplevel") {
+            ensure!(request.as_object().unwrap().len() == 2, "INVALID_FIELDS");
+            let target: crate::toplevel::FocusTarget =
+                serde_json::from_value(request["target"].clone())
+                    .context("INVALID_TOPLEVEL_TARGET")?;
+            ensure!(!*self.portal_loss.borrow(), "PORTAL_SERVICE_LOST");
+            engine
+                .capture
+                .as_ref()
+                .context("CAPTURE_UNAVAILABLE")?
+                .check()?;
+            let output = engine
+                .output
+                .as_ref()
+                .context("OUTPUT_UNAVAILABLE")?
+                .name
+                .clone();
+            // Even an uncertain focus request makes the old visual context stale.
+            engine.observation = None;
+            self.snapshot.lock().unwrap()["observation_id"] = Value::Null;
+            let mut response =
+                crate::toplevel::focus(&target, Some(&output), Some(&self.cancel_requested)).await;
+            response["session_id"] = json!(engine.id);
+            response["observation_id"] = Value::Null;
+            return Ok(response);
+        }
         if request.get("command").and_then(Value::as_str) == Some("release_all") {
             engine
                 .worker
@@ -655,6 +681,16 @@ pub async fn send(request: Value) -> Result<Value> {
     )
     .await
     .context("SESSION_RESPONSE_TIMEOUT")?
+}
+pub async fn focus_toplevel(target: crate::toplevel::FocusTarget) -> Result<Value> {
+    let root = runtime()?;
+    if root.join("socket").exists() {
+        // Never fall back after contacting an owner: its result may be uncertain.
+        return send(json!({"command":"focus_toplevel","target":target})).await;
+    }
+    // This also rejects a preparing owner or another standalone focus operation.
+    let _lock = Lock::acquire(&root)?;
+    Ok(crate::toplevel::focus(&target, None, None).await)
 }
 struct Owner {
     child: Child,

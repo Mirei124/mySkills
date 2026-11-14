@@ -4,6 +4,10 @@ Run `target/release/wayfire-computer-use doctor` inside the intended Wayfire ses
 
 | Result | Response |
 |---|---|
+| WAYFIRE_IPC_UNAVAILABLE / WAYFIRE_IPC_ERROR | Window management requires the intended WAYFIRE_SOCKET and ipc/ipc-rules plugins. Inspect availability; do not silently change compositor configuration or choose another session. |
+| TOPLEVEL_NOT_FOUND / TOPLEVEL_CLOSED / TOPLEVEL_IDENTITY_CHANGED | List windows again and identify the intended current ID/PID. Do not choose a same-title replacement automatically. |
+| TOPLEVEL_OUTPUT_MISMATCH | An active owner cannot focus a window outside its selected output. Stop and explicitly select the intended output before controlling it. |
+| TOPLEVEL_FOCUS_TIMEOUT / WAYFIRE_IPC_TIMEOUT | Confirmation or IPC did not complete within three seconds. Inspect focus_request_may_have_executed and do not retry automatically. Refresh the screenshot before further input. |
 | WAYLAND_UNAVAILABLE | Check the intended session's Wayland socket/access. Permission errors do not prove missing protocols. |
 | WAYLAND_RESPONSE_TIMEOUT | The compositor did not answer within the bounded roundtrip. Stop; do not replay input blindly. |
 | OUTPUT_CONFIRMATION_REQUIRED | Confirm the desired output. Automatic single-output selection does not apply to multiple outputs. |
