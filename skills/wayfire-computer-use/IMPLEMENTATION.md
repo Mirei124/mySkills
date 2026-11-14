@@ -141,3 +141,27 @@ Moved the skill to skills/wayfire-computer-use and merged archive/PLAN.md, this 
 Review fixes: Portal D-Bus calls now have deadlines; output-discovery subprocesses are reaped on cancellation; cancelled/failed CLI startup terminates and reaps its preparing owner while a successfully ready owner remains running. Added targeted regressions.
 
 Final validation: 37 offline tests pass; native helper clean build passes without compiler warnings; the isolated two-output Wayfire geometry probe passes after migration; skill-creator quick_validate passes. No live desktop input was sent during this consolidation review. The user-approved initial scope retains the production multi-output gate, limited Unicode/toolkit coverage, and documented remaining reliability-matrix work.
+
+## Rust rewrite in progress (paused at PipeWire stream failure)
+
+The user requested a Rust runtime rewrite to remove Python and the separate C helper runtime. Added a root Cargo project with a lockfile, strict action types/validation, native Rust Wayland discovery and output-bound pointer/keyboard devices, xkbcommon keymaps, ashpd Portal sessions, zbus notifications, PNG encoding, and an experimental direct PipeWire capture thread. Existing Python/C entrypoints remain the documented working implementation until parity and desktop acceptance pass; this is not a completed migration.
+
+The Rust project builds offline with the available toolchain. Three Rust action-validation tests pass. Native Rust doctor correctly reported current eDP-1 and HEADLESS-8 geometry and protocol versions without external discovery commands. A capture-only probe selected the explicitly authorized HEADLESS-8 Portal source using the Rust virtual pointer, but direct PipeWire capture returned PIPEWIRE_STREAM_ERROR before producing a frame. The probe closed its portal session and exited. It did not click ordinary applications or type text. Startup errors conservatively report selector_click_may_have_executed when automatic selection was requested.
+
+Stopped under the user's earlier stop-on-problem instruction. Next work: retain bounded/sanitized PipeWire error details and diagnose format/buffer negotiation; then verify frame timestamp semantics and screenshot bytes before migrating session/action dispatch. The current Rust capture negotiates BGRx only and requires a header timestamp; these restrictions have not passed real capture validation. Rust session CLI parity, lifecycle/cancellation tests and runtime documentation cutover remain pending.
+
+## Rust PipeWire diagnosis follow-up
+
+The user authorized diagnosis of the prior stream error. Retaining a bounded, control-character-filtered PipeWire error string identified 'no more input formats'. Expanded the requested format pod with BGRx/BGRA/RGBx/RGBA choices, image-size bounds and frame-rate bounds; added corresponding packed-pixel conversion paths. This change has not yet passed a real capture test.
+
+The next real probe returned a generic deadline error instead of a frame. No ordinary application click or text was requested. The probe process exited. Added stage-specific Portal timeout contexts and changed cleanup reporting so Portal close or end-notification errors cannot replace the primary capture failure; end notification is attempted after Portal close failure. A manual probe-end notification was submitted after the failed run.
+
+Paused at this new timeout under the user's stop-on-problem instruction, without issuing another source-selection click. Next probe should distinguish source-selection/start/remote-open/close timeout from capture negotiation, then confirm actual frame format, buffer layout and monotonic header timestamps. Three Rust validation tests continue to pass. Existing Python/C runtime remains unchanged and is still the documented implementation.
+
+## Rust stage-specific timeout and service-state diagnosis
+
+A new authorized screenshot probe returned PORTAL_CREATE_TIMEOUT, before selector discovery or the PipeWire capture thread. No source-selection click was sent by this attempt. Read-only systemd checks show both portal services active, but recent journal entries include portal-wlr reporting a fatal PipeWire core error and systemd restarting that backend, failure to close ashpd session objects, and a slurp coredump in xkb_state_update_mask. These observations do not establish a single root cause or prove the Rust client caused each failure. No desktop service was manually restarted.
+
+Added the Rust action dispatcher implementation (not yet wired into the CLI/session owner), preserving key aliases, text/chord distinction, bounds checking, cancellation checks and release attempts. Five Rust offline tests pass. The new code is not runtime-parity acceptance.
+
+Paused further current-desktop probing because service/selector failures make that environment unsuitable for repeated tests. Recommended next step: reproduce in an isolated Wayfire/session-bus/portal environment, verify pointer-only selector bootstrap without creating or releasing a keyboard device, and diagnose PipeWire negotiation there. The current Rust bootstrap uses a combined Input device and therefore uploads/releases a keyboard keymap even though it only needs a pointer; whether this contributed to the observed slurp crash is unverified. Capture negotiation, actual screenshot validation and session CLI migration remain incomplete; existing Python/C runtime remains available.
