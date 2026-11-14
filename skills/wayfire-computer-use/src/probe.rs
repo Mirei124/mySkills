@@ -1,6 +1,6 @@
 use crate::{
     capture::Capture,
-    desktop::{Desktop, Input},
+    desktop::{Desktop, PointerOnly},
     portal::Portal,
 };
 use anyhow::{Context, Result, ensure};
@@ -43,7 +43,7 @@ pub async fn notify(summary: &str, body: &str) -> Result<()> {
     .context("NOTIFICATION_TIMEOUT")??;
     Ok(())
 }
-fn selectors() -> BTreeSet<u32> {
+pub(crate) fn selectors() -> BTreeSet<u32> {
     let mut found = BTreeSet::new();
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.flatten() {
@@ -71,7 +71,8 @@ fn selectors() -> BTreeSet<u32> {
                     .and_then(|v| v.to_str());
                 if executable == Some("slurp")
                     && argv.contains(&b"-or".as_slice())
-                    && argv.contains(&b"Monitor: %o".as_slice())
+                    && (argv.contains(&b"Monitor: %o".as_slice())
+                        || argv.contains(&b"%o".as_slice()))
                 {
                     found.insert(pid);
                 }
@@ -90,7 +91,7 @@ pub async fn choose_once(output: String, baseline: BTreeSet<u32>) -> Result<()> 
             return tokio::task::spawn_blocking(move || {
                 let desktop = Desktop::connect()?;
                 let (id, geometry) = desktop.select(Some(&output))?;
-                let mut input = Input::new(desktop, id)?;
+                let mut input = PointerOnly::new(desktop, id)?;
                 ensure!(
                     selectors()
                         .difference(&baseline)
@@ -133,6 +134,7 @@ pub async fn capture(
     path: PathBuf,
     auto_select: bool,
 ) -> Result<serde_json::Value> {
+    let _lock = crate::session::Lock::acquire(&crate::session::runtime()?)?;
     let desktop = Desktop::connect()?;
     let (_, selected) = desktop.select(output.as_deref())?;
     notify("Computer Use Rust capture test","Preparing an explicitly authorized screenshot test. Desktop input may select the Portal source.").await?;
@@ -161,10 +163,10 @@ pub async fn capture(
         Err(error) => Err(anyhow::anyhow!(error.to_string())),
     };
     let mut cleanup_errors = Vec::new();
-    if let Ok(portal) = portal {
-        if let Err(error) = portal.close().await {
-            cleanup_errors.push(format!("{error:#}"));
-        }
+    if let Ok(portal) = portal
+        && let Err(error) = portal.close().await
+    {
+        cleanup_errors.push(format!("{error:#}"));
     }
     if let Err(error) = notify(
         "Computer Use Rust capture test ended",

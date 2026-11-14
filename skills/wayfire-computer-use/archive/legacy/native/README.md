@@ -1,3 +1,5 @@
+> Archived Python/C implementation. The active runtime is the Rust executable built from the skill root.
+
 # Native input helper
 
 Build with `make`. Requires wayland-scanner, wayland-client, and xkbcommon development files. `build/input-helper --probe` checks protocol availability without creating input devices. The default mode creates persistent devices and accepts internal line commands on stdin; use the session CLI for desktop tasks so locking, notifications and capture are enforced.

@@ -21,3 +21,7 @@ Text is limited to 10,000 code points, drag paths to 1,000 points and at least t
 Keys include CTRL, SHIFT, ALT, SUPER, ENTER, TAB, ESC, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, arrows, SPACE, F1-F12 and ASCII alphanumeric keys. CONTROL, ESCAPE, RETURN, ARROWLEFT/RIGHT/UP/DOWN and META have explicit aliases. CMD is unsupported and is never silently translated to CTRL. Shortcut keycodes follow the helper's controlled US keymap. Unicode uses a temporary keymap with experimental 50 ms client-settling delays; Chinese and a checkmark passed in GTK 3. IME, emoji and other toolkit compatibility remain unverified. No clipboard text strategy is enabled.
 
 The request envelope and session metadata are local extensions, not OpenAI native fields. The skill does not register a computer tool. The optional MCP adapter has not been implemented.
+
+## Rust implementation
+
+The default runtime is the root Cargo project's executable. The action/envelope schema is enforced by strict serde types and preflight checks; the supervised input worker is another process of that same binary. No Python, GStreamer or standalone C helper is used. Screenshot freshness is checked against negotiated PipeWire header timestamps, with checked buffer planes/stride/offset and packed RGB conversion. Initial production input is gated to one normal-orientation output at scale 1.

@@ -7,8 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
-sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
-from outputs import parse_outputs
+
 
 CONFIG='''[core]
 plugins =
@@ -49,14 +48,15 @@ def probe():
                     raise RuntimeError('ISOLATED_START_FAILED: '+(root/'log').read_text()[-2500:])
                 if len(sockets)!=1: raise RuntimeError('AMBIGUOUS_ISOLATED_SOCKET')
                 env['WAYLAND_DISPLAY']=sockets[0].name
-                result=subprocess.run(['wayland-info'],env=env,capture_output=True,text=True,timeout=5,check=True)
-                outputs=parse_outputs(result.stdout)
+                binary=Path(__file__).resolve().parents[1]/'target/debug/wayfire-computer-use'
+                result=subprocess.run([str(binary),'doctor'],env=env,capture_output=True,text=True,timeout=5,check=True)
+                outputs=list(json.loads(result.stdout)['outputs'].values())
                 indexed={o['name']:o for o in outputs}
-                expected={'HEADLESS-1':((-960,0),(960,540),'180'),'HEADLESS-2':((0,0),(864,1536),'90')}
+                expected={'HEADLESS-1':((-960,0),(960,540),2),'HEADLESS-2':((0,0),(864,1536),1)}
                 if set(indexed)!=set(expected): raise RuntimeError('ISOLATED_OUTPUT_COUNT_MISMATCH')
                 for name,(position,size,rotation) in expected.items():
                     output=indexed[name]
-                    if output['position']!=position or output['size']!=size or output.get('transform','').rstrip('°')!=rotation:
+                    if tuple(output['position'])!=position or tuple(output['size'])!=size or output.get('transform')!=rotation:
                         raise RuntimeError('ISOLATED_GEOMETRY_MISMATCH: '+name)
                 return {'status':'passed','backend':'isolated Wayfire headless/pixman','configured_scales':{'HEADLESS-1':2,'HEADLESS-2':1.25},'outputs':outputs,'live_desktop_modified':False,'portal_capture_verified':False,'pointer_mapping_verified':False}
             finally:

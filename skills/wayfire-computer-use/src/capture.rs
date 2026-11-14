@@ -23,15 +23,17 @@ struct Frame {
 }
 #[derive(Default)]
 struct Shared {
-    frame: Option<Frame>,
+    frame: Option<Arc<Frame>>,
     error: Option<String>,
 }
 pub struct Capture {
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
+    output_gate: Mutex<()>,
 }
 struct Data {
+    streaming: bool,
     format: spa::param::video::VideoInfoRaw,
     shared: Arc<Mutex<Shared>>,
 }
@@ -63,11 +65,27 @@ impl Capture {
             shared,
             stop,
             thread: Some(thread),
+            output_gate: Mutex::new(()),
         }
     }
+    pub fn check(&self) -> Result<()> {
+        ensure!(!self.stop.load(Ordering::Acquire), "CAPTURE_ENDED");
+        if let Some(error) = &self.shared.lock().unwrap().error {
+            bail!("{error}");
+        }
+        Ok(())
+    }
+    pub fn cancel(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
+    pub fn synchronize(&self) {
+        drop(self.output_gate.lock().unwrap());
+    }
     pub fn observe(&self, path: &Path, after: i64) -> Result<(u32, u32)> {
+        ensure!(after >= 0, "CLOCK_UNAVAILABLE");
         let started = Instant::now();
         loop {
+            ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
             let frame = {
                 let state = self.shared.lock().unwrap();
                 if let Some(error) = &state.error {
@@ -75,13 +93,15 @@ impl Capture {
                 }
                 state.frame.clone()
             };
-            if let Some(frame) = frame {
-                if frame.received >= started {
-                    let pts = frame.pts.context("FRAME_TIMESTAMP_UNAVAILABLE")?;
-                    if pts >= after {
-                        write_png(path, frame.width, frame.height, &frame.pixels)?;
-                        return Ok((frame.width, frame.height));
-                    }
+            if let Some(frame) = frame
+                && frame.received >= started
+            {
+                let pts = frame.pts.context("FRAME_TIMESTAMP_UNAVAILABLE")?;
+                if pts >= after {
+                    let _gate = self.output_gate.lock().unwrap();
+                    ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
+                    write_png(path, frame.width, frame.height, &frame.pixels)?;
+                    return Ok((frame.width, frame.height));
                 }
             }
             ensure!(
@@ -125,12 +145,19 @@ fn run(fd: OwnedFd, node: u32, shared: Arc<Mutex<Shared>>, stop: Arc<AtomicBool>
         properties! {*pw::keys::MEDIA_TYPE=>"Video",*pw::keys::MEDIA_CATEGORY=>"Capture",*pw::keys::MEDIA_ROLE=>"Screen"},
     )?;
     let data = Data {
+        streaming: false,
         format: Default::default(),
         shared: shared.clone(),
     };
     let _listener = stream
         .add_local_listener_with_user_data(data)
         .state_changed(|_, data, _, new| {
+            if matches!(new, pw::stream::StreamState::Streaming) {
+                data.streaming = true;
+            }
+            if matches!(new, pw::stream::StreamState::Unconnected) && data.streaming {
+                data.shared.lock().unwrap().error = Some("CAPTURE_ENDED".into());
+            }
             if let pw::stream::StreamState::Error(detail) = new {
                 let detail: String = detail
                     .chars()
@@ -141,12 +168,16 @@ fn run(fd: OwnedFd, node: u32, shared: Arc<Mutex<Shared>>, stop: Arc<AtomicBool>
                     Some(format!("PIPEWIRE_STREAM_ERROR: {detail}"));
             }
         })
-        .param_changed(|_, data, id, param| {
-            if id == spa::param::ParamType::Format.as_raw() {
-                if let Some(param) = param {
-                    if data.format.parse(param).is_err() {
-                        data.shared.lock().unwrap().error = Some("UNSUPPORTED_FRAME_FORMAT".into());
-                    }
+        .param_changed(|stream, data, id, param| {
+            if id == spa::param::ParamType::Format.as_raw()
+                && let Some(param) = param
+            {
+                if data.format.parse(param).is_err() {
+                    data.shared.lock().unwrap().error = Some("UNSUPPORTED_FRAME_FORMAT".into());
+                    return;
+                }
+                if let Err(error) = request_header(stream) {
+                    data.shared.lock().unwrap().error = Some(error.to_string());
                 }
             }
         })
@@ -160,7 +191,7 @@ fn run(fd: OwnedFd, node: u32, shared: Arc<Mutex<Shared>>, stop: Arc<AtomicBool>
             let result = unsafe { copy_frame(raw, &data.format) };
             unsafe { stream.queue_raw_buffer(raw) };
             match result {
-                Ok(frame) => data.shared.lock().unwrap().frame = Some(frame),
+                Ok(frame) => data.shared.lock().unwrap().frame = Some(Arc::new(frame)),
                 Err(error) => data.shared.lock().unwrap().error = Some(error.to_string()),
             }
         })
@@ -322,4 +353,131 @@ unsafe fn copy_frame(
         received: Instant::now(),
         pts,
     })
+}
+
+fn request_header(stream: &pw::stream::Stream) -> Result<()> {
+    let metadata = spa::pod::Object {
+        type_: spa::sys::SPA_TYPE_OBJECT_ParamMeta,
+        id: spa::sys::SPA_PARAM_Meta,
+        properties: vec![
+            spa::pod::Property::new(
+                spa::sys::SPA_PARAM_META_type,
+                spa::pod::Value::Id(spa::utils::Id(spa::sys::SPA_META_Header)),
+            ),
+            spa::pod::Property::new(
+                spa::sys::SPA_PARAM_META_size,
+                spa::pod::Value::Int(std::mem::size_of::<spa::sys::spa_meta_header>() as i32),
+            ),
+        ],
+    };
+    let bytes = spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &spa::pod::Value::Object(metadata),
+    )?
+    .0
+    .into_inner();
+    stream.update_params(&mut [
+        spa::pod::Pod::from_bytes(&bytes).context("PIPEWIRE_METADATA_FAILED")?
+    ])?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn png_round_trip_preserves_rgb() {
+        let path = std::env::temp_dir().join(format!(
+            "wf-rgb-{}-{}.png",
+            std::process::id(),
+            monotonic_ns()
+        ));
+        write_png(&path, 1, 1, &[12, 34, 56]).unwrap();
+        let decoder =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        assert_eq!((info.width, info.height), (1, 1));
+        assert_eq!(&bytes[..info.buffer_size()], &[12, 34, 56]);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn cancelled_capture_never_creates_an_output() {
+        let capture = Capture {
+            shared: Arc::new(Mutex::new(Shared::default())),
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+            output_gate: Mutex::new(()),
+        };
+        let path = std::env::temp_dir().join(format!(
+            "wf-cancel-{}-{}.png",
+            std::process::id(),
+            monotonic_ns()
+        ));
+        capture.cancel();
+        assert_eq!(capture.check().unwrap_err().to_string(), "CAPTURE_ENDED");
+        assert_eq!(
+            capture
+                .observe(&path, monotonic_ns())
+                .unwrap_err()
+                .to_string(),
+            "ACTION_CANCELLED"
+        );
+        assert!(!path.exists());
+    }
+    #[test]
+    fn packed_frame_honors_offset_stride_and_header() {
+        let mut pixels = vec![99u8; 4];
+        pixels.extend_from_slice(&[30, 20, 10, 255, 60, 50, 40, 255]);
+        let mut chunk = spa::sys::spa_chunk {
+            offset: 4,
+            size: 8,
+            stride: 8,
+            flags: 0,
+        };
+        let mut data = spa::sys::spa_data {
+            type_: spa::sys::SPA_DATA_MemPtr,
+            flags: 0,
+            fd: -1,
+            mapoffset: 0,
+            maxsize: pixels.len() as u32,
+            data: pixels.as_mut_ptr().cast(),
+            chunk: &mut chunk,
+        };
+        let mut header = spa::sys::spa_meta_header {
+            flags: 0,
+            offset: 0,
+            pts: 123456,
+            dts_offset: 0,
+            seq: 1,
+        };
+        let mut meta = spa::sys::spa_meta {
+            type_: spa::sys::SPA_META_Header,
+            size: std::mem::size_of_val(&header) as u32,
+            data: std::ptr::from_mut(&mut header).cast(),
+        };
+        let mut buffer = spa::sys::spa_buffer {
+            n_metas: 1,
+            n_datas: 1,
+            metas: &mut meta,
+            datas: &mut data,
+        };
+        // SAFETY: this C POD has only integer and raw-pointer fields; all zero
+        // values are representable, and the buffer pointer is set before use.
+        let mut raw: pw::sys::pw_buffer = unsafe { std::mem::zeroed() };
+        raw.buffer = &mut buffer;
+        let mut format = spa::param::video::VideoInfoRaw::default();
+        format.set_format(spa::param::video::VideoFormat::BGRx);
+        format.set_size(spa::utils::Rectangle {
+            width: 2,
+            height: 1,
+        });
+        let frame = unsafe { copy_frame(&mut raw, &format) }.unwrap();
+        assert_eq!(frame.pixels, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(frame.pts, Some(123456));
+        chunk.size = 7;
+        assert_eq!(chunk.size, 7);
+        assert!(unsafe { copy_frame(&mut raw, &format) }.is_err());
+    }
 }

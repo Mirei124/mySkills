@@ -1,9 +1,11 @@
+> Historical Python/C simulation and current-output results below are retained as evidence for that implementation. The Rust runtime has separate isolated capture/input/session tests, documented at the end. Historical tests do not automatically validate the rewrite.
+
 # Simulated display validation
 
 Run the offline suite from the repository root:
 
 ```bash
-.venv/bin/python3 -m unittest discover -s skills/wayfire-computer-use/tests
+.venv/bin/python3 -m unittest discover -s skills/wayfire-computer-use/archive/legacy/tests
 ```
 
 The suite includes 288 pointer-contract cases spanning three output origins, four scale factors (1, 1.25, 1.5, 2), eight rotations/reflections, and three image positions. The fake compositor assumes display-oriented frames and output-bound normalized pointer semantics. These cases test the dispatcher contract, not whether a real compositor honors that binding or a portal supplies correctly oriented frames.
@@ -29,7 +31,7 @@ The probe does not run Portal or validate actual pointer hit targets. Portal str
 
 With explicit user authorization, the existing Wayfire session was tested with eDP-1 at (0,0) and HEADLESS-8 at (1920,0), both 1920x1080 at scale 1 with normal orientation. Only a newly created, uniquely identified GTK fixture was moved to HEADLESS-8 using Wayfire IPC.
 
-The test-only probe_current_multi.py subclass bypasses the production multi-output gate solely for HEADLESS-8. A newly detected Portal selector receives an output-bound virtual pointer move to the headless display center and one authorized wlrctl click. The production single-output auto-selector option remains restricted to one output. The Portal stream must still match the explicitly selected output's position and logical size.
+The archived test-only archive/legacy/tests/probe_current_multi.py subclass bypasses the production multi-output gate solely for HEADLESS-8. A newly detected Portal selector receives an output-bound virtual pointer move to the headless display center and one authorized wlrctl click. The production single-output auto-selector option remains restricted to one output. The Portal stream must still match the explicitly selected output's position and logical size.
 
 Observed results:
 
@@ -40,3 +42,17 @@ Observed results:
 - Stop returned an empty cleanup-errors list and the fixture was closed. Output configuration was unchanged.
 
 This verifies a real Portal/input loop on the current physical-plus-headless, normal-orientation, scale-1 configuration with a nonzero selected-output origin. It does not validate scale/rotation capture orientation or every multi-output layout. Production multi-output input remains gated pending broader acceptance and an explicit supported-capability policy.
+
+## Rust isolated integration
+
+Build the debug binary with `cargo build --locked` in the skill directory, then from the repository root run:
+
+```bash
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --input-test --session-test
+```
+
+The harness owns a private runtime directory, D-Bus with activation disabled, headless Wayfire, PipeWire, policy-only WirePlumber, a notification sink and the wlr Portal. The selector uses a pointer-only Rust device. The animated GTK fixture generates controlled screen damage so fresh-frame requirements are testable. Notification submission is tested against a stub, not a real user display.
+
+Verified: direct PipeWire packed-pixel capture with header timestamps and PNG inspection; Rust input-worker click, ASCII/chord/Chinese text; session CLI all nine actions, double-click/scroll event reception, deduplication, stale-observation rejection, wait cancellation, repeated stop and screenshot cleanup; start-notification denial, end-notification failure reporting, and input-worker crash cleanup/interruption notice. Scope is a single unrotated 1920x1080 headless output at scale 1. The two-output geometry-only probe now reads the Rust doctor's output; it still does not establish Portal/input mapping for those transforms.
+
+No current desktop service is restarted or used by this test. The Rust production multi-output/transform gates remain in place.

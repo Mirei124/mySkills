@@ -6,10 +6,11 @@ import secrets
 from pathlib import Path
 import gi
 gi.require_version('Gtk','3.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--state',type=Path,required=True)
+parser.add_argument('--animate',action='store_true',help='Generate isolated capture damage with a periodic test label')
 args=parser.parse_args()
 token=secrets.token_hex(8)
 window=Gtk.Window(title='Wayfire Computer Use Test '+token)
@@ -46,5 +47,12 @@ window.connect('notify::is-active',save_state)
 window.add(box)
 window.connect('destroy',Gtk.main_quit)
 window.show_all()
+if args.animate:
+    ticks=[0]
+    def tick():
+        ticks[0]+=1
+        status.set_text('Capture test frame '+str(ticks[0]))
+        return True
+    GLib.timeout_add(100,tick)
 save_state()
 Gtk.main()

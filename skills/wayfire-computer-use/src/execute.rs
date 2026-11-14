@@ -36,23 +36,23 @@ pub fn key(name: &str) -> Result<(u32, u32)> {
                 ("ZXCVBNM", 44),
                 ("1234567890", 2),
             ] {
-                if name.len() == 1 {
-                    if let Some(index) = letters.find(&name) {
-                        return Ok((start + index as u32, 0));
-                    }
+                if name.len() == 1
+                    && let Some(index) = letters.find(&name)
+                {
+                    return Ok((start + index as u32, 0));
                 }
             }
-            if let Some(number) = name.strip_prefix('F').and_then(|n| n.parse::<u32>().ok()) {
-                if (1..=12).contains(&number) {
-                    return Ok((
-                        if number <= 10 {
-                            58 + number
-                        } else {
-                            76 + number
-                        },
-                        0,
-                    ));
-                }
+            if let Some(number) = name.strip_prefix('F').and_then(|n| n.parse::<u32>().ok())
+                && (1..=12).contains(&number)
+            {
+                return Ok((
+                    if number <= 10 {
+                        58 + number
+                    } else {
+                        76 + number
+                    },
+                    0,
+                ));
             }
             bail!("UNSUPPORTED_KEY")
         }

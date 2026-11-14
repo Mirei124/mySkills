@@ -1,0 +1,5 @@
+# Optional isolated GTK/Portal test fixtures; not required by the Rust runtime.
+dbus-next==0.2.3
+PyGObject==3.58.1
+# External skill-creator quick_validate tool only.
+PyYAML==6.0.3

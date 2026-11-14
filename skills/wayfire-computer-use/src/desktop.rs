@@ -4,13 +4,12 @@ use std::{
     collections::BTreeMap,
     fs::File,
     io::Write,
-    os::fd::{AsFd, FromRawFd},
+    os::fd::{AsFd, AsRawFd, FromRawFd},
     time::{Duration, Instant},
 };
 use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop,
-    globals::{GlobalListContents, registry_queue_init},
-    protocol::{wl_output, wl_registry, wl_seat},
+    protocol::{wl_callback, wl_output, wl_registry, wl_seat},
 };
 use wayland_protocols::xdg::xdg_output::zv1::client::{zxdg_output_manager_v1, zxdg_output_v1};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
@@ -33,26 +32,29 @@ pub struct Output {
 pub struct State {
     pub outputs: BTreeMap<u32, Output>,
     pub globals: BTreeMap<String, u32>,
+    entries: BTreeMap<u32, (String, u32)>,
 }
-impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
+impl Dispatch<wl_registry::WlRegistry, ()> for State {
     fn event(
         state: &mut Self,
         _: &wl_registry::WlRegistry,
         event: wl_registry::Event,
-        _: &GlobalListContents,
+        _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         match event {
             wl_registry::Event::Global {
-                name: _,
+                name,
                 interface,
                 version,
             } => {
+                state.entries.insert(name, (interface.clone(), version));
                 state.globals.insert(interface, version);
             }
             wl_registry::Event::GlobalRemove { name } => {
                 state.outputs.remove(&name);
+                state.entries.remove(&name);
             }
             _ => {}
         }
@@ -119,35 +121,42 @@ pub struct Desktop {
 impl Desktop {
     pub fn connect() -> Result<Self> {
         let connection = Connection::connect_to_env().context("WAYLAND_UNAVAILABLE")?;
-        let (globals, mut queue) = registry_queue_init::<State>(&connection)?;
+        Self::from_connection(connection)
+    }
+    fn from_connection(connection: Connection) -> Result<Self> {
+        let mut queue = connection.new_event_queue::<State>();
         let qh = queue.handle();
+        let registry = connection.display().get_registry(&qh, ());
         let mut state = State::default();
-        let all = globals.contents().clone_list();
-        state.globals = all
-            .iter()
-            .map(|g| (g.interface.clone(), g.version))
-            .collect();
-        let seats = all.iter().filter(|g| g.interface == "wl_seat").count();
+        roundtrip(&connection, &mut queue, &mut state, Duration::from_secs(3))?;
+        let seats = state
+            .entries
+            .values()
+            .filter(|(interface, _)| interface == "wl_seat")
+            .count();
         ensure!(seats == 1, "AMBIGUOUS_SEAT");
-        let seat = globals.bind(&qh, 1..=1, ()).ok();
-        let pointer_manager = globals.bind(&qh, 1..=2, ()).ok();
-        let keyboard_manager = globals.bind(&qh, 1..=1, ()).ok();
-        let manager: zxdg_output_manager_v1::ZxdgOutputManagerV1 = globals
-            .bind(&qh, 1..=3, ())
-            .context("OUTPUT_GEOMETRY_UNAVAILABLE")?;
+        let seat = bind::<wl_seat::WlSeat>(&registry, &state, &qh, 1, 1);
+        let pointer_manager = bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1>(
+            &registry, &state, &qh, 1, 2,
+        );
+        let keyboard_manager = bind::<zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1>(
+            &registry, &state, &qh, 1, 1,
+        );
+        let manager =
+            bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1>(&registry, &state, &qh, 1, 3)
+                .context("OUTPUT_GEOMETRY_UNAVAILABLE")?;
         let mut handles = BTreeMap::new();
         let mut logical = vec![];
-        for global in all.iter().filter(|g| g.interface == "wl_output") {
-            let handle = globals.registry().bind::<wl_output::WlOutput, _, _>(
-                global.name,
-                global.version.min(4),
-                &qh,
-                global.name,
-            );
-            logical.push(manager.get_xdg_output(&handle, &qh, global.name));
-            handles.insert(global.name, handle);
+        for (name, (interface, version)) in &state.entries {
+            if interface != "wl_output" {
+                continue;
+            }
+            let handle =
+                registry.bind::<wl_output::WlOutput, _, _>(*name, (*version).min(4), &qh, *name);
+            logical.push(manager.get_xdg_output(&handle, &qh, *name));
+            handles.insert(*name, handle);
         }
-        queue.roundtrip(&mut state)?;
+        roundtrip(&connection, &mut queue, &mut state, Duration::from_secs(3))?;
         ensure!(!state.outputs.is_empty(), "OUTPUT_GEOMETRY_UNAVAILABLE");
         Ok(Self {
             state,
@@ -161,8 +170,12 @@ impl Desktop {
         })
     }
     pub fn refresh(&mut self) -> Result<()> {
-        self.queue.roundtrip(&mut self.state)?;
-        Ok(())
+        roundtrip(
+            &self.connection,
+            &mut self.queue,
+            &mut self.state,
+            Duration::from_secs(3),
+        )
     }
     pub fn select(&self, name: Option<&str>) -> Result<(u32, Output)> {
         if name.is_none() {
@@ -357,5 +370,181 @@ impl Drop for Input {
         self.keyboard.destroy();
         self.pointer.destroy();
         let _ = self.desktop.connection.flush();
+    }
+}
+
+/// Portal bootstrap device: never creates a virtual keyboard or uploads a keymap.
+pub struct PointerOnly {
+    desktop: Desktop,
+    pointer: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
+    held: bool,
+    epoch: Instant,
+}
+impl PointerOnly {
+    pub fn new(desktop: Desktop, output: u32) -> Result<Self> {
+        let manager = desktop
+            .pointer_manager
+            .as_ref()
+            .context("PROTOCOL_UNAVAILABLE")?;
+        let seat = desktop.seat.as_ref().context("PROTOCOL_UNAVAILABLE")?;
+        let queue = desktop.queue.handle();
+        let pointer = if manager.version() >= 2 {
+            manager.create_virtual_pointer_with_output(
+                Some(seat),
+                Some(desktop.handles.get(&output).context("UNKNOWN_OUTPUT")?),
+                &queue,
+                (),
+            )
+        } else {
+            ensure!(
+                desktop.state.outputs.len() == 1,
+                "OUTPUT_MAPPING_UNAVAILABLE"
+            );
+            manager.create_virtual_pointer(Some(seat), &queue, ())
+        };
+        let mut device = Self {
+            desktop,
+            pointer,
+            held: false,
+            epoch: Instant::now(),
+        };
+        device.desktop.refresh()?;
+        Ok(device)
+    }
+    pub fn motion(&mut self, x: u32, y: u32, width: u32, height: u32) -> Result<()> {
+        ensure!(x < width && y < height, "COORDINATE_OUT_OF_BOUNDS");
+        self.pointer
+            .motion_absolute(self.epoch.elapsed().as_millis() as u32, x, y, width, height);
+        self.pointer.frame();
+        self.desktop.refresh()
+    }
+    pub fn button(&mut self, code: u32, pressed: bool) -> Result<()> {
+        ensure!(code == 272, "UNSUPPORTED_BOOTSTRAP_BUTTON");
+        self.held = pressed;
+        self.pointer.button(
+            self.epoch.elapsed().as_millis() as u32,
+            code,
+            if pressed {
+                wayland_client::protocol::wl_pointer::ButtonState::Pressed
+            } else {
+                wayland_client::protocol::wl_pointer::ButtonState::Released
+            },
+        );
+        self.pointer.frame();
+        self.desktop.refresh()
+    }
+    pub fn release(&mut self) -> Result<()> {
+        if self.held {
+            self.button(272, false)?;
+        }
+        Ok(())
+    }
+}
+impl Drop for PointerOnly {
+    fn drop(&mut self) {
+        let _ = self.release();
+        self.pointer.destroy();
+        let _ = self.desktop.connection.flush();
+    }
+}
+
+fn bind<T: Proxy + 'static>(
+    registry: &wl_registry::WlRegistry,
+    state: &State,
+    queue: &QueueHandle<State>,
+    minimum: u32,
+    maximum: u32,
+) -> Option<T>
+where
+    State: Dispatch<T, ()>,
+{
+    state
+        .entries
+        .iter()
+        .find(|(_, (interface, version))| interface == T::interface().name && *version >= minimum)
+        .map(|(name, (_, version))| {
+            registry.bind::<T, _, _>(*name, (*version).min(maximum), queue, ())
+        })
+}
+impl Dispatch<wl_callback::WlCallback, std::sync::Arc<std::sync::atomic::AtomicBool>> for State {
+    fn event(
+        _: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        done: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if matches!(event, wl_callback::Event::Done { .. }) {
+            done.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+fn roundtrip(
+    connection: &Connection,
+    queue: &mut EventQueue<State>,
+    state: &mut State,
+    timeout: Duration,
+) -> Result<()> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let done = Arc::new(AtomicBool::new(false));
+    let _callback = connection.display().sync(&queue.handle(), done.clone());
+    let deadline = Instant::now() + timeout;
+    loop {
+        connection.flush()?;
+        queue.dispatch_pending(state)?;
+        if done.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        ensure!(!remaining.is_zero(), "WAYLAND_RESPONSE_TIMEOUT");
+        if let Some(guard) = queue.prepare_read() {
+            let mut fd = libc::pollfd {
+                fd: connection.backend().poll_fd().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: a single initialized pollfd is borrowed for the bounded call.
+            let count = unsafe {
+                libc::poll(
+                    &mut fd,
+                    1,
+                    remaining.as_millis().max(1).min(i32::MAX as u128) as i32,
+                )
+            };
+            if count < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error.into());
+            }
+            ensure!(count > 0, "WAYLAND_RESPONSE_TIMEOUT");
+            guard.read()?;
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn silent_compositor_has_a_deadline() {
+        let (client, _server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let mut queue = connection.new_event_queue::<State>();
+        let mut state = State::default();
+        let before = Instant::now();
+        let error = roundtrip(
+            &connection,
+            &mut queue,
+            &mut state,
+            Duration::from_millis(20),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "WAYLAND_RESPONSE_TIMEOUT");
+        assert!(before.elapsed() < Duration::from_secs(1));
     }
 }

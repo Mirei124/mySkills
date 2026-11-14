@@ -1,23 +1,60 @@
-# Development CLI
+# Rust runtime usage
 
-Use the repository `.venv/bin/python3` for all Python commands. Install requirements.txt into that environment and run `make -C native` from the skill directory. Runtime dependencies include Python, both packages in requirements.txt, libwayland-client, libxkbcommon, GStreamer typelibs and appsink/videoconvert/PipeWire plugins, wayland-info, notify-send, and a working desktop portal. The native/build/input-helper executable is required for input at runtime. A C compiler, pkg-config, Wayland/xkbcommon development files and wayland-scanner are build-time dependencies. GTK 3 typelibs are needed for the test fixture; PyYAML is only needed for skill-creator validation and is not a runtime requirement.
+From the skill directory, build once:
 
-Run `scripts/computer.py doctor`, then `scripts/computer.py start`. Select the display in the portal UI. With one output, mapping selection is automatic; the portal's authorization UI remains independent. Multiple outputs require an explicit `--output NAME`; native multi-output input is not yet verified and currently fails explicitly.
+```bash
+cargo build --locked --release
+./target/release/wayfire-computer-use doctor
+./target/release/wayfire-computer-use start
+```
 
-Start returns a session_id, observation_id, screenshot_path, dimensions, output and layout_version. View the PNG using the host image viewer before acting. Pass an envelope to `scripts/computer.py act` on stdin, for example:
+For an authorized single-output Portal selection click:
+
+```bash
+./target/release/wayfire-computer-use start --auto-select-single-output
+```
+
+This uses a pointer-only Wayland device, not wlrctl. It checks for one output and a new same-user slurp monitor-selector process, allows setup time, then sends one click. The start notification precedes the click. Selector process discovery is not input-grab acknowledgment; concurrent selectors or disappearance prevent a reliable association. Never silently repeat a click. selector_click_may_have_executed conservatively records an uncertain startup side effect.
+
+The initial production runtime accepts exactly one normal-orientation output at scale 1. Multiple outputs and other transforms/scales are explicitly rejected before ordinary input. Historical eDP-1/HEADLESS-8 testing used the archived implementation and does not enable arbitrary configurations in the Rust runtime.
+
+Start returns session_id, observation_id, screenshot_path, dimensions, output and layout_version. View the screenshot, then pass one envelope on stdin to `act`:
 
 ```json
 {"request_id":"r-1","session_id":"COPY_FROM_START","observation_id":"COPY_FROM_START","action":{"type":"click","x":300,"y":213,"button":"left"}}
 ```
 
-View each returned screenshot and use its new observation_id. Reusing a request_id with exactly the same envelope returns the saved result without replaying input; a different envelope returns REQUEST_ID_CONFLICT. If action_executed is true on an error, partial execution may have occurred. Observe again, never blindly replay. A screenshot action may omit a stale observation only after recovery support is implemented; currently a lost observation requires restarting the session.
+Read the result and actually view its new screenshot before deciding the next action. `validate` accepts an action object alone on stdin and sends no input. `status` and `capabilities` report the current session. `release_all` (also accepted as release-all) is a management recovery command. `stop` waits for cleanup and notification submission attempts, returning an errors array; check it even when status is stopped.
 
-`status`, `release_all`, and `stop` are management commands. Stop bypasses the action queue, cancels the active request and returns after cleanup and the end-notification attempt. Inspect its errors array; the result is also stored in the private runtime stopped.json. Repeated stop returns the completed result. Screenshots are temporary and removed at cleanup. The session exits after five idle minutes or helper death. Notifications do not replace the exclusive per-display lock. SIGKILL of the owner can prevent the end notification; killing the entire process group or losing the session bus cannot guarantee cleanup notification delivery.
+Identical request IDs return the cached response without replaying input. IDs with different content fail. A failed action can be partially executed: action_executed is conservative, not a guarantee that every event completed. Observe before deciding further work; the skill workflow stops/restarts on mapping or capture failure. A successful screenshot is never fabricated for an executed action whose capture failed.
 
-This CLI is under development and has not passed the complete ../archive/PLAN.md reliability matrix. Do not install it as a production skill yet.
+The same binary starts an owner and input-worker process. The owner holds an exclusive per-display lock in a mode-0700 XDG_RUNTIME_DIR subdirectory shared with the legacy lock convention. Its socket and metadata/images are private. Screenshots are removed at stop; orphan images from a forcibly killed owner are removed at the next locked start. Request bodies/text are not written to runtime logs. Sessions stop after five idle minutes or worker death. Wayland roundtrips have a three-second deadline; input actions have a 30-second limit. Emergency stop cooperatively cancels, then terminates an unresponsive worker after a bounded wait and reports cleanup uncertainty.
 
-## Authorized single-output selector click
+Normal stop, cancellation and idle/worker failure attempt one end notification after device cleanup and lock release. Start notification failure prevents ordinary input. SIGKILL of the owner or entire process group, compositor failure, bus loss and system shutdown cannot guarantee notification delivery. Notification submission is not proof of user acknowledgment.
 
-When the user has authorized automatic Portal source selection, use `start --auto-select-single-output`. It checks that exactly one output exists, waits for a newly observed same-user slurp monitor selector, submits the start notification, then issues exactly one `wlrctl pointer click left` at the existing cursor position. It never uses relative move as absolute positioning. Multi-output selection still requires confirmation. A selector process is not proof of an active input grab; disappearance or concurrent matching selectors can prevent reliable association. Keep this feature explicitly enabled and do not silently retry the click. The native helper remains the backend for ordinary computer actions.
+## Dependencies
 
-This bootstrap notification occurs before capture is ready because selecting the capture source itself requires the authorized click. It is sent once, and the normal end notification follows cleanup. A selector click may have executed even when later startup steps fail; treat startup failure after the bootstrap notice as potentially having clicked.
+Runtime: the compiled Rust executable, libpipewire-0.3 and its SPA support, libxkbcommon/keymap data, the Linux C/system libraries linked by the build, a Wayfire session exposing the virtual-pointer/keyboard protocols, D-Bus, a notification service, PipeWire and a Screenshot/ScreenCast-capable desktop portal. The session's PipeWire policy manager must connect capture streams. Python, pip, GStreamer, notify-send, wayland-info, wlrctl, a compiler and a separate C helper are not runtime requirements.
+
+Build: a compatible Rust/Cargo toolchain, a C compiler for native binding build steps, pkg-config, PipeWire/SPA and xkbcommon development files, and libclang for generated PipeWire bindings. Cargo.lock pins the dependency resolution. Binaries target the build machine's Linux ABI; this is not a promise of a universally static executable. Check `ldd target/release/wayfire-computer-use` when packaging.
+
+Development tests only: requirements-dev.txt installs Python fixture/validation packages. The isolated integration harness additionally needs the distribution Wayfire and Portal executables, dbus-run-session, PipeWire and WirePlumber. Its paths currently match the tested Arch Linux installation.
+
+## Validation commands
+
+```bash
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --locked
+```
+
+From the repository root, optional isolated integration tests use the repository interpreter:
+
+```bash
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --input-test --session-test
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_headless.py
+```
+
+The private integration test starts its own D-Bus, headless Wayfire, PipeWire, policy-only WirePlumber, notification sink, permission store and wlr Portal. It does not restart or connect to the current desktop's Portal services. Logs/screenshots remain in its reported /tmp/wf-rust-isolated-* directory for inspection; remove that directory after review.
+
+`probe-capture --output NAME --path FILE [--auto-select]` is a diagnostic capture-only command. Its explicit selector automation can target a confirmed named output, including a headless test output; it does not enable multi-output input in ordinary sessions. It acquires the per-display lock and closes its Portal session on exit.
