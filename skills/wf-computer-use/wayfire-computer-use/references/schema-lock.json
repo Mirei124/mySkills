@@ -1,0 +1,59 @@
+{
+  "retrieved": "2026-11-14",
+  "source": "https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_computer_tool_call.py",
+  "transport": "https://cdn.jsdelivr.net/gh/openai/openai-python@main/src/openai/types/responses/response_computer_tool_call.py",
+  "sha256": "452f4f27beb01e8cbab1d2c1fd9261b9d14e787ee5bd376cfb59de45e1011bed",
+  "version_strategy": "Vendored content snapshot; SHA-256 is the immutable content identifier. Branch main is not an immutable revision.",
+  "fields": {
+    "ActionClick": {
+      "button": "Literal['left', 'right', 'wheel', 'back', 'forward']",
+      "type": "Literal['click']",
+      "x": "int",
+      "y": "int",
+      "keys": "Optional[List[str]]"
+    },
+    "ActionDoubleClick": {
+      "keys": "Optional[List[str]]",
+      "type": "Literal['double_click']",
+      "x": "int",
+      "y": "int"
+    },
+    "ActionDragPath": {
+      "x": "int",
+      "y": "int"
+    },
+    "ActionDrag": {
+      "path": "List[ActionDragPath]",
+      "type": "Literal['drag']",
+      "keys": "Optional[List[str]]"
+    },
+    "ActionKeypress": {
+      "keys": "List[str]",
+      "type": "Literal['keypress']"
+    },
+    "ActionMove": {
+      "type": "Literal['move']",
+      "x": "int",
+      "y": "int",
+      "keys": "Optional[List[str]]"
+    },
+    "ActionScreenshot": {
+      "type": "Literal['screenshot']"
+    },
+    "ActionScroll": {
+      "scroll_x": "int",
+      "scroll_y": "int",
+      "type": "Literal['scroll']",
+      "x": "int",
+      "y": "int",
+      "keys": "Optional[List[str]]"
+    },
+    "ActionType": {
+      "text": "str",
+      "type": "Literal['type']"
+    },
+    "ActionWait": {
+      "type": "Literal['wait']"
+    }
+  }
+}

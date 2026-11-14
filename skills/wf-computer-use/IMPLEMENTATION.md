@@ -1,0 +1,115 @@
+# Implementation status
+
+This is a partial P0 milestone, not completion of PLAN.md.
+
+Implemented: read-only diagnostic CLI, strict draft action shape validation, skill instructions and metadata, and offline contract tests.
+
+Validation: two unittest cases passed. skill-creator quick_validate could not run because the repository virtual environment lacks PyYAML. Doctor ran; see a fresh doctor invocation for current environment evidence. No real desktop input was attempted.
+
+Pending: official schema revision lock, native persistent input helper, portal/PipeWire capture, reliable output mapping, session supervisor and private socket, notification lifecycle, request deduplication, cleanup and all P1/P2 integration tests. The execution commands fail explicitly rather than simulating success. The optional MCP adapter is not implemented.
+
+## Follow-up diagnostics
+
+Using `.venv/bin/python3`, installed PyYAML for validation and dbus-next for portal work. Skill quick_validate and both contract tests now pass. With desktop access enabled, Wayland socket, wayland-info, portal introspection, notification introspection, and PipeWire core probes succeed. This supersedes the earlier sandbox denial; it does not verify input or frame capture.
+
+Added an asynchronous portal Screenshot request client with signal subscription before requesting, unique request tokens, cancellation/timeout cleanup, and explicit portal errors. It is not yet wired to the execution CLI or tested against a real capture. ScreenCast and native input remain pending.
+
+## ScreenCast probe
+
+Verified gst-plugin-pipewire 1.6.11. Implemented portal CreateSession, SelectSources (one monitor), Start, OpenPipeWireRemote, and session/FD cleanup. A real portal stream returned position (0, 0) and size (1920, 1080). A GStreamer pipeline using the portal-provided FD captured one PNG successfully and exited zero; the portal session was then closed. The probe image is temporary at /tmp/wf-frame.png and is not committed.
+
+Blocked on reliable stream-to-output identity: this portal response provides position and size but no output name. The plan prohibits guessing the identity. An explicit output selection and geometry validation path must be agreed before implementing input mapping. Persistent fresh-frame acquisition remains pending; the successful single-frame probe does not establish it.
+
+## Native helper prototype
+
+Retrieved both upstream protocol XML files through jsDelivr, retaining license notices. Generated bindings and compiled a C helper against wayland-client 1.26.0 and xkbcommon 1.13.2 without compiler warnings. Read-only protocol probe succeeds. A notified, no-input test created virtual devices, uploaded a US keymap, reported READY, processed stop, and exited zero. No clicks or text were sent. This proves device creation/destruction only; output binding, Unicode, supervision, lifecycle enforcement, and event behavior remain pending.
+
+Output selection now follows the user's decision: automatically select the sole output, require an explicit choice among multiple outputs, and verify portal position/size. Six offline tests and a real single-output capture with geometry validation passed.
+
+## GTK and persistent-capture preparation
+
+Installed PyGObject 3.58.1 and pycairo 1.29.2 into the repository virtual environment. Verified Gtk 3 and GStreamer 1.28.9 imports with `.venv/bin/python3`. Added a dedicated GTK text-entry fixture and a prototype persistent appsink capture implementation. Six offline tests and skill validation still pass.
+
+The persistent-capture probe stopped at Portal SelectSources: the backend launched a slurp display selector and did not receive a selection before its timeout. Cleanup ran; no input was sent. The capture implementation has not reached frame acquisition and remains unverified. Single-output automatic mapping does not bypass the portal backend's own source-selection UI.
+
+## Fresh-frame and input probes
+
+Retried persistent capture with source selection completed: two successive observations from one portal session returned 1920x1080 frames and the session closed normally. Launched the dedicated GTK fixture, inspected a screenshot, moved to its entry, clicked, and sent a single 'a'; fixture state and a subsequent screenshot confirmed success.
+
+Added a prototype Python dispatcher over the persistent C helper. A follow-up click / CTRL+A / type 'Wayfire 123!' probe failed: the fixture state remained 'a'. Input cleanup and end notification ran. Stopped testing at this failure per user instruction. The cause (focus, event timing, keymap/modifier handling, or dispatch) has not yet been isolated. No claim of shortcut or text dispatcher correctness is made. CLI session integration remains pending.
+
+## Input timing investigation
+
+Reopened the dedicated fixture and inspected its screenshot. Adding a 300 ms startup/inter-action delay made sequential ASCII input, CTRL+A, and replacement text pass. Added conservative startup (150 ms) and post-action (50 ms) settling delays to the prototype dispatcher; a separate replacement-text probe passed with 'Verified 42!'. This is evidence of timing sensitivity, not proof of the precise root cause or toolkit-independent reliability.
+
+Attempted controlled Unicode keymap switching in the native helper. The first Unicode action returned INPUT_FAILED during a real fixture probe. Cleanup ran, and testing stopped under the user's stop-on-problem instruction. The Unicode implementation is experimental and must not be advertised as supported until its failure is isolated. No clipboard fallback was used.
+
+## Unicode investigation
+
+Found and corrected a return-value bug: wl_display_roundtrip succeeds for any nonnegative value, while the Unicode command previously accepted only zero. A new dedicated-fixture probe no longer reported INPUT_FAILED, but actual text was 'aaaWayfire a' instead of the requested Chinese/symbol text. Thus successful protocol delivery does not establish Unicode keymap use. The cause of unchanged AC01 symbols is not yet isolated (keymap merge/override semantics, compositor behavior, or client update timing). Stopped at this new observed failure and cleaned up input. Unicode remains unverified and unsuitable for use.
+
+## Unicode timing result and CLI integration
+
+Offline libxkbcommon inspection confirmed AC01 maps to Unicode keysym 0x01004F60 for all tested merge forms; a new offline regression checks it. With experimental 50 ms waits before emission and before restoring the base keymap, the GTK fixture received exactly '你好，Wayfire ✓'. This supports a client keymap-update timing explanation but does not establish universal toolkit/IME/emoji compatibility.
+
+Added a private per-display Unix-socket session owner with flock, portal lifetime, persistent capture and input, observation IDs, request deduplication/conflict checks, stale/layout checks, idle/helper-exit monitoring, lifecycle notifications, and screenshot cleanup. A real CLI start returned a screenshot; a click returned a fresh screenshot; replaying the identical request returned the identical saved result. Stop cleanup reported no errors. Remaining lifecycle/failure tests are not yet complete.
+
+Added native output-name discovery and virtual-pointer v2 output binding. Native multi-output behavior remains unverified; the session currently rejects multiple outputs explicitly after confirmation rather than claiming it works. Public click button names wheel/back/forward are now recognized, with middle retained as a local alias. Seven offline tests pass.
+
+## Test isolation failure (stopped)
+
+During a later CLI probe the dedicated fixture process was no longer running. The start screenshot did not show the fixture, but the test orchestration still sent CTRL+A. No replacement text was sent. Stopped the session immediately on recognizing the missing fixture. This is an orchestration error: input tests must verify fixture liveness and visible focus immediately before dispatch, and stop when isolation is lost. The destination of that shortcut was not established. Do not count this probe as successful validation.
+
+## Test-target guard
+
+Added per-fixture random identity, PID and focus state with atomic state publication. The test-only guard checks process liveness, /proc command identity, unique window title, active toplevel through wlrctl, and focused entry before permitting a test action. Missing-state and exited-process regression tests pass. This reduces accidental-target risk; shared-desktop focus can still change after a check, so visual verification remains required.
+
+Added offline session tests for deduplication without replay, execution reporting when post-action capture fails, stale/layout rejection before input, and single capture for screenshot actions. Fourteen offline tests pass. Skill instructions now describe the implemented development CLI and remaining limitations rather than diagnosis-only behavior.
+
+The subsequent guarded desktop run did not reach input: Portal source selection timed out. Session cleanup ran and the fixture was closed. No guarded action was dispatched. Real guard integration remains pending interactive source selection; offline guard/session tests are not counted as desktop verification.
+
+## Guarded desktop verification and stop responsiveness
+
+A fresh fixture/portal run completed successfully under the test guard. Inspected the initial image, verified fixture identity/liveness/focus, dispatched Chinese/symbol text through the session CLI, inspected the resulting screenshot, then dispatched CTRL+A and ASCII replacement with guard checks and screenshot inspection between actions. Fixture state and images matched the requested contents. Stopped the session afterward.
+
+An offline concurrency probe then found a stop responsiveness defect: the stop request waits behind the same serial lock held by a running action (STOP_BLOCKED_BY_ACTION_LOCK). No real desktop input was involved in that probe. Stop must bypass the action queue, cancel the in-flight dispatcher, release input in its finally path, and wait for cleanup completion. Paused at this confirmed failure per user instruction. Current CLI is not ready for deployment.
+
+## Stop cancellation fix
+
+Moved stop handling outside the serialized action queue. The first stop request marks the session stopping, cancels the tracked input task, and waits for final cleanup/notification results; later stop requests share that completion without cancelling release again. Signal and idle/helper-exit paths use the same cancellation entry point. Added regression tests for prompt action cancellation, acknowledgment only after cleanup completion, repeated stop during release, cancelled-drag release, failed-action release, preflight bounds, axis ordering, and key aliases.
+
+Twenty-two offline tests pass. Also added stopped-result replay for repeated stop after socket removal, frame-dimension invalidation, and atomic ready publication. A real-desktop stop-during-action test remains pending. No actual desktop input was sent during these offline checks.
+
+## Stop integration failure (paused)
+
+Twenty-four offline tests passed, including notification-start failure preventing input and cleanup continuation after input cleanup failure. However, a real CLI stop-during-wait probe timed out. No clicks or text were issued. The helper and owner processes were explicitly terminated after identity checks and an interruption notification was sent.
+
+Suspected shutdown ordering deadlock: serve closes the server and awaits wait_closed before setting session.finished, while the stop client awaits session.finished before closing its connection. Python 3.12 server shutdown can wait for live client transports, creating a cycle. This hypothesis still needs an actual Unix-socket regression test. Pause here under the stop-on-problem instruction. Reorder cleanup/completion signaling before waiting for client transport closure, with bounded transport shutdown. Also cover stop arriving during pre-dispatch discovery and capture, which the current input-only active-task tracking does not fully cover.
+
+## Unix-socket shutdown ordering fix
+
+Reordered shutdown to close the listener, clean resources, unlock control, attempt the end notification, publish stop completion, and then await client transport closure with a bound. A real Unix-socket regression now keeps the stop connection open until receiving the completion result, exercising the previous deadlock.
+
+Expanded cancellation tracking to the entire request, including output discovery and post-action capture. Added regressions for stop before dispatch (no action executed) and stop during capture (prior execution preserved). Twenty-seven tests pass. Added stale runtime socket recovery, cleanup of orphaned screenshot artifacts at the next locked start, interrupted-task end-notification wording, and repeated stop result replay. Current real-desktop retry is awaiting portal source selection.
+
+## Real stop verification and guarded pointer test
+
+The desktop stop-during-wait retry passed: stop returned stopped with an empty errors list in approximately 0.067 seconds, and the in-flight request returned ACTION_CANCELLED. No clicks or text were sent during that probe.
+
+Pinned the official action source as a vendored SHA-256-identified snapshot, added a local JSON schema and compatibility documentation, and expanded doctor output with protocol versions, parsed outputs, native read-only probe, PipeWire plugin and portal route information.
+
+A subsequent pointer-action fixture run reached capture, but the fixture was no longer focused after portal selection. The guard rejected the move before dispatch (FIXTURE_NOT_FOCUSED). Stopped the session cleanly and closed the fixture. This is the intended fail-closed guard behavior, not a successful pointer-action test. Remaining mouse-action verification requires the user to focus the dedicated fixture after selecting the portal source.
+
+## Portal startup wait (paused)
+
+The next pointer-fixture run did not reach readiness: portal source selection remained pending and the CLI returned SESSION_START_TIMEOUT. No action was dispatched and no input helper had been created. The lingering owner was terminated after checking its command identity, and the fixture was closed.
+
+This exposes a separate lifecycle gap: CLI startup timeout does not currently cancel its spawned preparing owner, and signal cancellation does not interrupt prepare immediately. Before retrying interactive verification, track the preparing task, cancel it on startup timeout/signals, and bound portal cleanup. Also allow a configurable longer source-selection timeout instead of requiring repeated short retries.
+
+## Authorized Portal selector bootstrap and nine-action run
+
+The user explicitly authorized one wlrctl click to choose the sole Portal display. Added the opt-in --auto-select-single-output bootstrap: single-output check, new same-user slurp monitor-selector detection, start notification before clicking, one left click, and no retry. Ordinary actions continue using the native helper. This is process-based detection, not an input-grab acknowledgment; its race/association limits are documented.
+
+Added preparation cancellation on signals and CLI startup timeout termination of the spawned owner. Offline regressions cover preparation cancellation, one selector click after notification, ambiguous-selector rejection and notification failure preventing the click. Thirty-one tests pass.
+
+Two real automatic-selector starts succeeded without manual selection. The second run focused the known unique fixture title using wlrctl toplevel focus, checked the fixture guard, and called all nine standard actions through the session dispatcher with screenshot inspection between actions. The GTK event log confirmed move, press/release, double click, drag motion with held button, and two scroll events. Unicode text and CTRL+A were visible in subsequent screenshots. Wait and screenshot also completed. This verifies basic dispatch and event delivery on the current single 1920x1080 output; it does not establish scroll-distance calibration, useful drag selection in an empty field, multi-output mapping, rotation/scaling, or cross-toolkit Unicode reliability. Stop returned stopped with no cleanup errors.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wayfire Computer Use"
+  short_description: "Diagnose native Wayfire desktop control readiness"
+  default_prompt: "Check Wayfire desktop readiness and report verified capabilities and blockers."
