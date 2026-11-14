@@ -76,3 +76,9 @@ On the current eDP-1/HEADLESS-8 desktop (both 1920x1080, scale 1, normal orienta
 Verified all nine action types, exact first-input text `Rust FIRST AbZ !@_ 中文 aA`, Ctrl+A replacement with exact `aA zZ 1! 中文 bB Rust`, visible click/double-click/drag selection and fixture motion/double-click/scroll events. Normal and repeated stop returned empty error arrays, removed screenshots and the control socket, and the fixture was closed. Ready metadata is retained until the next start; it is not an active-session indicator. No output configuration was changed.
 
 These results cover this GTK configuration and the private harness. Settling delays are experimental; arbitrary input methods, other toolkits, emoji and scaled/rotated input remain unverified.
+
+## Additional eDP-1 and text-cancellation coverage
+
+The same isolated command now also verifies cancellation after observing partial delivery of a 400-character text action. It requires stop within two seconds, conservative partial-execution reporting, unchanged fixture text for 300 ms after stop and no screenshot leaks.
+
+The user subsequently selected eDP-1 for live release testing with both outputs still present. Capture, exact click mapping and Ctrl+A replacement passed in the dedicated GTK fixture. Exact text assertions covered `aA中bB文zZ 1!_+ {}[] éÉ Ωω ✓ 😀` and `lower UPPER lower 中文 aA zZ 0123456789 !@#$%^&*()`. fcitx5 was running; its mode/settings were not changed, so this does not establish composition-mode behavior. One standalone emoji is verified in this GTK environment; multi-code-point emoji sequences and other toolkits remain unverified. Normal stop removed socket/screenshots and returned no errors; the fixture was closed.

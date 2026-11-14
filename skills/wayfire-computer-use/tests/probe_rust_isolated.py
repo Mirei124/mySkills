@@ -211,6 +211,27 @@ def inside(root):
             if not (runtime/'stopped.json').exists():raise RuntimeError('RUST_WORKER_CRASH_NOT_CLEANED')
             if json.loads((runtime/'stopped.json').read_text()).get('errors'):raise RuntimeError('RUST_WORKER_CRASH_CLEANUP_ERRORS')
             if 'Task interrupted; desktop control has stopped.' not in (root/'notifications.log').read_text():raise RuntimeError('RUST_INTERRUPTION_NOTICE_MISSING')
+            # Exercise cancellation inside the new cancellable text-settling
+            # waits, after observing actual partial delivery to the fixture.
+            first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
+            if first.get('status')!='ready':raise RuntimeError('RUST_TEXT_CANCEL_START_FAILED')
+            latest=first
+            act({'type':'click','x':300,'y':213,'button':'left'},'cancel-text-click')
+            act({'type':'keypress','keys':['CTRL','A']},'cancel-text-select')
+            act({'type':'keypress','keys':['BACKSPACE']},'cancel-text-clear')
+            pending=subprocess.Popen([binary,'act'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            pending.stdin.write(json.dumps(envelope({'type':'type','text':'aA'*200},'cancel-text')));pending.stdin.close()
+            wait_for(lambda:bool(json.loads((root/'fixture-state.json').read_text())['text']),processes,timeout=5)
+            before=time.monotonic()
+            stopped=cli(['stop'])
+            elapsed=time.monotonic()-before
+            cancelled=json.loads(pending.stdout.read());pending.wait(timeout=3)
+            if stopped!={'status':'stopped','errors':[]} or elapsed>2:raise RuntimeError('RUST_TEXT_CANCEL_STOP_FAILED')
+            if cancelled.get('code')!='ACTION_CANCELLED' or cancelled.get('action_executed') is not True:raise RuntimeError('RUST_TEXT_CANCEL_RESULT_FAILED: '+repr(cancelled))
+            delivered=json.loads((root/'fixture-state.json').read_text())['text']
+            time.sleep(.3)
+            if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RUST_TEXT_CONTINUED_AFTER_STOP')
+            if list(runtime.glob('o-*.png')):raise RuntimeError('RUST_TEXT_CANCEL_SCREENSHOT_LEAK')
             session_verified=True
         report={'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
