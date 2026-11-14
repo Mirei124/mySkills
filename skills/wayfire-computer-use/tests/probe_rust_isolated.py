@@ -157,6 +157,26 @@ def toplevel_case(root,env,processes,cli,ipc,ready,latest):
         response=cli(['act'],json.dumps({'request_id':'focus-observe-'+str(time.monotonic_ns()),'session_id':ready['session_id'],'observation_id':None,'action':{'type':'screenshot'}}))
         if response.get('status')!='ok':raise RuntimeError('TOPLEVEL_FRESH_CAPTURE_FAILED: '+repr(response))
         return response
+    # Exercise the actual owner's connection lifecycle without spawning a CLI
+    # process for every poll. Status must not invalidate the observation.
+    control=Path(latest['screenshot_path']).parent/'socket'
+    def resources():
+        process=Path('/proc')/str(ready['owner_pid'])
+        rss=next(line.split()[1] for line in (process/'status').read_text().splitlines() if line.startswith('VmRSS:'))
+        return {'rss_kib':int(rss),'fds':len(list((process/'fd').iterdir()))}
+    time.sleep(.1)
+    baseline=resources()
+    for _ in range(2_000):
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3);client.connect(str(control));client.sendall(b'{"command":"status"}\n')
+            with client.makefile('r') as response:
+                status=json.loads(response.readline())
+            if status.get('status')!='active' or status.get('observation_id')!=latest['observation_id']:
+                raise RuntimeError('TOPLEVEL_STATUS_LOAD_CHANGED_SESSION')
+    time.sleep(.1)
+    after_load=resources()
+    if after_load['fds']>baseline['fds']+2:raise RuntimeError('TOPLEVEL_STATUS_LOAD_FD_GROWTH')
+    (root/'status-load.json').write_text(json.dumps({'requests':2000,'before':baseline,'after':after_load},indent=2))
     confirmed(second)
     stale=cli(['act'],json.dumps({'request_id':'focus-stale','session_id':ready['session_id'],'observation_id':latest['observation_id'],'action':{'type':'click','x':300,'y':213,'button':'left'}}))
     if stale.get('code')!='STALE_OBSERVATION' or stale.get('action_executed') is not False:raise RuntimeError('TOPLEVEL_FOCUS_REUSED_OLD_OBSERVATION')

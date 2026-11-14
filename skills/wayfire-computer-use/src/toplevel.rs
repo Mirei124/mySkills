@@ -102,7 +102,7 @@ fn parse_list(value: Value) -> Result<Vec<Toplevel>> {
 
 struct Ipc(UnixStream);
 impl Ipc {
-    async fn connect() -> Result<Self> {
+    async fn connect(expected_pid: Option<libc::pid_t>) -> Result<Self> {
         let path = std::env::var_os("WAYFIRE_SOCKET")
             .context("WAYFIRE_IPC_UNAVAILABLE: WAYFIRE_SOCKET is not set")?;
         let path = Path::new(&path);
@@ -117,7 +117,12 @@ impl Ipc {
         let stream = UnixStream::connect(path)
             .await
             .context("WAYFIRE_IPC_UNAVAILABLE")?;
-        ensure!(stream.peer_cred()?.uid() == uid, "UNSAFE_WAYFIRE_IPC_PEER");
+        let peer = stream.peer_cred()?;
+        ensure!(peer.uid() == uid, "UNSAFE_WAYFIRE_IPC_PEER");
+        ensure!(
+            expected_pid.is_none_or(|pid| peer.pid() == Some(pid)),
+            "COMPOSITOR_IDENTITY_MISMATCH"
+        );
         Ok(Self(stream))
     }
 
@@ -149,11 +154,18 @@ impl Ipc {
 
 pub async fn list() -> Result<Value> {
     tokio::time::timeout(TIMEOUT, async {
-        let views = Ipc::connect().await?.views().await?;
+        let views = Ipc::connect(None).await?.views().await?;
         Ok(json!({"status":"ok","backend":"wayfire-ipc","sends_input":false,"toplevels":views}))
     })
     .await
     .context("WAYFIRE_IPC_TIMEOUT")?
+}
+
+pub(crate) async fn verify_compositor(pid: libc::pid_t) -> Result<()> {
+    tokio::time::timeout(TIMEOUT, Ipc::connect(Some(pid)))
+        .await
+        .context("WAYFIRE_IPC_TIMEOUT")??;
+    Ok(())
 }
 
 fn validate_target(view: &Toplevel, target: &FocusTarget, output: Option<&str>) -> Result<()> {
@@ -224,10 +236,18 @@ pub(crate) async fn focus(
     target: &FocusTarget,
     output: Option<&str>,
     cancel: Option<&AtomicBool>,
+    compositor_pid: libc::pid_t,
 ) -> Value {
     let sent = AtomicBool::new(false);
     let result = tokio::time::timeout(TIMEOUT, async {
-        request_focus(&mut Ipc::connect().await?, target, output, &sent, cancel).await
+        request_focus(
+            &mut Ipc::connect(Some(compositor_pid)).await?,
+            target,
+            output,
+            &sent,
+            cancel,
+        )
+        .await
     })
     .await
     .context("TOPLEVEL_FOCUS_TIMEOUT")

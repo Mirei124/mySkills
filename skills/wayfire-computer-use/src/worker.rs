@@ -83,7 +83,8 @@ pub fn run(output: &str) -> Result<()> {
                     width,
                     height,
                 } => {
-                    CANCEL.store(false, Ordering::Release);
+                    // SIGUSR1 revokes this worker for its remaining lifetime.
+                    // A queued Execute must not clear an already-delivered stop.
                     execute::execute(&mut input, &action, width, height, &CANCEL)?;
                     Ok(json!({"status":"ok"}))
                 }

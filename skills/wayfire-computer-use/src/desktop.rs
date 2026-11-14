@@ -20,6 +20,65 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 use xkbcommon::xkb;
 
+/// Identity and socket namespace of the compositor actually serving Wayland.
+/// Keep the connection alive while its compositor lock is held.
+pub(crate) struct Compositor {
+    pub pid: libc::pid_t,
+    pub socket_directory: std::path::PathBuf,
+    _connection: Connection,
+}
+impl Compositor {
+    pub fn connect() -> Result<Self> {
+        let connection = Connection::connect_to_env().context("WAYLAND_UNAVAILABLE")?;
+        let backend = connection.backend();
+        let fd = backend.poll_fd();
+        let mut credentials = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        // SAFETY: fd is a live borrowed socket; the output buffer and its size
+        // are initialized for Linux SO_PEERCRED and remain valid during the call.
+        let result = unsafe {
+            libc::getsockopt(
+                fd.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut credentials as *mut libc::ucred).cast(),
+                &mut size,
+            )
+        };
+        ensure!(
+            result == 0 && size as usize == std::mem::size_of::<libc::ucred>(),
+            "COMPOSITOR_IDENTITY_UNAVAILABLE"
+        );
+        // SAFETY: getuid has no arguments or preconditions.
+        ensure!(
+            credentials.pid > 0 && credentials.uid == unsafe { libc::getuid() },
+            "UNSAFE_COMPOSITOR_PEER"
+        );
+        let socket = std::os::unix::net::UnixStream::from(fd.try_clone_to_owned()?);
+        let address = socket.peer_addr()?;
+        let path = address
+            .as_pathname()
+            .context("COMPOSITOR_SOCKET_IDENTITY_UNAVAILABLE")?;
+        ensure!(path.is_absolute(), "COMPOSITOR_SOCKET_IDENTITY_UNAVAILABLE");
+        let path = path
+            .canonicalize()
+            .context("COMPOSITOR_SOCKET_IDENTITY_UNAVAILABLE")?;
+        let socket_directory = path
+            .parent()
+            .context("COMPOSITOR_SOCKET_IDENTITY_UNAVAILABLE")?
+            .to_owned();
+        Ok(Self {
+            pid: credentials.pid,
+            socket_directory,
+            _connection: connection,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Output {
     pub name: String,

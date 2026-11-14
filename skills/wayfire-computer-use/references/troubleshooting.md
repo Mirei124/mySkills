@@ -4,6 +4,8 @@ Run `target/release/wayfire-computer-use doctor` inside the intended Wayfire ses
 
 | Result | Response |
 |---|---|
+| COMPOSITOR_IDENTITY_MISMATCH | Wayland and IPC point to different compositor processes, or an owner's IPC server has been replaced. Correct the intended desktop environment; no focus request is sent. |
+| COMPOSITOR_IDENTITY_UNAVAILABLE / COMPOSITOR_SOCKET_IDENTITY_UNAVAILABLE / UNSAFE_COMPOSITOR_PEER | The actual Wayland server identity or named socket namespace cannot be established safely. Use the intended local Wayfire session; no guessed namespace or lock fallback is used. |
 | WAYFIRE_IPC_UNAVAILABLE / WAYFIRE_IPC_ERROR | Window management requires the intended WAYFIRE_SOCKET and ipc/ipc-rules plugins. Inspect availability; do not silently change compositor configuration or choose another session. |
 | TOPLEVEL_NOT_FOUND / TOPLEVEL_CLOSED / TOPLEVEL_IDENTITY_CHANGED | List windows again and identify the intended current ID/PID. Do not choose a same-title replacement automatically. |
 | TOPLEVEL_OUTPUT_MISMATCH | An active owner cannot focus a window outside its selected output. Stop and explicitly select the intended output before controlling it. |

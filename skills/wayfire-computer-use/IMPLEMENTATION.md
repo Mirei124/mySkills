@@ -311,3 +311,8 @@ Added an opt-in private keyboard-handoff regression reproducing a slurp null-XKB
 ## Rust window discovery and focus
 
 Implemented optional Wayfire IPC `toplevel list` and `toplevel focus --id ID [--pid PID]`. Focus is verified and serialized with active input; owner-managed requests require the selected output and invalidate the prior observation. Standalone requests hold the display lock. Missing IPC/plugins, identity changes, closed windows, ambiguous IDs and uncertain completion fail explicitly without fallback/retry. No dependency or standard action-schema change was required. All 23 unit tests, strict Clippy, release compilation, the expanded private dual-output suite and dedicated current-desktop release checks passed. See [window management](references/usage.md#window-management) and [the evidence](references/simulation-tests.md#rust-toplevel-listing-and-focus-commands).
+
+
+## Cancellation and compositor-lock review fixes
+
+Latched SIGUSR1 cancellation across queued Execute requests, bound focus to the actual Wayland/IPC compositor PID, and added a canonical compositor-level lock shared with owner control and capture probes. The existing display lock remains. Completed client tasks are reaped throughout serving and cleanup. All 24 unit tests, strict Clippy, release build, controlled debug/release cancellation and cross-compositor regressions, the full private dual-output/toplevel suite and late-stop regression passed. See [the evidence](references/simulation-tests.md#review-fixes-cancellation-compositor-identity-and-connection-retention). Stale-executable detection and build-policy changes remain deferred at the user's request.

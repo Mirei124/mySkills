@@ -157,6 +157,8 @@ pub async fn capture(
     auto_select: bool,
 ) -> Result<serde_json::Value> {
     let _lock = crate::session::Lock::acquire(&crate::session::runtime()?)?;
+    let compositor = crate::desktop::Compositor::connect()?;
+    let _compositor_lock = crate::session::Lock::for_compositor(&compositor)?;
     let desktop = Desktop::connect()?;
     let (_, selected) = desktop.select(output.as_deref())?;
     notify("Computer Use Rust capture test","Preparing an explicitly authorized screenshot test. Desktop input may select the Portal source.").await?;

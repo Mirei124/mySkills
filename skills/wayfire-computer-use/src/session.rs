@@ -2,7 +2,7 @@
 use crate::{
     action::Action,
     capture::{Capture, monotonic_ns},
-    desktop::{Desktop, Output},
+    desktop::{Compositor, Desktop, Output},
     portal::Portal,
     probe,
 };
@@ -64,6 +64,27 @@ pub fn runtime() -> Result<PathBuf> {
 }
 pub(crate) struct Lock(File);
 impl Lock {
+    pub(crate) fn for_compositor(compositor: &Compositor) -> Result<Self> {
+        // Use the server's actual socket directory, not the caller's display
+        // spelling or XDG_RUNTIME_DIR. Aliases must share the same lock.
+        let root = compositor
+            .socket_directory
+            .join(format!("wf-computer-compositor-{}", compositor.pid));
+        match std::fs::create_dir(&root) {
+            Ok(()) => std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        let metadata = std::fs::symlink_metadata(&root)?;
+        // SAFETY: getuid has no arguments or preconditions.
+        ensure!(
+            metadata.is_dir()
+                && metadata.uid() == unsafe { libc::getuid() }
+                && metadata.mode() & 0o077 == 0,
+            "UNSAFE_RUNTIME_DIRECTORY"
+        );
+        Self::acquire(&root)
+    }
     pub(crate) fn acquire(root: &Path) -> Result<Self> {
         let file = OpenOptions::new()
             .read(true)
@@ -346,6 +367,7 @@ impl Engine {
     }
 }
 struct Shared {
+    compositor_pid: libc::pid_t,
     engine: Mutex<Engine>,
     serial: Mutex<()>,
     snapshot: StdMutex<Value>,
@@ -436,8 +458,13 @@ impl Shared {
             // Even an uncertain focus request makes the old visual context stale.
             engine.observation = None;
             self.snapshot.lock().unwrap()["observation_id"] = Value::Null;
-            let mut response =
-                crate::toplevel::focus(&target, Some(&output), Some(&self.cancel_requested)).await;
+            let mut response = crate::toplevel::focus(
+                &target,
+                Some(&output),
+                Some(&self.cancel_requested),
+                self.compositor_pid,
+            )
+            .await;
             response["session_id"] = json!(engine.id);
             response["observation_id"] = Value::Null;
             return Ok(response);
@@ -522,9 +549,19 @@ async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let _ = tokio::time::timeout(Duration::from_secs(2), write_line(&mut writer, &response)).await;
     let _ = writer.shutdown().await;
 }
+fn spawn_client(clients: &mut tokio::task::JoinSet<()>, shared: Arc<Shared>, socket: UnixStream) {
+    // Drain ready completions in a batch before admitting more requests. The
+    // owner loop also joins completions when no new connection is arriving.
+    while clients.try_join_next().is_some() {}
+    clients.spawn(async move {
+        client(shared, socket).await;
+    });
+}
 pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     let root = runtime()?;
     let lock = Lock::acquire(&root)?;
+    let compositor = Compositor::connect()?;
+    let compositor_lock = Lock::for_compositor(&compositor)?;
     for name in ["ready.json", "stopped.json", "socket"] {
         let _ = std::fs::remove_file(root.join(name));
     }
@@ -542,6 +579,7 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     let (finished, _) = watch::channel(None);
     let engine = Engine::new(root.clone())?;
     let shared = Arc::new(Shared {
+        compositor_pid: compositor.pid,
         snapshot: StdMutex::new(json!({"status":"preparing","session_id":engine.id})),
         engine: Mutex::new(engine),
         serial: Mutex::new(()),
@@ -585,7 +623,8 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
                     error=>{let engine=shared.engine.lock().await;let code=match error{Ok(Err(error))=>format!("{error:#}"),Err(error)=>format!("PREPARE_TASK_FAILED: {error}"),_=>unreachable!()};publish(&root.join("ready.json"),&json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":engine.bootstrap}))?;drop(engine);shared.cancel();break;}
                 }
             },
-            socket=listener.accept()=>{let (socket,_)=socket?;let state=shared.clone();clients.spawn(async move{client(state,socket).await;});},
+            _=clients.join_next(),if !clients.is_empty()=>{},
+            socket=listener.accept()=>{let (socket,_)=socket?;spawn_client(&mut clients,shared.clone(),socket);},
             _=tick.tick()=>{
                 if shared.last.lock().unwrap().elapsed()>Duration::from_secs(300){shared.cancel_with_reason("idle timeout");break;}
                 if let Ok(mut engine)=shared.engine.try_lock()&& let Some(worker)=engine.worker.as_mut()&& worker.child.try_wait()?.is_some(){shared.worker_pid.store(0,Ordering::Release);shared.cancel_with_reason("helper interrupted");break;}
@@ -611,6 +650,7 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
         let mut errors = engine.cleanup().await;
         shared.worker_pid.store(0, Ordering::Release);
         drop(lock);
+        drop(compositor_lock);
         if engine.started
             && let Err(error) = probe::notify(
                 if errors.is_empty() {
@@ -644,10 +684,11 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
         tokio::select! {
             biased;
             result = &mut finishing => { result?; break; },
+            _ = clients.join_next(), if !clients.is_empty() => {},
             socket = listener.accept() => {
                 let (socket, _) = socket?;
                 let state = shared.clone();
-                clients.spawn(async move { client(state, socket).await; });
+                spawn_client(&mut clients, state, socket);
             }
         }
     }
@@ -683,6 +724,8 @@ pub async fn send(request: Value) -> Result<Value> {
     .context("SESSION_RESPONSE_TIMEOUT")?
 }
 pub async fn focus_toplevel(target: crate::toplevel::FocusTarget) -> Result<Value> {
+    let compositor = Compositor::connect()?;
+    crate::toplevel::verify_compositor(compositor.pid).await?;
     let root = runtime()?;
     if root.join("socket").exists() {
         // Never fall back after contacting an owner: its result may be uncertain.
@@ -690,7 +733,8 @@ pub async fn focus_toplevel(target: crate::toplevel::FocusTarget) -> Result<Valu
     }
     // This also rejects a preparing owner or another standalone focus operation.
     let _lock = Lock::acquire(&root)?;
-    Ok(crate::toplevel::focus(&target, None, None).await)
+    let _compositor_lock = Lock::for_compositor(&compositor)?;
+    Ok(crate::toplevel::focus(&target, None, None, compositor.pid).await)
 }
 struct Owner {
     child: Child,
@@ -777,6 +821,49 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         path
     }
+    fn test_shared(root: &Path) -> Arc<Shared> {
+        let (stop, _) = watch::channel(false);
+        let (finished, _) = watch::channel(None);
+        Arc::new(Shared {
+            compositor_pid: std::process::id() as libc::pid_t,
+            engine: Mutex::new(Engine::new(root.to_owned()).unwrap()),
+            serial: Mutex::new(()),
+            snapshot: StdMutex::new(json!({"status":"active"})),
+            last: StdMutex::new(Instant::now()),
+            stop,
+            finished,
+            reason: StdMutex::new("normal"),
+            worker_pid: AtomicU32::new(0),
+            capture: StdMutex::new(None),
+            cancel_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            portal_loss: watch::channel(false).0,
+        })
+    }
+    #[tokio::test]
+    async fn completed_status_connections_do_not_accumulate() {
+        let root = directory();
+        let shared = test_shared(&root);
+        let mut clients = tokio::task::JoinSet::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for _ in 0..2_000 {
+                let (mut socket, server) = UnixStream::pair().unwrap();
+                spawn_client(&mut clients, shared.clone(), server);
+                write_line(&mut socket, &json!({"command":"status"}))
+                    .await
+                    .unwrap();
+                let response = read_line(&mut BufReader::new(socket)).await.unwrap();
+                assert_eq!(response["status"], "active");
+                tokio::task::yield_now().await;
+                assert!(clients.len() <= 2, "completed requests were retained");
+            }
+            while clients.join_next().await.is_some() {}
+        })
+        .await
+        .unwrap();
+        assert!(!*shared.stop.borrow());
+        assert!(clients.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn exclusive_lock_releases_on_drop() {
         let root = directory();
@@ -811,6 +898,7 @@ mod tests {
         let (stop, _) = watch::channel(false);
         let (finished, _) = watch::channel(None);
         let shared = Arc::new(Shared {
+            compositor_pid: std::process::id() as libc::pid_t,
             engine: Mutex::new(engine),
             serial: Mutex::new(()),
             snapshot: StdMutex::new(json!({"status":"active"})),
