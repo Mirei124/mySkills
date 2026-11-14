@@ -29,21 +29,15 @@ Run `target/release/wayfire-computer-use doctor` inside the intended Wayfire ses
 
 Always inspect stop's errors list. Losing a whole process group or the bus can prevent an end notification. A submitted notification is not user acknowledgment.
 
-Current Rust validation and historical Python/C results are distinguished in IMPLEMENTATION.md and simulation-tests.md. archive/legacy is not a fallback runtime. Do not restart the user's services as an unrequested repair.
+See [tested scope](compatibility.md) for compatibility and validation limits. Historical implementations are not fallback runtimes. Do not restart the user's services as an unrequested repair.
 
 
 ## Selector keyboard handoff
 
 A current-desktop failure with slurp 1.5.0-2 was traced to xkb_state_update_mask receiving a null state. A private Wayfire regression reproduces the state by keeping one keyboard present, creating and stopping another virtual keyboard, then starting slurp: the compositor sends enter/modifiers without a preceding keymap. The selector crashes before the bootstrap click completes. This is independent of output count. A local slurp 1.5.0-3 patch ignores key/modifier events until an XKB state exists; it preserves pointer source selection and does not inject a keyboard event to restore the compositor's current keyboard. It does not repair the compositor's keyboard handoff or guarantee Escape works before a keymap arrives.
 
-Use the opt-in private regression from the repository root (after building the release executable):
-
-```bash
-./.venv/bin/python3 skills/wayfire-computer-use/tests/probe_selector_keyboard.py
-```
-
-`--selector PATH` checks a specific executable; `--expect-crash` deliberately verifies the original SIGSEGV in the private desktop. Each invocation creates a fresh compositor and retains its Wayland trace. Run probes serially. A selector disappearance alone does not establish this diagnosis; inspect evidence before applying an external package patch.
+A selector disappearance alone does not establish this diagnosis; inspect evidence before applying an external package patch. The skill does not patch system packages automatically.
 
 ## Lock-screen feedback
 
-The runtime currently exposes no dedicated locked status/error and does not subscribe to logind's LockedHint. A session may remain active while a screenshot shows the lock screen. If capture is invalidated, the ordinary session/stream-loss handling stops control and attempts an end notification, without identifying a lock as the cause. Do not interpret active as unlocked or an end notification as a lock-specific notice. Stop input when the observed screen is locked; any test-driver LockedHint guard is separate from runtime behavior. The completed-lock screenshot test in simulation-tests.md verified lock-screen content in the tested configuration, not automatic lock detection.
+The runtime currently exposes no dedicated locked status/error and does not subscribe to logind's LockedHint. A session may remain active while a screenshot shows the lock screen. If capture is invalidated, the ordinary session/stream-loss handling stops control and attempts an end notification, without identifying a lock as the cause. Do not interpret active as unlocked or an end notification as a lock-specific notice. Stop input when the observed screen is locked; any test-driver LockedHint guard is separate from runtime behavior. The completed-lock screenshot test verified lock-screen content in the tested configuration, not automatic lock detection.

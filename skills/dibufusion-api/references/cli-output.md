@@ -18,6 +18,6 @@ python3 "$CLI" tasks list -v --param size=20
 python3 "$CLI" tasks list --output tasks.json
 ```
 
-Live workload-write sampling found creation receipts (`message`, `port`, `IP`), stop acceptance messages, and empty-body HTTP receipts already minimal; they remain complete by default. Creation may omit the workload ID, so reconcile the exact unique name in current/pending/history lists and check actual status. A stop acceptance can precede populated save status and workload termination. See [maintenance/verification.md](maintenance/verification.md) for sampled coverage and failures.
+Live workload-write sampling found creation receipts (`message`, `port`, `IP`), stop acceptance messages, and empty-body HTTP receipts already minimal; they remain complete by default. Creation may omit the workload ID, so reconcile the exact unique name in current/pending/history lists and check actual status. A stop acceptance can precede populated save status and workload termination. These observations cover sampled operations and do not establish universal write behavior.
 
 Changing existing consumers to `--raw` preserves the previous response shape. Raw responses and fallback output may contain sensitive fields; do not paste or commit them.

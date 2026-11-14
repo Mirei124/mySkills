@@ -51,7 +51,3 @@ Default JSON is compact for recognized lists; unknown fields can trigger full-re
 Save stdout, stderr, startup/exit records, and worker logs under `/workspace/task_run_logs/<task>/<run>/`. Keep a credential-free project index linking workload ID, configuration, result paths, logs, and validation status. Include required project environment setup inside the submitted command, not only the submitting shell; suppress secret-printing bootstrap output.
 
 Resolve the real workload ID after submission; receipts may omit it. Check actual status/events and application logs. Submission acceptance, Running, worker startup, and validated completion are different states. `Not exist or finished` does not prove success. An application can fail while its container still shows Running; report that discrepancy before considering an authorized replacement. Project-level metrics and complete, unique sample/result artifacts establish application correctness, not an exit code alone.
-
-## Maintenance
-
-Read [maintenance/verification.md](maintenance/verification.md) only for historical samples, unresolved failures, or skill maintenance. Keep deployment/account observations distinct from general rules. Installed skill copies are manually synchronized by the user; maintain source in this repository.

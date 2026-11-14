@@ -1,6 +1,6 @@
 # Actions and compatibility
 
-The public OpenAI action definitions are pinned as a vendored content snapshot in action-schema-snapshot.py.txt; schema-lock.json records its SHA-256, retrieval date and source URL. The moving upstream branch is not an immutable Git revision. Local strict validation is described by actions.schema.json and enforced before dispatch by computer.py.
+The Rust runtime validates action objects and envelopes with strict serde types and preflight checks before dispatch. Unknown fields and unsupported values are rejected.
 
 | Action | Required fields | Behavior |
 |---|---|---|
@@ -24,4 +24,4 @@ The request envelope and session metadata are local extensions, not OpenAI nativ
 
 ## Rust implementation
 
-The default runtime is the root Cargo project's executable. The action/envelope schema is enforced by strict serde types and preflight checks; the supervised input worker is another process of that same binary. No Python, GStreamer or standalone C helper is used. Screenshot freshness is checked against negotiated PipeWire header timestamps, with checked buffer planes/stride/offset and packed RGB conversion. Input targets one selected normal-orientation output at scale 1; multiple outputs require explicit selection and virtual-pointer v2 binding.
+The default runtime is the bundled Cargo project's executable. The action/envelope schema is enforced by strict serde types and preflight checks; the supervised input worker is another process of that same binary. No Python, GStreamer or standalone C helper is used. Screenshot freshness is checked against negotiated PipeWire header timestamps, with checked buffer planes/stride/offset and packed RGB conversion. Input targets one selected normal-orientation output at scale 1; multiple outputs require explicit selection and virtual-pointer v2 binding.

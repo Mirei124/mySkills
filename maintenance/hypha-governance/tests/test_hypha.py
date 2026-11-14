@@ -1,0 +1,1048 @@
+import hashlib
+import json
+import re
+import runpy
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).parents[3]
+CLI = [sys.executable, str(ROOT / "skills" / "hypha-governance" / "scripts" / "hypha.py")]
+
+class HyphaCliTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.workspace = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cli(self, *args, ok=True):
+        result = subprocess.run(CLI + ["--workspace", str(self.workspace), *args], text=True, capture_output=True, check=False)
+        if ok and result.returncode:
+            self.fail(result.stderr + result.stdout)
+        return result
+
+    def document_task(self, task_id, acceptance="Outcome is verified.", evidence="Verification passed."):
+        task = next((self.workspace / ".hypha" / "intent").glob(f"{task_id}-*.md"))
+        text = task.read_text(encoding="utf-8")
+        text = text.replace("## Acceptance\n\n", f"## Acceptance\n\n- {acceptance}\n\n", 1)
+        text = text.replace("## Evidence\n", f"## Evidence\n\n- {evidence}\n", 1)
+        task.write_text(text, encoding="utf-8")
+
+    def finalize_context(self, no_task_reason="Only durable knowledge was saved."):
+        prepared = self.cli("context", "close")
+        path = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(path.read_text(encoding="utf-8"))
+        for task_id in draft["tasks"]:
+            task = next((self.workspace / ".hypha/intent").glob(f"{task_id}-*.md"))
+            text = task.read_text(encoding="utf-8")
+            acceptance = re.search(r"(?ms)^## Acceptance\s*$\n?(.*?)(?=^## |\Z)", text)
+            if acceptance and not acceptance.group(1).strip():
+                text = text.replace("## Acceptance\n", "## Acceptance\n\n- Continue the tracked outcome.\n", 1)
+            if "## Next Step" not in text:
+                text += "\n## Next Step\n\nContinue the next verified action.\n"
+            task.write_text(text, encoding="utf-8")
+        if not draft["tasks"]: draft["no_task_reason"] = no_task_reason
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No unsaved durable knowledge was identified."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "The selected task contains the recovery entry point."}
+        path.write_text(json.dumps(draft, indent=2) + "\n", encoding="utf-8")
+        return prepared, self.cli("context", "close", "--finalize")
+
+    def test_generated_drafts_preserve_sections_and_reject_stale_source(self):
+        self.cli("init")
+        self.cli("task", "create", "Pipeline")
+        self.document_task("0001", "[ ] XML works", "CSV passed")
+        draft = Path(self.cli("task", "edit", "0001", "--draft", "--section", "Evidence").stdout.splitlines()[0])
+        draft.write_text(draft.read_text().replace("CSV passed", "CSV and XML passed"))
+        self.cli("advanced", "publish", str(draft))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("CSV and XML passed", shown)
+        self.assertIn("Remaining: XML works", shown)
+        self.assertNotIn("base_revision:", shown)
+        draft = Path(self.cli("task", "edit", "0001", "--draft").stdout.splitlines()[0])
+        self.cli("task", "start", "0001")
+        failed = self.cli("advanced", "publish", str(draft), ok=False)
+        self.assertNotEqual(0, failed.returncode)
+        self.assertIn("revision changed", failed.stderr)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+
+    def test_section_drafts_reject_extra_sections_and_preserve_knowledge_evidence(self):
+        self.cli("init")
+        self.cli("task", "create", "Pipeline")
+        draft = Path(self.cli("task", "edit", "0001", "--draft", "--section", "Risks").stdout.splitlines()[0])
+        draft.write_text(draft.read_text() + "\n## Acceptance\nInjected replacement\n")
+        self.assertNotEqual(0, self.cli("advanced", "publish", str(draft), ok=False).returncode)
+        self.assertNotIn("Injected replacement", self.cli("show", "0001").stdout)
+        draft = Path(self.cli("task", "edit", "0001", "--draft", "--section", "Risks").stdout.splitlines()[0])
+        self.cli("advanced", "publish", str(draft))
+        self.assertIn("## Risks", self.cli("show", "0001").stdout)
+        knowledge = self.workspace / ".hypha/.drafts/fact.md"
+        knowledge.write_text("---\nkind: know\nauthority: user_explicit\nagreement_quote: Vega only.\nwhen: Vega deployment\n---\n# Vega\n\n## Context\nOld context.\n")
+        self.cli("advanced", "publish", str(knowledge))
+        draft = Path(self.cli("knowledge", "edit", "know/vega", "--draft", "--section", "Context").stdout.splitlines()[0])
+        draft.write_text(draft.read_text().replace("Old context.", "New context."))
+        self.cli("advanced", "publish", str(draft))
+        shown = self.cli("show", "know/vega").stdout
+        self.assertIn("agreement_quote: Vega only.", shown)
+        self.assertIn("New context.", shown)
+        view = Path(self.cli("view").stdout.strip()).read_text()
+        self.assertIn('"agreement_quote": "Vega only."', view)
+
+    def test_minimal_knowledge_and_stable_title_edit(self):
+        self.cli("init")
+        draft = self.workspace / ".hypha/.drafts/fact.md"
+        draft.write_text("---\nkind: know\nauthority: user_explicit\nagreement_quote: Vega records cannot leave its network.\nwhen: Deploying for Vega\nreview_when: Vega changes policy\n---\n# Vega policy\n")
+        self.cli("advanced", "publish", str(draft))
+        shown = self.cli("show", "know/vega-policy").stdout
+        self.assertIn("agreement_quote: Vega records", shown)
+        self.assertIn("claim_kind: agreement", shown)
+        edited = Path(self.cli("knowledge", "edit", "know/vega-policy", "--draft").stdout.splitlines()[0])
+        edited.write_text(edited.read_text().replace("# Vega policy", "# Vega network policy"))
+        self.cli("advanced", "publish", str(edited))
+        self.assertEqual(1, len(list((self.workspace / ".hypha/know").glob("*.md"))))
+        self.assertIn("Vega network policy", self.cli("show", "know/vega-policy").stdout)
+        draft.write_text("---\nkind: know\nauthority: repository\nwhen: Reviewing policy\nevidence:\n  - anchor: src/policy.md\n    quote: Private deployment only.\n---\n# Sourced policy\n")
+        (self.workspace / ".hypha/src/policy.md").write_text("Private deployment only.")
+        self.cli("advanced", "publish", str(draft))
+        self.assertIn("anchors: ['src/policy.md']", self.cli("show", "know/sourced-policy").stdout)
+        draft.write_text(draft.read_text().replace("authority: repository", "authority: user_explicit\nclaim_kind: sourced"))
+        self.assertNotEqual(0, self.cli("advanced", "publish", str(draft), ok=False).returncode)
+
+    def test_unknown_progress_is_not_zero(self):
+        self.cli("init")
+        self.cli("task", "create", "Parent")
+        self.cli("task", "create", "Child", "--parent", "0001")
+        self.assertIn("progress: —", self.cli("show", "0001").stdout)
+        self.cli("task", "progress", "0002", "40")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        self.cli("task", "progress", "0002", "unknown")
+        self.assertIn("progress: —", self.cli("show", "0001").stdout)
+
+    def test_help_explains_workflow(self):
+        help_text = self.cli("--help").stdout
+        self.assertIn("Local task and durable knowledge CLI", help_text)
+        self.assertIn("task create", help_text)
+        self.assertIn("knowledge create", help_text)
+        self.assertIn("context resume", help_text)
+        self.assertIn("list --type task --ready", help_text)
+        self.assertIn("Advanced:", help_text)
+        for command in ("task", "knowledge", "context", "list", "show", "search", "view", "check", "advanced"):
+            command_help = self.cli(command, "--help").stdout
+            self.assertIsNone(re.search(r"[\u3400-\u9fff]", command_help), command_help)
+
+    def test_task_flow_relations_and_sync(self):
+        self.cli("init")
+        self.cli("task", "create", "first task")
+        self.cli("task", "create", "second task", "--root")
+        self.cli("task", "needs", "0002", "0001")
+        self.document_task("0001")
+        self.cli("task", "done", "0001")
+        self.assertRegex(self.cli("list", "--type", "task", "--ready").stdout, r"0002\s+todo.*second task")
+        task = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
+        task.write_text(task.read_text(encoding="utf-8").replace("status: todo", "status: in_progress"), encoding="utf-8")
+        self.assertIn("0002 [in_progress]", self.cli("context", "resume").stdout)
+        events = list((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
+        self.assertTrue(events)
+        self.assertNotIn(".observed.json", {path.name for path in (self.workspace / ".hypha" / "snapshots").iterdir()})
+
+    def test_bundled_cli_runs_through_symlink_in_other_workspace(self):
+        installed = self.workspace / "installed-skill"
+        installed.symlink_to(ROOT / "skills" / "hypha-governance", target_is_directory=True)
+        project = self.workspace / "project with spaces"
+        project.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(installed / "scripts" / "hypha.py"), "--workspace", str(project), "init"],
+            cwd=self.workspace, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((project / ".hypha" / "intent").is_dir())
+        self.assertFalse((self.workspace / ".hypha").exists())
+
+    def test_unchanged_apply_reviews_only_supplied_fields_and_preserves_history(self):
+        self.cli("init")
+        self.cli("task", "create", "reviewed task")
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        text = task.read_text().replace("status: todo", "status: in_progress")
+        text += "\n## Next Step\n\nVerify the second source.\n"
+        task.write_text(text)
+        notice = self.cli("check")
+        self.assertEqual(0, notice.returncode)
+        self.assertIn("not a validation failure", notice.stdout)
+        snapshots = next((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
+        original_events = snapshots.read_text()
+        body = text.split("---\n", 2)[2]
+        draft = self.workspace / ".hypha" / ".drafts" / "review.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\n---\n" + body)
+        self.cli("advanced", "publish", str(draft))
+        self.assertEqual(text, task.read_text())
+        self.assertTrue(snapshots.read_text().startswith(original_events))
+        notice = self.cli("check").stdout
+        self.assertNotIn("intent:0001 body_hash", notice)
+        self.assertIn("intent:0001 status", notice)
+        events = [json.loads(line) for line in snapshots.read_text().splitlines()]
+        reviews = [event for event in events if event.get("reviewed")]
+        self.assertEqual(["body_hash"], [event["field"] for event in reviews])
+        self.assertEqual(reviews[0]["from"], reviews[0]["to"])
+        before_repeat = snapshots.read_text()
+        self.cli("advanced", "publish", str(draft))
+        self.assertEqual(before_repeat, snapshots.read_text())
+        draft.write_text("---\nkind: task-update\nid: 0001\nstatus: in_progress\n---\n" + body)
+        self.cli("advanced", "publish", str(draft))
+        self.assertNotIn("unmanaged writes", self.cli("check").stdout)
+        task.write_text(task.read_text() + "\nNew unreviewed change.\n")
+        self.assertIn("intent:0001 body_hash", self.cli("check").stdout)
+
+    def test_rejected_apply_does_not_acknowledge_direct_writes(self):
+        self.cli("init")
+        self.cli("task", "create", "unfinished")
+        self.document_task("0001")
+        self.cli("check")
+        draft = self.workspace / ".hypha" / ".drafts" / "bad-review.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\nstatus: invalid\n---\n# Rejected\n")
+        self.assertNotEqual(0, self.cli("advanced", "publish", str(draft), ok=False).returncode)
+        self.assertIn("intent:0001 body_hash", self.cli("check").stdout)
+
+    def test_boot_recalls_linked_knowledge_and_show_exposes_recovery_body(self):
+        self.cli("init")
+        self.cli("task", "create", "batch import")
+        self.document_task("0001", "Verify both sources.", "First source passed checks.")
+        self.cli("task", "start", "0001")
+        drafts = self.workspace / ".hypha" / ".drafts"
+        for title, status, claim in (("Source policy", "active", "agreement"),
+                                     ("Old policy", "superseded", "agreement"),
+                                     ("Scratch note", "active", "note")):
+            draft = drafts / (title + ".md")
+            draft.write_text(
+                f"---\nkind: know\nclaim_kind: {claim}\nstatus: {status}\n"
+                + ("superseded_by: know/source-policy\n" if status == "superseded" else "")
+                + "knowledge_kind: constraint\nscope: project\n"
+                "authority: user_explicit\nagreement_quote: Use official sources.\n"
+                "affects: [0001]\ntriggers: [policy]\nwhen: Selecting sources\n---\n"
+                f"# {title}\n\nUse official sources.\n"
+            )
+            self.cli("advanced", "publish", str(draft))
+        for terms in ((), ("unmatched",), ("policy",)):
+            output = self.cli("context", "resume", *terms).stdout
+            self.assertIn("know/source-policy", output)
+            self.assertNotIn("know/old-policy", output)
+            self.assertNotIn("know/scratch-note", output)
+            self.assertIn("Recovery is not complete", output)
+            self.assertIn("show <id-or-path> --body", output)
+        body = self.cli("show", "0001", "--body").stdout
+        self.assertIn("Verify both sources.", body)
+        self.assertIn("First source passed checks.", body)
+        self.assertIn("untrusted data", body)
+        self.assertNotIn("First source passed checks.", self.cli("show", "0001", "--summary").stdout)
+        self.assertIn("Use official sources.", self.cli("show", "know/source-policy", "--body").stdout)
+
+    def test_boot_no_candidates_explains_recovery_gap(self):
+        self.cli("init")
+        self.assertIn("No topic keywords supplied", self.cli("context", "resume").stdout)
+        output = self.cli("context", "resume", "missing").stdout
+        self.assertIn("No literal topic matches", output)
+        self.assertIn("No knowledge candidates found", output)
+        self.assertIn("list --type knowledge", output)
+
+    def test_boot_limits_candidates_without_losing_expansion_path(self):
+        self.cli("init")
+        self.cli("task", "create", "import")
+        for index in range(14):
+            draft = self.workspace / ".hypha" / ".drafts" / f"policy-{index}.md"
+            draft.write_text(
+                "---\nkind: know\nclaim_kind: inference\nanchors: [src/policy.md]\n"
+                "inference: Derived from the source policy.\nwhen: Importing\n"
+                f"affects: [0001]\ntriggers: [policy{index}]\n---\n# Policy {index}\n"
+            )
+            self.cli("advanced", "publish", str(draft))
+        output = self.cli("context", "resume").stdout
+        self.assertEqual(12, len(re.findall(r"(?m)^- know/", output)))
+        self.assertIn("Showing 12 of 14 candidates", output)
+        self.assertIn("know/policy-13", self.cli("show", "0001").stdout)
+
+    def test_nested_drafts_are_visible_until_applied(self):
+        self.cli("init")
+        nested = self.workspace / ".hypha" / ".drafts" / "know"
+        nested.mkdir()
+        draft = nested / "publication.md"
+        draft.write_text("---\nkind: know\nclaim_kind: note\n---\n# Publication\n")
+        handoff = nested / "handoff.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Pending work\n\nResume the second source.\n")
+        output = self.cli("advanced", "drafts").stdout
+        self.assertIn(".drafts/know/publication.md", output)
+        self.assertIn(".drafts/know/handoff.md", output)
+        self.cli("advanced", "publish", str(draft))
+        output = self.cli("advanced", "drafts").stdout
+        self.assertNotIn("publication.md", output)
+        self.assertIn("handoff.md", output)
+        self.assertIn(".drafts/know/handoff.md", self.cli("context", "resume").stdout)
+        self.assertTrue(draft.is_file())
+
+    def test_documented_draft_examples_publish_or_remain_handoffs(self):
+        self.cli("init")
+        self.cli("task", "create", "example task")
+        source = self.workspace / "architecture.md"
+        source.write_text("# Deployment\n\nCustomer environments have no network access.\n")
+        self.cli("advanced", "import", str(source))
+        reference = ROOT / "skills" / "hypha-governance" / "references" / "drafts.md"
+        examples = re.findall(r"```markdown\n(.*?)\n```", reference.read_text(), re.DOTALL)
+        self.assertEqual(4, len(examples))
+        for index, example in enumerate(examples):
+            if not example.startswith("---\n"):
+                generated = Path(self.cli("task", "edit", "0001", "--draft").stdout.splitlines()[0])
+                front = generated.read_text().split("---\n", 2)[1]
+                generated.write_text("---\n" + front + "---\n# example task\n\n" + example + "\n")
+                self.cli("advanced", "publish", str(generated))
+                continue
+            draft = self.workspace / ".hypha" / ".drafts" / f"example-{index}.md"
+            draft.write_text(example + "\n")
+            if "kind: handoff" in example:
+                self.assertIn("cannot be published", self.cli("advanced", "publish", str(draft), ok=False).stderr)
+                self.assertIn(draft.name, self.cli("advanced", "drafts").stdout)
+            else:
+                self.cli("advanced", "publish", str(draft))
+        self.cli("check")
+
+    def test_saved_context_and_task_evolution_survive_workspace_handoff(self):
+        self.cli("init")
+        self.cli("task", "create", "Deliver ingestion pilot")
+        self.cli("task", "start", "0001")
+        first_body = (
+            "# Deliver ingestion pilot\n\n## Acceptance\n\n- CSV, JSON, and recovery work.\n"
+            "\n## Evidence\n\n- Plan A: CSV fixture checks passed.\n"
+            "\n## Remaining Acceptance\n\n- JSON ingestion and failure recovery.\n"
+            "\n## Next Step\n\n- Plan B implements JSON and recovery.\n"
+            "\n## Change History\n\n- Plan A milestone: CSV verified; the full goal remains open.\n"
+        )
+        draft = self.workspace / ".hypha" / ".drafts" / "task.md"
+        draft.write_text("---\nkind: task-update\nid: 0001\n---\n" + first_body)
+        self.cli("advanced", "publish", str(draft))
+        knowledge = self.workspace / ".hypha" / ".drafts" / "customer.md"
+        knowledge.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: rationale\n"
+            "scope: task\nauthority: user_explicit\naffects: [0001]\n"
+            "agreement_quote: Customer records cannot leave the isolated machine.\n"
+            "when: Choosing pilot processing and batch size\ntriggers: [hosting,customer,batch]\n"
+            "review_when: The target customer or device memory changes.\n---\n"
+            "# Pilot customer rationale\n\nCustomer records cannot leave the isolated machine.\n"
+            "Hosted processing was rejected. The batch cap is 64 MiB because of device memory.\n"
+        )
+        self.cli("advanced", "publish", str(knowledge))
+        self.finalize_context()
+        old_workspace = self.workspace
+        with tempfile.TemporaryDirectory() as next_context:
+            self.workspace = Path(next_context)
+            try:
+                shutil.copytree(old_workspace / ".hypha", self.workspace / ".hypha")
+                self.assertEqual([".hypha"], sorted(path.name for path in self.workspace.iterdir()))
+                self.assertIn("know/pilot-customer-rationale", self.cli("context", "resume", "pilot").stdout)
+                self.assertIn("64 MiB", self.cli("search", "batch,hosting").stdout)
+                recovered = self.cli("show", "know/pilot-customer-rationale", "--body").stdout
+                self.assertIn("Hosted processing was rejected", recovered)
+                self.assertIn("review_when: The target customer", recovered)
+                self.assertEqual("No matches.\n", self.cli("search", "demo date").stdout)
+                updated_body = first_body.replace("CSV, JSON, and recovery", "CSV, XML, and recovery")
+                updated_body = updated_body.replace("JSON ingestion", "XML ingestion").replace("implements JSON", "implements XML")
+                updated_body += (
+                    "- Scope correction: CSV+JSON+recovery becomes CSV+XML+recovery because the user says "
+                    "the customer changed its export system. JSON alone is cancelled. CSV evidence remains valid. "
+                    "XML and recovery stay on 0001; no dependencies or other scope are removed.\n"
+                )
+                update = self.workspace / ".hypha" / ".drafts" / "evolution.md"
+                update.write_text("---\nkind: task-update\nid: 0001\n---\n" + updated_body)
+                self.cli("advanced", "publish", str(update))
+                shown = self.cli("show", "0001", "--body").stdout
+                self.assertIn("status: in_progress", shown)
+                self.assertIn("Plan A: CSV fixture checks passed", shown)
+                self.assertIn("JSON alone is cancelled", shown)
+                self.assertIn("XML ingestion and failure recovery", shown)
+                payload = json.loads(self.cli("list", "--type", "task", "--json").stdout)
+                self.assertEqual(["0001"], [node["id"] for node in payload["result"]["nodes"]])
+                self.cli("check")
+            finally:
+                self.workspace = old_workspace
+
+    def test_completion_requires_acceptance_and_evidence(self):
+        self.cli("init")
+        self.cli("task", "create", "verified outcome")
+        started = self.cli("task", "start", "0001").stdout
+        self.assertIn("has no Acceptance criteria", started)
+        missing_acceptance = self.cli("task", "done", "0001", ok=False)
+        self.assertIn("without non-empty Acceptance", missing_acceptance.stderr)
+
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        text = task.read_text(encoding="utf-8").replace(
+            "## Acceptance\n\n", "## Acceptance\n\n- The outcome works.\n\n", 1
+        )
+        task.write_text(text, encoding="utf-8")
+        missing_evidence = self.cli("task", "done", "0001", ok=False)
+        self.assertIn("without non-empty Evidence", missing_evidence.stderr)
+
+        text = task.read_text(encoding="utf-8").replace(
+            "## Evidence\n", "## Evidence\n\n- The verification command passed.\n", 1
+        )
+        task.write_text(text, encoding="utf-8")
+        self.assertIn("Updated 0001: done", self.cli("task", "done", "0001").stdout)
+
+    def test_list_supports_table_filters_tree_and_json(self):
+        self.cli("init")
+        self.cli("task", "create", "umbrella")
+        self.cli("task", "create", "child work", "--parent", "0001")
+        self.cli("task", "start", "0002")
+        draft = self.workspace / ".hypha" / ".drafts" / "overview.md"
+        draft.write_text("---\nkind: know\nclaim_kind: note\naffects: [0002]\n---\n# Overview note\n", encoding="utf-8")
+        self.cli("advanced", "publish", str(draft))
+
+        table = self.cli("list").stdout
+        self.assertIn("TYPE", table)
+        self.assertIn("0002", table)
+        self.assertIn("know/overview", table)
+        filtered = self.cli("list", "--type", "task", "--status", "in_progress").stdout
+        self.assertIn("child work", filtered)
+        self.assertNotIn("umbrella", filtered)
+        self.assertNotIn("Overview note", filtered)
+        tree = self.cli("list", "--tree").stdout
+        self.assertRegex(tree, r"(?m)^0001 \[todo\].*umbrella\n  0002 \[in_progress\].*child work$")
+        payload = json.loads(self.cli("list", "--json").stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual({"total": 3, "task": 2, "knowledge": 1}, payload["result"]["counts"])
+        child = next(node for node in payload["result"]["nodes"] if node["id"] == "0002")
+        self.assertEqual("0001", child["parent"])
+        self.assertIn("created_at", child)
+        self.assertIn("updated_at", child)
+        self.assertEqual("No nodes match the filters.\n", self.cli("list", "--status", "blocked").stdout)
+
+    def test_add_requires_explicit_root_or_parent_and_can_reparent(self):
+        self.cli("init")
+        self.cli("task", "create", "umbrella")
+        result = self.cli("task", "create", "independent", ok=False)
+        self.assertIn("specify --parent ID or --root", result.stderr)
+        duplicate = self.cli("task", "create", "umbrella", "--root", ok=False)
+        self.assertIn("active task with this title already exists: 0001", duplicate.stderr)
+        self.cli("task", "create", "independent", "--root")
+        self.cli("task", "parent", "0002", "0001")
+        self.assertIn("Child tasks: 0002", self.cli("show", "0001").stdout)
+        self.assertIn("parent: 0001", self.cli("show", "0002").stdout)
+
+    def test_parent_progress_is_derived_from_non_dropped_leaves(self):
+        self.cli("init")
+        self.cli("task", "create", "parent")
+        self.document_task("0001")
+        self.cli("task", "progress", "0001", "40")
+        self.cli("task", "create", "first leaf", "--parent", "0001")
+        self.document_task("0002")
+        parent = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        self.assertNotIn("progress:", parent.read_text(encoding="utf-8"))
+        rejected = self.cli("task", "progress", "0001", "90", ok=False)
+        self.assertIn("update progress on its leaves", rejected.stderr)
+        self.cli("task", "progress", "0002", "40")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        self.cli("task", "create", "second leaf", "--parent", "0001")
+        self.document_task("0003")
+        self.cli("task", "progress", "0003", "80")
+        self.assertIn("progress: 60", self.cli("show", "0001").stdout)
+        self.cli("task", "drop", "0003")
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        blocked_done = self.cli("task", "done", "0001", ok=False)
+        self.assertIn("aggregate leaf progress 40%", blocked_done.stderr)
+        self.cli("task", "done", "0002")
+        self.cli("task", "done", "0001")
+        self.assertIn("progress: 100", self.cli("show", "0001").stdout)
+        payload = json.loads(self.cli("list", "--json").stdout)
+        root = next(node for node in payload["result"]["nodes"] if node["id"] == "0001")
+        self.assertEqual(100, root["progress"])
+
+    def test_progress_average_is_independent_of_intermediate_grouping(self):
+        module = runpy.run_path(str(CLI[1]))
+        tasks = {
+            "0001": {"status": "in_progress"},
+            "0002": {"status": "done", "progress": 100, "parent": "0001"},
+            "0003": {"status": "in_progress", "parent": "0001"},
+            "0004": {"status": "done", "progress": 100, "parent": "0003"},
+            "0005": {"status": "todo", "progress": 0, "parent": "0003"},
+            "0006": {"status": "todo", "progress": 0, "parent": "0003"},
+        }
+        progresses = module["task_progresses"](tasks)
+        self.assertEqual(50, progresses["0001"])
+        self.assertEqual(33, progresses["0003"])
+
+    def test_audit_reports_isolated_tasks(self):
+        self.cli("init")
+        self.cli("task", "create", "first")
+        self.cli("task", "create", "second", "--root")
+        output = self.cli("check", "--audit").stdout
+        self.assertIn("0001: isolated task", output)
+        self.assertIn("0002: isolated task", output)
+
+    def test_bootstrap_scans_project_writes_plan_and_applies_reviewed_tasks(self):
+        (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Always use Git.\n", encoding="utf-8")
+        (self.workspace / "src").mkdir()
+        (self.workspace / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
+        (self.workspace / "tests").mkdir()
+        (self.workspace / "tests" / "test_app.py").write_text("def test_run():\n    assert True\n", encoding="utf-8")
+        (self.workspace / "docs").mkdir()
+        (self.workspace / "docs" / "plan.md").write_text("# Plan\n\n- [x] design\n- [ ] release\n", encoding="utf-8")
+
+        plan = json.loads(self.cli("advanced", "bootstrap", "--dry-run").stdout)
+        self.assertFalse((self.workspace / ".hypha").exists())
+        self.assertEqual("hypha-bootstrap-plan", plan["kind"])
+        self.assertEqual(2, plan["schemaVersion"])
+        self.assertFalse(plan["reviewed"])
+        self.assertEqual(1, len(plan["observations"]["completed_items"]))
+        self.assertEqual(1, len(plan["observations"]["open_items"]))
+        self.assertEqual(["done", "todo"], [task["status"] for task in plan["tasks"][1:]])
+        self.assertEqual([100, 0], [task["progress"] for task in plan["tasks"][1:]])
+        self.assertEqual("docs/plan.md", plan["knowledge"][0]["source"])
+        self.assertNotIn("AGENTS.md", {entry["source"] for entry in plan["knowledge"]})
+
+        self.cli("init")
+        output = self.cli("advanced", "bootstrap").stdout
+        self.assertIn("bootstrap-plan.json", output)
+        self.assertIn("AGENT FOLLOW-UP", output)
+        plan_path = self.workspace / ".hypha" / ".drafts" / "bootstrap-plan.json"
+        self.assertTrue(plan_path.is_file())
+        rejected = self.cli("advanced", "bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("reviewed: true", rejected.stderr)
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        plan["reviewed"] = True
+        plan["tasks"][0]["title"] = "Ship the reviewed project"
+        plan["tasks"][0]["acceptance"] = ["All reviewed repository work is represented by evidence-backed leaves."]
+        plan["tasks"][0]["confidence"] = "reviewed"
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        rejected = self.cli("advanced", "bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("knowledge candidates must be reviewed", rejected.stderr)
+        plan["knowledge"][0]["confidence"] = "reviewed"
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        applied = self.cli("advanced", "bootstrap", "--apply", str(plan_path)).stdout
+        self.assertIn("Created 4 nodes", applied)
+        self.assertIn("Child tasks: 0002, 0003", self.cli("show", "0001").stdout)
+        self.assertIn("progress: 50", self.cli("show", "0001").stdout)
+        root = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        self.assertNotIn("progress:", root.read_text(encoding="utf-8"))
+        child = next((self.workspace / ".hypha" / "intent").glob("0002-*.md"))
+        self.assertIn("bootstrap_confidence: explicit-marker", child.read_text(encoding="utf-8"))
+        knowledge = next((self.workspace / ".hypha" / "know" / "bootstrap").glob("*.md"))
+        self.assertIn("claim_kind: sourced", knowledge.read_text(encoding="utf-8"))
+        self.assertTrue((self.workspace / ".hypha" / "src" / "bootstrap" / "docs" / "plan.md").is_file())
+        rejected = self.cli("advanced", "bootstrap", "--apply", str(plan_path), ok=False)
+        self.assertIn("requires an empty task and knowledge graph", rejected.stderr)
+
+    def test_apply_evidence_and_show(self):
+        self.cli("init")
+        self.cli("task", "create", "oauth work")
+        source = self.workspace / "source.md"
+        source.write_text("# Tokens\n\n## Refreshing Tokens\nrotate token safely\n", encoding="utf-8")
+        self.cli("advanced", "import", str(source))
+        draft = self.workspace / ".hypha" / ".drafts" / "oauth.md"
+        draft.write_text("---\nkind: know\nclaim_kind: sourced\nwhen: OAuth refresh fails\ntriggers: [oauth, refresh]\nanchors: [src/source.md#refreshing-tokens]\nevidence:\n  - anchor: src/source.md#refreshing-tokens\n    quote: rotate token safely\naffects: [0001]\n---\n# OAuth token rotation\n\nUse the documented rotation procedure.\n", encoding="utf-8")
+        self.cli("advanced", "publish", str(draft))
+        self.assertIn("No unapplied drafts", self.cli("advanced", "drafts").stdout)
+        draft.write_text(draft.read_text(encoding="utf-8") + "\nchanged after publish\n", encoding="utf-8")
+        self.assertIn("oauth.md", self.cli("advanced", "drafts").stdout)
+        self.assertIn("Knowledge premises: know/oauth", self.cli("show", "0001").stdout)
+        self.assertIn("know/oauth", self.cli("advanced", "explain", "oauth").stdout)
+        self.cli("check")
+
+    def test_search_uses_comma_keywords_and_file_scope(self):
+        self.cli("init")
+        evidence = self.workspace / "auth-source.md"
+        evidence.write_text("Session expiry can require authentication.\n", encoding="utf-8")
+        self.cli("advanced", "import", str(evidence))
+        active = self.workspace / ".hypha" / ".drafts" / "auth.md"
+        active.write_text(
+            "---\nkind: know\nclaim_kind: inference\nstatus: active\n"
+            "when: 用户无法进入系统\ntriggers: [认证, login]\n"
+            "anchors: [src/auth-source.md]\n"
+            "inference: 会话失效可能需要重新认证\n---\n"
+            "# Authentication recovery\n\n会话失效时重新获取凭据。\n",
+            encoding="utf-8",
+        )
+        self.cli("advanced", "publish", str(active))
+        note = self.workspace / ".hypha" / ".drafts" / "private-note.md"
+        note.write_text("---\nkind: know\nclaim_kind: note\n---\n# Note\n\n认证不应被默认搜索。\n", encoding="utf-8")
+        self.cli("advanced", "publish", str(note))
+
+        output = self.cli("search", "登录失败,认证,会话").stdout
+        self.assertIn(".hypha/know/authentication-recovery.md", output)
+        self.assertIn("会话失效时重新获取凭据", output)
+        self.assertNotIn("private-note", output)
+        self.assertIn("authentication-recovery", self.cli("search", "无命中，认证").stdout)
+
+        source = self.workspace / "docs" / "runbook.txt"
+        source.parent.mkdir()
+        source.write_text("Rotate the session cookie after authentication failure.\n", encoding="utf-8")
+        scoped = self.cli("search", "登录失败,session", "--file", "docs", "--limit", "1").stdout
+        self.assertEqual("docs/runbook.txt:1: Rotate the session cookie after authentication failure.\n", scoped)
+        rejected = self.cli("search", "session", "--file", "../outside", ok=False)
+        self.assertIn("must be inside the workspace", rejected.stderr)
+        empty = self.cli("search", ",，,", ok=False)
+        self.assertIn("requires at least one non-empty keyword", empty.stderr)
+
+    def test_agreement_draft_publishes_without_duplicating_agents(self):
+        self.cli("init")
+        self.assertFalse((self.workspace / ".hypha" / "agreements").exists())
+        self.cli("task", "create", "Long migration")
+        draft = self.workspace / ".hypha" / ".drafts" / "offline-rationale.md"
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: rationale\nscope: project\n"
+            "authority: user_explicit\nstatus: active\nwhen: Changing deployment or runtime architecture\n"
+            "triggers: [offline, deployment]\nagreement_quote: The product must work without network access.\n"
+            "affects: [0001]\nreview_when: The supported environment gains guaranteed network access\n---\n"
+            "# Offline architecture rationale\n\nOffline operation is a product boundary, not merely a deployment convenience.\n",
+            encoding="utf-8",
+        )
+        text = draft.read_text(encoding="utf-8")
+        self.assertIn("claim_kind: agreement", text)
+        self.assertIn("knowledge_kind: rationale", text)
+        self.assertEqual(0, json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)["result"]["counts"]["knowledge"])
+        self.cli("advanced", "publish", str(draft))
+        payload = json.loads(self.cli("list", "--type", "knowledge", "--json").stdout)
+        self.assertEqual("user_explicit", payload["result"]["nodes"][0]["authority"])
+        self.assertEqual("project", payload["result"]["nodes"][0]["scope"])
+
+        (self.workspace / "AGENTS.md").write_text("# Rules\n\n- Use Git for commits.\n", encoding="utf-8")
+        duplicate = self.workspace / ".hypha" / ".drafts" / "git-rule.md"
+        duplicate.write_text(
+            "---\nkind: know\nclaim_kind: agreement\nknowledge_kind: constraint\nscope: project\n"
+            "authority: user_confirmed\nwhen: Committing\ntriggers: [git]\n"
+            "agreement_quote: Use Git for commits.\n---\n# Git rule\n\nDuplicate operating rule.\n",
+            encoding="utf-8",
+        )
+        rejected = self.cli("advanced", "publish", str(duplicate), ok=False)
+        self.assertIn("already exists in AGENTS.md", rejected.stderr)
+
+    def test_invalid_task_body_intent_link_is_rejected(self):
+        self.cli("init")
+        self.cli("task", "create", "task")
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        task.write_text(task.read_text(encoding="utf-8") + "\n[[intent/9999-missing]]\n", encoding="utf-8")
+        result = self.cli("check", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dangling task body link", result.stdout)
+
+    def test_snapshots_replay_shape(self):
+        self.cli("init")
+        self.cli("task", "create", "one")
+        event_file = next((self.workspace / ".hypha" / "snapshots").glob("*.jsonl"))
+        event = json.loads(event_file.read_text(encoding="utf-8").splitlines()[0])
+        self.assertIn("recorded_at", event)
+        fields = {json.loads(line)["field"] for line in event_file.read_text(encoding="utf-8").splitlines()}
+        self.assertIn("body_hash", fields)
+
+    def test_node_observation_times_use_first_and_last_node_events(self):
+        module = runpy.run_path(str(CLI[1]))
+        events = [
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T02:00:00Z"},
+            {"kind": "session", "id": "workspace", "recorded_at": "2026-08-29T02:30:00Z"},
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T01:00:00Z"},
+            {"kind": "intent", "id": "0001", "recorded_at": "2026-08-29T03:00:00Z"},
+        ]
+        self.assertEqual(module["node_observation_times"](events), {
+            ("intent", "0001"): {
+                "created_at": "2026-08-29T01:00:00Z",
+                "updated_at": "2026-08-29T03:00:00Z",
+            },
+        })
+
+    def test_close_view_and_unmanaged_warning(self):
+        self.cli("init")
+        self.cli("task", "create", "deliverable")
+        self.document_task("0001")
+        self.cli("task", "done", "0001")
+        self.cli("task", "create", "follow up", "--parent", "0001")
+        prepared, finalized = self.finalize_context()
+        self.assertIn("Context remains open", prepared.stdout)
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized.stdout)
+        view = Path(self.cli("view", "--mode", "tasks").stdout.strip())
+        html = view.read_text(encoding="utf-8")
+        self.assertIn("Tasks", html)
+        self.assertIn("Knowledge", html)
+        self.assertIn("Hypha Mycelial Canvas", html)
+        self.assertIn("Mycelium", html)
+        self.assertIn('"initialMode": "tasks"', html)
+        self.assertIn('"schemaVersion": 1', html)
+        self.assertIn('"diagnostics": {"redlinks"', html)
+        self.assertIn('"kind": "parent"', html)
+        self.assertIn('"progress": null', html)
+        self.assertIn('"status": "in_progress"', html)
+        self.assertIn('"path": "intent/', html)
+        self.assertIn('"summary":', html)
+        self.assertIn('"markdown":', html)
+        self.assertIn('"metadata":', html)
+        self.assertIn('"generatedAt":', html)
+        self.assertIn('"created_at":', html)
+        self.assertIn('"updated_at":', html)
+        task = next((self.workspace / ".hypha" / "intent").glob("0001-*.md"))
+        task.write_text(task.read_text(encoding="utf-8").replace("# deliverable", "# deliverable changed"), encoding="utf-8")
+        self.assertIn("unmanaged writes to formal nodes", self.cli("check").stdout)
+
+    def test_open_view_uses_linux_xdg_open_without_waiting(self):
+        module = runpy.run_path(str(CLI[1]))
+        with mock.patch.object(module["subprocess"], "Popen") as popen:
+            module["open_view"](Path("/tmp/hypha-view.html"))
+        popen.assert_called_once_with(
+            ["xdg-open", "/tmp/hypha-view.html"],
+            stdout=module["subprocess"].DEVNULL,
+            stderr=module["subprocess"].DEVNULL,
+            start_new_session=True,
+        )
+
+    def test_apply_requires_explicit_publishable_kind(self):
+        self.cli("init")
+        self.cli("task", "create", "recover flow")
+        drafts = self.workspace / ".hypha" / ".drafts"
+        handoff = drafts / "handoff.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Continue task 0001\n", encoding="utf-8")
+        result = self.cli("advanced", "publish", str(handoff), ok=False)
+        self.assertIn("cannot be published with apply", result.stderr)
+        partial = drafts / "partial.md"
+        partial.write_text("---\nkind: task-update\ntask: 0001\n---\n# Partial\n", encoding="utf-8")
+        result = self.cli("advanced", "publish", str(partial), ok=False)
+        self.assertIn("requires id", result.stderr)
+        unknown = drafts / "unknown.md"
+        unknown.write_text("---\nclaim_kind: note\n---\n# Unknown\n", encoding="utf-8")
+        result = self.cli("advanced", "publish", str(unknown), ok=False)
+        self.assertIn("must explicitly use kind: know", result.stderr)
+        self.assertFalse(list((self.workspace / ".hypha" / "know").glob("*.md")))
+        update = drafts / "task-update.md"
+        update.write_text("---\nkind: task-update\nid: 0001\n---\n# Recovered flow\n\n## 验收\nrecovered\n", encoding="utf-8")
+        self.cli("advanced", "publish", str(update))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("Recovered flow", shown)
+        self.assertIn("status: todo", shown)
+
+    def test_frontmatter_round_trip_preserves_quotes_and_lists(self):
+        self.cli("init")
+        draft = self.workspace / ".hypha" / ".drafts" / "quote.md"
+        inference = "Provider A's evidence: \"rotate, then retry\""
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: inference\nwhen: Choosing a provider\nanchors: [src/provider.md#decision]\ninference: [\""
+            + inference.replace('"', '\\"')
+            + "\"]\n---\n# Provider decision\n",
+            encoding="utf-8",
+        )
+        self.cli("advanced", "publish", str(draft))
+        published = next((self.workspace / ".hypha" / "know").glob("*.md"))
+        module = runpy.run_path(str(CLI[1]))
+        self.assertEqual([inference], module["read_node"](published)["inference"])
+
+    def test_recovery_hints_and_non_git_lint_are_quiet(self):
+        self.cli("init")
+        self.assertNotIn(".drafts/", (self.workspace / ".hypha" / ".gitignore").read_text(encoding="utf-8"))
+        self.cli("task", "create", "continue flow")
+        self.cli("task", "start", "0001")
+        self.cli("task", "progress", "0001", "40")
+        draft = self.workspace / ".hypha" / ".drafts" / "resume.md"
+        draft.write_text("---\nkind: handoff\n---\n# Resume OAuth flow\n", encoding="utf-8")
+        boot = self.cli("context", "resume", "oauth")
+        self.assertIn("previous session may not have been closed", boot.stdout)
+        self.assertIn("Unapplied drafts: 1", boot.stdout)
+        ready_output = self.cli("list", "--type", "task", "--ready").stdout
+        self.assertEqual("No nodes match the filters.\n", ready_output)
+        self.assertIn("kind=handoff", self.cli("advanced", "drafts").stdout)
+        self.assertIn("progress: 40", self.cli("show", "0001").stdout)
+        lint = self.cli("check", "--audit")
+        self.assertEqual("", lint.stderr)
+        self.finalize_context()
+        self.assertNotIn("previous session may not have been closed", self.cli("context", "resume", "oauth").stdout)
+
+    def test_dismiss_suppresses_repeated_candidate(self):
+        self.cli("init")
+        self.cli("task", "create", "OAuth provider")
+        draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
+        draft.write_text("---\nkind: know\nclaim_kind: inference\nwhen: Choosing OAuth provider\nanchors: [src/provider.md]\ninference: provider evidence\ntriggers: [oauth, provider]\n---\n# OAuth provider decision\n", encoding="utf-8")
+        self.cli("advanced", "publish", str(draft))
+        output = self.cli("check", "--audit").stdout
+        match = re.search(r"\[([0-9a-f]{12})\] 0001", output)
+        self.assertIsNotNone(match)
+        self.cli("advanced", "dismiss", match.group(1))
+        self.assertNotIn(match.group(1), self.cli("check", "--audit").stdout)
+
+    def test_semantic_follow_ups_and_resolution_guards(self):
+        self.cli("init")
+        self.cli("task", "create", "OAuth provider")
+        source = self.workspace / "provider.md"
+        source.write_text("# Provider\n\nUse short-lived access tokens.\n", encoding="utf-8")
+        imported = self.cli("advanced", "import", str(source)).stdout
+        self.assertIn("No knowledge was created", imported)
+
+        draft = self.workspace / ".hypha" / ".drafts" / "provider.md"
+        draft.write_text(
+            "---\nkind: know\nclaim_kind: inference\nwhen: Choosing OAuth provider\n"
+            "anchors: [src/provider.md]\ninference: provider evidence\ntriggers: [oauth, provider]\n---\n"
+            "# OAuth provider decision\n",
+            encoding="utf-8",
+        )
+        self.cli("advanced", "publish", str(draft))
+        audit = self.cli("check", "--audit").stdout
+        self.assertIn("AGENT FOLLOW-UP", audit)
+        candidate = re.search(r"\[([0-9a-f]{12})\] 0001", audit).group(1)
+        deferred = self.cli("advanced", "defer", candidate).stdout
+        self.assertIn("remain visible in later audits", deferred)
+        deferred_audit = self.cli("check", "--audit").stdout
+        self.assertIn(candidate, deferred_audit)
+        self.assertIn("[deferred]", deferred_audit)
+        self.assertNotIn("AGENT FOLLOW-UP", deferred_audit)
+        rejected = self.cli("advanced", "dismiss", "deadbeefdead", ok=False)
+        self.assertIn("not present in the current check --audit output", rejected.stderr)
+
+    def test_session_completion_scope_and_migrate_protocol(self):
+        self.cli("init")
+        self.cli("task", "create", "deliver")
+        self.cli("context", "resume")
+        self.document_task("0001")
+        self.cli("task", "done", "0001")
+        prepared, finalized = self.finalize_context()
+        self.assertIn("Context remains open", prepared.stdout)
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized.stdout)
+        self.assertNotIn("previous session may not have been closed", self.cli("context", "resume").stdout)
+        self.assertIn("No legacy agreements require migration", self.cli("advanced", "migrate").stdout)
+
+        agreements = self.workspace / ".hypha" / "agreements"
+        agreements.mkdir()
+        (agreements / "legacy.md").write_text("# Legacy rule\n", encoding="utf-8")
+        migration = self.cli("advanced", "migrate").stdout
+        self.assertIn("AGENT FOLLOW-UP", migration)
+        self.assertIn("legacy file: agreements/legacy.md", migration)
+
+    def test_route_explains_components_and_trigger_overlap_warns_only(self):
+        self.cli("init")
+        self.cli("task", "create", "OAuth work")
+        for name in ("first", "second"):
+            draft = self.workspace / ".hypha" / ".drafts" / f"{name}.md"
+            draft.write_text(
+                f"---\nkind: know\nclaim_kind: inference\nwhen: OAuth fails\n"
+                f"anchors: [src/{name}.md]\ninference: x\ntriggers: [oauth]\n---\n# {name} OAuth\n",
+                encoding="utf-8",
+            )
+            (self.workspace / ".hypha" / "src" / f"{name}.md").write_text("evidence\n", encoding="utf-8")
+            self.cli("advanced", "publish", str(draft))
+        routed = self.cli("advanced", "explain", "oauth").stdout
+        self.assertIn("trigger_hits=oauth", routed)
+        self.assertIn("title_hits=oauth", routed)
+        self.assertNotIn("Shared trigger candidate", self.cli("check").stdout)
+        lint = self.cli("check", "--verbose").stdout
+        self.assertIn("Info: Shared trigger candidate", lint)
+        self.assertIn("Lint passed", lint)
+
+    def test_command_surface_is_unambiguous_and_progress_starts_work(self):
+        self.cli("init")
+        self.cli("task", "create", "implementation")
+        progress = self.cli("task", "progress", "0001", "100").stdout
+        self.assertIn("Updated 0001: in_progress", progress)
+        self.assertIn("100% represents leaf work progress only", progress)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+
+        help_text = self.cli("--help").stdout
+        for command in ("search", "advanced", "list --type task --ready", "context resume"):
+            self.assertIn(command, help_text)
+        for removed in ("ask", "why", "next", "resolve", "sync"):
+            self.assertNotRegex(help_text, rf"(?m)^    {removed}\s")
+        rejected = subprocess.run(
+            CLI + ["--workspace", str(self.workspace), "--global", "add", "global task"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("invalid choice", rejected.stderr)
+        self.assertNotIn("replaced", rejected.stderr)
+
+    def test_new_direct_creation_edit_and_source_rollback(self):
+        self.cli("init")
+        created = self.cli("task", "create", "Offline delivery", "--acceptance", "Works offline").stdout
+        self.assertIn("Created task 0001", created)
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        self.assertIn("- [ ] Works offline", task.read_text(encoding="utf-8"))
+        evidence = self.workspace / "evidence.md"
+        evidence.write_text("- `python3 verify.py` passed.\n", encoding="utf-8")
+        self.cli("task", "edit", "0001", "--section", "Evidence", "--body-file", str(evidence))
+        shown = self.cli("show", "0001").stdout
+        self.assertIn("Works offline", shown)
+        self.assertIn("python3 verify.py", shown)
+
+        source = self.workspace / "requirements.md"
+        source.write_text("The product must work without network access.\n", encoding="utf-8")
+        failed = self.cli("knowledge", "create", "Offline policy", "--origin", "repository",
+                          "--source", str(source), "--quote", "Missing quote", "--when", "Deploying", ok=False)
+        self.assertIn("quote is not present", failed.stderr)
+        self.assertEqual([], list((self.workspace / ".hypha/know").glob("*.md")))
+        self.assertEqual([], list((self.workspace / ".hypha/src").glob("*.md")))
+        self.assertEqual([], list((self.workspace / ".hypha/.drafts").glob("knowledge-*.md")))
+        self.cli("knowledge", "create", "Offline policy", "--origin", "repository", "--source", str(source),
+                 "--quote", "The product must work without network access.", "--when", "Deploying")
+        duplicate = self.cli("knowledge", "create", "Offline policy", "--origin", "user",
+                             "--quote", "Keep it offline.", "--when", "Deploying", ok=False)
+        self.assertIn("knowledge edit know/offline-policy", duplicate.stderr)
+
+    def test_workspace_discovery_json_import_and_unknown_command(self):
+        self.cli("init")
+        self.cli("task", "create", "Root")
+        nested = self.workspace / "a/b"
+        nested.mkdir(parents=True)
+        discovered = subprocess.run(CLI + ["list", "--type", "task"], cwd=nested, text=True, capture_output=True, check=False)
+        self.assertEqual(0, discovered.returncode, discovered.stderr)
+        self.assertIn("Root", discovered.stdout)
+        payload = json.loads(subprocess.run(CLI + ["show", "0001", "--json"], cwd=nested,
+                                            text=True, capture_output=True, check=False).stdout)
+        self.assertTrue(payload["ok"])
+        missing = json.loads(subprocess.run(CLI + ["show", "9999", "--json"], cwd=nested,
+                                            text=True, capture_output=True, check=False).stdout)
+        self.assertEqual("invalid_request", missing["error"]["code"])
+        material = self.workspace / "contract.md"
+        material.write_text("Contract material.\n", encoding="utf-8")
+        imported = self.cli("advanced", "import", str(material)).stdout
+        self.assertIn("No knowledge was created", imported)
+        legacy = subprocess.run(CLI + ["--workspace", str(self.workspace), "ready"], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, legacy.returncode)
+        self.assertIn("invalid choice", legacy.stderr)
+        self.assertNotIn("replaced", legacy.stderr)
+
+    def test_launcher_installs_and_runs_across_directories(self):
+        install_dir = self.workspace / "bin"
+        installer = ROOT / "skills/hypha-governance/install.sh"
+        result = subprocess.run([str(installer), str(install_dir)], text=True, capture_output=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        project = self.workspace / "project"
+        project.mkdir()
+        initialized = subprocess.run([str(install_dir / "hypha"), "init"], cwd=project, text=True, capture_output=True, check=False)
+        self.assertEqual(0, initialized.returncode, initialized.stderr)
+        self.assertTrue((project / ".hypha").is_dir())
+        collision = install_dir / "other"
+        collision.mkdir()
+        (collision / "hypha").write_text("different", encoding="utf-8")
+        refused = subprocess.run([str(installer), str(collision)], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, refused.returncode)
+        self.assertEqual("different", (collision / "hypha").read_text(encoding="utf-8"))
+
+    def test_close_preparation_is_non_closing_and_pending_finalize_fails(self):
+        self.cli("init")
+        self.cli("task", "create", "Continue delivery", "--acceptance", "Result is delivered")
+        self.cli("task", "start", "0001")
+        before = sum(1 for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl")
+                     for line in path.read_text(encoding="utf-8").splitlines() if '"to":"close"' in line)
+        prepared = self.cli("context", "close")
+        self.assertIn("Handoff preparation required. Context remains open.", prepared.stdout)
+        self.assertNotIn("Session closed", prepared.stdout)
+        path = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(["0001"], draft["tasks"])
+        self.assertEqual("0001", draft["resume_task"])
+        draft["knowledge_review"]["note"] = "Human text survives repeated preparation."
+        path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        self.cli("context", "close")
+        self.assertEqual("Human text survives repeated preparation.", json.loads(path.read_text())["knowledge_review"]["note"])
+        self.assertIn("previous handoff was not finalized", self.cli("context", "resume").stdout)
+        json_prepared = json.loads(self.cli("context", "close", "--json").stdout)
+        self.assertTrue(json_prepared["ok"])
+        self.assertIn("Context remains open", json_prepared["result"]["output"])
+        failed = self.cli("context", "close", "--finalize", ok=False)
+        self.assertIn("knowledge_review.status is still pending", failed.stderr)
+        self.assertIn("Task 0001 needs a non-empty Next Step", failed.stderr)
+        json_failed = self.cli("context", "close", "--finalize", "--json", ok=False)
+        self.assertEqual("invalid_request", json.loads(json_failed.stdout)["error"]["code"])
+        after = sum(1 for event in (self.workspace / ".hypha/snapshots").glob("*.jsonl")
+                    for line in event.read_text().splitlines() if '"to":"close"' in line)
+        self.assertEqual(before, after)
+
+    def test_finalize_records_final_versions_references_and_is_idempotent(self):
+        self.cli("init")
+        self.cli("task", "create", "Active work", "--acceptance", "Feature works")
+        self.cli("task", "start", "0001")
+        self.cli("context", "close")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nRun the remaining fixture.\n", encoding="utf-8")
+        handoff = self.workspace / ".hypha/.drafts/recovery.md"
+        handoff.write_text("---\nkind: handoff\n---\n# Cursor\n\nResume fixture 8.\n", encoding="utf-8")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No new durable decision was made."}
+        draft["recovery_review"] = {"status": "saved", "references": [".drafts/recovery.md"], "note": ""}
+        preparation.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        first = self.cli("context", "close", "--finalize")
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", first.stdout)
+        self.assertIn("not the task or the current work", first.stdout)
+        self.assertNotIn("Context closed", first.stdout)
+        self.assertIn("status: in_progress", self.cli("show", "0001").stdout)
+        self.assertIn("## Next Step\n\nRun the remaining fixture.", task.read_text(encoding="utf-8"))
+        record = json.loads(next((self.workspace / ".hypha/handoffs").glob("*.json")).read_text())
+        self.assertEqual(hashlib.sha256(task.read_bytes()).hexdigest(), record["content_hashes"]["tasks"]["0001"])
+        events = [json.loads(line) for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl") for line in path.read_text().splitlines()]
+        closes = [event for event in events if event.get("handoff_id") == record["handoff_id"]]
+        self.assertEqual(1, len(closes))
+        self.cli("context", "close", "--finalize")
+        events = [json.loads(line) for path in (self.workspace / ".hypha/snapshots").glob("*.jsonl") for line in path.read_text().splitlines()]
+        self.assertEqual(1, len([event for event in events if event.get("handoff_id") == record["handoff_id"]]))
+        handoff.unlink()
+        self.assertIn("handoff reference disappeared", self.cli("context", "resume").stdout)
+
+    def test_task_free_and_multi_task_handoff_validation(self):
+        self.cli("init")
+        self.cli("context", "close")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "Knowledge-only session was reviewed."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "No execution state exists."}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        self.assertIn("no_task_reason is required", self.cli("context", "close", "--finalize", ok=False).stderr)
+        draft["no_task_reason"] = "This session only saved durable knowledge."
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        self.cli("context", "close", "--finalize")
+
+        self.cli("task", "create", "First", "--acceptance", "First works")
+        self.cli("task", "create", "Second", "--root", "--acceptance", "Second works")
+        for task_id in ("0001", "0002"):
+            self.cli("task", "start", task_id)
+            task = next((self.workspace / ".hypha/intent").glob(f"{task_id}-*.md"))
+            task.write_text(task.read_text() + "\n## Next Step\n\nContinue this task.\n", encoding="utf-8")
+        self.cli("context", "close", "--task", "0001", "--task", "0002")
+        draft = json.loads(preparation.read_text())
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "Reviewed."}
+        draft["recovery_review"] = {"status": "saved", "references": ["missing.md"], "note": ""}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        failed = self.cli("context", "close", "--finalize", ok=False)
+        self.assertIn("Multiple active handoff tasks require resume_task", failed.stderr)
+        self.assertIn("Invalid or missing recovery_review reference", failed.stderr)
+
+    def test_blocked_and_completed_task_handoffs_succeed(self):
+        self.cli("init")
+        self.cli("task", "create", "Blocked work", "--acceptance", "Dependency becomes available")
+        self.cli("task", "block", "0001", "Waiting for the upstream fixture")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nAfter the fixture arrives, rerun verification.\n", encoding="utf-8")
+        self.finalize_context()
+
+        self.cli("task", "create", "Completed work", "--root", "--acceptance", "Result is verified")
+        self.document_task("0002")
+        self.cli("task", "done", "0002")
+        self.cli("context", "close", "--task", "0002")
+        preparation = self.workspace / ".hypha/.drafts/context-close.json"
+        draft = json.loads(preparation.read_text())
+        draft["resume_task"] = None
+        draft["knowledge_review"] = {"status": "not_needed", "references": [], "note": "No durable change."}
+        draft["recovery_review"] = {"status": "not_needed", "references": [], "note": "All selected work ended."}
+        preparation.write_text(json.dumps(draft), encoding="utf-8")
+        finalized = self.cli("context", "close", "--finalize").stdout
+        self.assertIn("Handoff recorded. Selected tasks keep their current status.", finalized)
+        self.assertIn("not the task or the current work", finalized)
+
+    def test_resume_prefers_completed_handoff_and_reports_changes(self):
+        self.cli("init")
+        self.cli("task", "create", "Resume target", "--acceptance", "Target works")
+        self.cli("task", "start", "0001")
+        task = next((self.workspace / ".hypha/intent").glob("0001-*.md"))
+        task.write_text(task.read_text() + "\n## Next Step\n\nContinue from the saved cursor.\n", encoding="utf-8")
+        self.finalize_context()
+        resumed = self.cli("context", "resume").stdout
+        self.assertIn("Latest completed handoff", resumed)
+        self.assertIn("Resume task: 0001", resumed)
+        self.assertIn("Current Next Step: Continue from the saved cursor", resumed)
+        task.write_text(task.read_text() + "\nChanged after handoff.\n", encoding="utf-8")
+        changed = self.cli("context", "resume", "different topic").stdout
+        self.assertIn("Handoff supplement", changed)
+        self.assertIn("changed since handoff", changed)
+
+if __name__ == "__main__":
+    unittest.main()

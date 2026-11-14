@@ -3,7 +3,7 @@
 From the skill directory, build once:
 
 ```bash
-cargo build --locked --release
+./build.sh
 ./target/release/wayfire-computer-use doctor
 ./target/release/wayfire-computer-use start
 ```
@@ -62,27 +62,5 @@ Focus is a management command, not an additional standard action type. It does n
 Runtime: the compiled Rust executable, libpipewire-0.3 and its SPA support, libxkbcommon/keymap data, the Linux C/system libraries linked by the build, a Wayfire session exposing the virtual-pointer/keyboard protocols, D-Bus, a notification service, PipeWire and a Screenshot/ScreenCast-capable desktop portal. Window-management commands additionally use Wayfire IPC as described above. The session's PipeWire policy manager must connect capture streams. Python, pip, GStreamer, notify-send, wayland-info, wlrctl, a compiler and a separate C helper are not runtime requirements.
 
 Build: a compatible Rust/Cargo toolchain, a C compiler for native binding build steps, pkg-config, PipeWire/SPA and xkbcommon development files, and libclang for generated PipeWire bindings. Cargo.lock pins the dependency resolution. Binaries target the build machine's Linux ABI; this is not a promise of a universally static executable. Check `ldd target/release/wayfire-computer-use` when packaging.
-
-Development tests only: requirements-dev.txt installs Python fixture/validation packages. The isolated integration harness additionally needs the distribution Wayfire and Portal executables, dbus-run-session, PipeWire and WirePlumber. Its paths currently match the tested Arch Linux installation.
-
-## Validation commands
-
-```bash
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked
-```
-
-From the repository root, optional isolated integration tests use the repository interpreter:
-
-```bash
-.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --input-test --session-test
-.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --session-test --launcher-boundary-test
-.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --session-test --toplevel-test --launcher-boundary-test
-.venv/bin/python3 skills/wayfire-computer-use/tests/probe_control_regressions.py
-.venv/bin/python3 skills/wayfire-computer-use/tests/probe_headless.py
-```
-
-The private integration test starts its own D-Bus, headless Wayfire, PipeWire, policy-only WirePlumber, notification sink, permission store and wlr Portal. It does not restart or connect to the current desktop's Portal services. Logs/screenshots remain in its reported /tmp/wf-rust-isolated-* directory for inspection; remove that directory after review.
 
 `probe-capture --output NAME --path FILE [--auto-select]` is a diagnostic capture-only command. Its explicit selector automation can target a confirmed named output, including a headless test output; ordinary sessions use the same explicit-selection and geometry checks, with the selected transform/scale limits above. It acquires the per-display lock and closes its Portal session on exit.
