@@ -1,3 +1,5 @@
+> Historical design plan. The proposed nested directory structure below has been superseded by the consolidated skill at `skills/wayfire-computer-use`. The user approved the current initial-release scope; pending full-plan acceptance items remain documented in IMPLEMENTATION.md rather than being represented as completed.
+
 # Wayfire Computer Use Skill 实现计划
 
 日期：2026-11-14  

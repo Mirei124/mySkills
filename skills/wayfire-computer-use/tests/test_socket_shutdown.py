@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 import session
 
 class SocketShutdownTests(unittest.IsolatedAsyncioTestCase):

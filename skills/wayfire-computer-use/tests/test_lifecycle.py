@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock,patch
 from types import SimpleNamespace
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from session import Session
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):

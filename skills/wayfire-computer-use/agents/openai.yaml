@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wayfire Computer Use"
+  short_description: "Control Wayfire applications through screenshots and input"
+  default_prompt: "Use the Wayfire computer-use CLI to inspect the desktop, carry out the authorized task, verify each screenshot, and stop the session."

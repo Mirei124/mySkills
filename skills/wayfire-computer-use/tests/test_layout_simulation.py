@@ -4,7 +4,7 @@ from fractions import Fraction
 from pathlib import Path
 import sys
 import unittest
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from input_backend import Input
 from outputs import parse_outputs,verify_stream,MappingError
 

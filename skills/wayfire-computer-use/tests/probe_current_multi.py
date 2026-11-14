@@ -2,7 +2,7 @@
 import asyncio
 from pathlib import Path
 import sys
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 import session
 from portal import Portal
 from selector import selectors

@@ -15,6 +15,9 @@ class Portal:
         self.bus = await MessageBus(bus_type=BusType.SESSION, negotiate_unix_fd=True).connect()
         return self
 
+    async def call(self, message, timeout=5):
+        return await asyncio.wait_for(self.bus.call(message),timeout)
+
     async def request(self, interface, method, signature, body, timeout=60):
         token = 'wf_' + secrets.token_hex(12)
         body[-1]['handle_token'] = Variant('s', token)
@@ -25,12 +28,12 @@ class Portal:
             if message.message_type == MessageType.SIGNAL and message.path == path and message.interface == 'org.freedesktop.portal.Request' and message.member == 'Response' and not future.done():
                 future.set_result(message.body)
         rule = f"type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{path}'"
-        match = await self.bus.call(Message(destination='org.freedesktop.DBus', path='/org/freedesktop/DBus', interface='org.freedesktop.DBus', member='AddMatch', signature='s', body=[rule]))
+        match = await self.call(Message(destination='org.freedesktop.DBus', path='/org/freedesktop/DBus', interface='org.freedesktop.DBus', member='AddMatch', signature='s', body=[rule]))
         if match.message_type == MessageType.ERROR:
             raise PortalError('PORTAL_SIGNAL_SUBSCRIPTION_FAILED')
         self.bus.add_message_handler(receive)
         try:
-            reply = await self.bus.call(Message(destination=self.destination, path=self.path, interface=interface, member=method, signature=signature, body=body))
+            reply = await self.call(Message(destination=self.destination, path=self.path, interface=interface, member=method, signature=signature, body=body),timeout)
             if reply.message_type == MessageType.ERROR:
                 raise PortalError(f'PORTAL_UNAVAILABLE: {reply.error_name}')
             if reply.body != [path]:
@@ -44,7 +47,7 @@ class Portal:
             raise
         finally:
             self.bus.remove_message_handler(receive)
-            await self.bus.call(Message(destination='org.freedesktop.DBus', path='/org/freedesktop/DBus', interface='org.freedesktop.DBus', member='RemoveMatch', signature='s', body=[rule]))
+            await self.call(Message(destination='org.freedesktop.DBus', path='/org/freedesktop/DBus', interface='org.freedesktop.DBus', member='RemoveMatch', signature='s', body=[rule]))
 
     async def screenshot(self):
         return await self.request('org.freedesktop.portal.Screenshot', 'Screenshot', 'sa{sv}', ['', {'interactive': Variant('b', False)}])
@@ -56,7 +59,13 @@ class Portal:
         """Ask the user to select exactly one monitor and retain its portal session."""
         from outputs import parse_outputs, select_output, verify_stream
         process = await asyncio.create_subprocess_exec('wayland-info', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await asyncio.wait_for(process.communicate(), 8)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), 8)
+        except BaseException:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise
         if process.returncode:
             raise PortalError('OUTPUT_DISCOVERY_FAILED')
         outputs=parse_outputs(stdout.decode())
@@ -78,7 +87,7 @@ class Portal:
             if len(started.get('streams', [])) != 1:
                 raise PortalError('OUTPUT_MAPPING_UNAVAILABLE')
             verify_stream(self.output, started['streams'][0][1])
-            reply = await self.bus.call(Message(destination=self.destination, path=self.path, interface='org.freedesktop.portal.ScreenCast', member='OpenPipeWireRemote', signature='oa{sv}', body=[self.session, {}]))
+            reply = await self.call(Message(destination=self.destination, path=self.path, interface='org.freedesktop.portal.ScreenCast', member='OpenPipeWireRemote', signature='oa{sv}', body=[self.session, {}]))
             if reply.message_type == MessageType.ERROR or not reply.unix_fds:
                 raise PortalError('PIPEWIRE_REMOTE_UNAVAILABLE')
             self.remote_fd = reply.unix_fds[reply.body[0]]

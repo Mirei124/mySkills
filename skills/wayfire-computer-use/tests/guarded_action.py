@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 import sys
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from fixture_guard import require_fixture
 from session import send,runtime
 

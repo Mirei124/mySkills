@@ -97,8 +97,10 @@ class Session:
     async def outputs(self):
         process=await asyncio.create_subprocess_exec('wayland-info',stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
         try: data,_=await asyncio.wait_for(process.communicate(),5)
-        except asyncio.TimeoutError:
-            process.kill();await process.wait();raise RuntimeError('OUTPUT_DISCOVERY_FAILED')
+        except BaseException:
+            if process.returncode is None:
+                process.kill();await process.wait()
+            raise
         if process.returncode: raise RuntimeError('OUTPUT_DISCOVERY_FAILED')
         return parse_outputs(data.decode())
 
@@ -282,11 +284,21 @@ async def start(output,auto_select=False):
     if output: command+=['--output',output]
     if auto_select: command+=['--auto-select-single-output']
     owner=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-    for _ in range(750):
-        if (root/'ready.json').exists(): return json.loads((root/'ready.json').read_text())
-        await asyncio.sleep(.1)
-    owner.terminate()
-    try: await asyncio.to_thread(owner.wait,8)
-    except subprocess.TimeoutExpired:
-        owner.kill();await asyncio.to_thread(owner.wait)
-    return {'status':'error','code':'SESSION_START_TIMEOUT','action_executed':False}
+    delivered=False
+    try:
+        for _ in range(750):
+            if (root/'ready.json').exists():
+                result=json.loads((root/'ready.json').read_text())
+                delivered=result.get('status')=='ready'
+                return result
+            if owner.poll() is not None:
+                return {'status':'error','code':'SESSION_START_FAILED','action_executed':False}
+            await asyncio.sleep(.1)
+        return {'status':'error','code':'SESSION_START_TIMEOUT','action_executed':False}
+    finally:
+        if not delivered:
+            if owner.poll() is None:
+                owner.terminate()
+            try: await asyncio.to_thread(owner.wait,8)
+            except subprocess.TimeoutExpired:
+                owner.kill();await asyncio.to_thread(owner.wait)

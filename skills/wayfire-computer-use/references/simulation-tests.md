@@ -3,7 +3,7 @@
 Run the offline suite from the repository root:
 
 ```bash
-.venv/bin/python3 -m unittest discover -s skills/wf-computer-use/tests
+.venv/bin/python3 -m unittest discover -s skills/wayfire-computer-use/tests
 ```
 
 The suite includes 288 pointer-contract cases spanning three output origins, four scale factors (1, 1.25, 1.5, 2), eight rotations/reflections, and three image positions. The fake compositor assumes display-oriented frames and output-bound normalized pointer semantics. These cases test the dispatcher contract, not whether a real compositor honors that binding or a portal supplies correctly oriented frames.
@@ -13,7 +13,7 @@ Output parsing now preserves wl_output integer scale and transform, so layout in
 An opt-in integration probe starts the distribution Wayfire binary with two headless outputs, pixman rendering, a private runtime directory, an explicit minimal configuration, no plugins, and no connection to the live desktop/session bus:
 
 ```bash
-.venv/bin/python3 skills/wf-computer-use/tests/probe_headless.py --result /tmp/wf-headless-result.json
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_headless.py --result /tmp/wf-headless-result.json
 ```
 
 It bypasses user session-launch wrappers, verifies output geometry and rotation, then terminates the isolated process and removes its runtime directory. It does not change the current desktop configuration. Verified on Wayfire 0.12.0 / wlroots 0.20.2:

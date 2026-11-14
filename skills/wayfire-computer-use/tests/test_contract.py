@@ -1,7 +1,7 @@
 import importlib.util
 import pathlib
 import unittest
-spec = importlib.util.spec_from_file_location('computer', pathlib.Path(__file__).parents[1] / 'wayfire-computer-use/scripts/computer.py')
+spec = importlib.util.spec_from_file_location('computer', pathlib.Path(__file__).parents[1] / 'scripts/computer.py')
 computer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(computer)
 

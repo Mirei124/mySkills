@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 import unittest
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from outputs import select_output,verify_stream,MappingError,parse_outputs
 
 class OutputsTests(unittest.TestCase):

@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from outputs import parse_outputs
 
 CONFIG='''[core]

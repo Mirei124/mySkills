@@ -4,7 +4,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
-sys.path.insert(0,str(Path(__file__).parents[1]/'wayfire-computer-use/scripts'))
+sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 from selector import click_once
 
 class SelectorTests(unittest.IsolatedAsyncioTestCase):
