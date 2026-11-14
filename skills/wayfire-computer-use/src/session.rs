@@ -277,7 +277,7 @@ impl Engine {
         );
         self.output = Some(selected.clone());
         self.layout = layout;
-        self.portal = Some(Portal::open().await?);
+        self.portal = Some(Portal::open_with_loss(shared.portal_loss.clone()).await?);
         let stream = if auto_select {
             let baseline = probe::selectors();
             probe::notify(
@@ -356,6 +356,7 @@ struct Shared {
     worker_pid: AtomicU32,
     capture: StdMutex<Option<std::sync::Weak<Capture>>>,
     cancel_requested: Arc<std::sync::atomic::AtomicBool>,
+    portal_loss: watch::Sender<bool>,
 }
 impl Shared {
     fn cancel(&self) {
@@ -449,6 +450,7 @@ impl Shared {
             value=async{
                 ensure!(envelope.observation_id==engine.observation,"STALE_OBSERVATION");
                 if engine.observation.is_none(){ensure!(matches!(&envelope.action,Action::Screenshot{}),"STALE_OBSERVATION");}
+                ensure!(!*self.portal_loss.borrow(), "PORTAL_SERVICE_LOST");
                 engine.capture.as_ref().context("CAPTURE_UNAVAILABLE")?.check()?;
                 let layout=engine.worker.as_mut().context("INPUT_UNAVAILABLE")?.call(json!({"command":"layout"})).await?;
                 if layout["layout"]!=engine.layout{engine.observation=None;bail!("LAYOUT_CHANGED");}
@@ -524,7 +526,9 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
         worker_pid: AtomicU32::new(0),
         capture: StdMutex::new(None),
         cancel_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        portal_loss: watch::channel(false).0,
     });
+    let mut portal_loss = shared.portal_loss.subscribe();
     let preparing_shared = shared.clone();
     let mut preparing = tokio::spawn(async move {
         let mut engine = preparing_shared.engine.lock().await;
@@ -538,6 +542,8 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     let serving:Result<()>=async {
     loop{
         tokio::select!{
+            biased;
+            _=portal_loss.changed()=>{shared.cancel_with_reason("portal service lost");break;},
             _=receiver.changed()=>break,
             _=signals.recv()=>{shared.cancel_with_reason("interrupted");break;},
             _=tokio::signal::ctrl_c()=>{shared.cancel_with_reason("interrupted");break;},
@@ -757,6 +763,7 @@ mod tests {
             worker_pid: AtomicU32::new(0),
             capture: StdMutex::new(None),
             cancel_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            portal_loss: watch::channel(false).0,
         });
         assert!(
             shared

@@ -33,7 +33,7 @@ def reliability_case(root,env,processes,target):
         return ready
     def request(ready,action):
         return {'request_id':'reliability-'+str(time.monotonic_ns()),'session_id':ready['session_id'],'observation_id':ready['observation_id'],'action':action}
-    ready=start();report={'case':case,'live_desktop_connected':False}
+    ready=start();report={'case':case,'live_desktop_connected':False};runtime=Path(ready['screenshot_path']).parent
     if case=='cycles':
         rss=[];fds=[]
         for index in range(10):
@@ -56,8 +56,29 @@ def reliability_case(root,env,processes,target):
             response=cli(['act'],request(ready,{'type':'click','x':300,'y':213,'button':'left'}))
             if response.get('code')!='LAYOUT_CHANGED' or response.get('action_executed') is not False:raise RuntimeError('RELIABILITY_LAYOUT_INPUT_NOT_BLOCKED: '+repr(response))
         else:
-            service=next(p for name,p in processes if name==case)
+            pending=None
+            if case=='portal-active':
+                response=cli(['act'],request(ready,{'type':'click','x':300,'y':213,'button':'left'}))
+                if response.get('status')!='ok':raise RuntimeError('RELIABILITY_FOCUS_FAILED')
+                ready=response
+                pending=subprocess.Popen([binary,'act'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                pending.stdin.write(json.dumps(request(ready,{'type':'type','text':'aA'*200})));pending.stdin.close()
+                deadline=time.monotonic()+5
+                while not json.loads((root/'fixture-state.json').read_text())['text'] and time.monotonic()<deadline:time.sleep(.02)
+                if not json.loads((root/'fixture-state.json').read_text())['text']:raise RuntimeError('RELIABILITY_TEXT_NOT_STARTED')
+            service=next(p for name,p in processes if name==('portal' if case=='portal-active' else case))
             service.terminate();service.wait(timeout=5)
+            if case in {'portal','portal-active','portal-wlr'}:
+                deadline=time.monotonic()+8
+                while not (runtime/'stopped.json').exists() and time.monotonic()<deadline:time.sleep(.02)
+                if not (runtime/'stopped.json').exists():raise RuntimeError('RELIABILITY_PORTAL_DID_NOT_AUTOSTOP')
+                if pending:
+                    cancelled=json.loads(pending.stdout.read());pending.wait(timeout=3)
+                    if cancelled.get('code')!='ACTION_CANCELLED' or cancelled.get('action_executed') is not True:raise RuntimeError('RELIABILITY_PORTAL_ACTION_NOT_CANCELLED: '+repr(cancelled))
+                    delivered=json.loads((root/'fixture-state.json').read_text())['text'];time.sleep(.3)
+                    if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RELIABILITY_PORTAL_INPUT_CONTINUED')
+                    report['cancelled']=cancelled
+                if (runtime/'socket').exists():raise RuntimeError('RELIABILITY_PORTAL_SOCKET_REMAINED')
             response=cli(['act'],request(ready,{'type':'screenshot'}))
             if response.get('status')!='error':raise RuntimeError('RELIABILITY_LOSS_NOT_REPORTED: '+repr(response))
         before=time.monotonic();stopped=cli(['stop']);elapsed=time.monotonic()-before
@@ -316,7 +337,7 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
-    parser.add_argument('--reliability-case',choices=['cycles','layout','pipewire','portal','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
+    parser.add_argument('--reliability-case',choices=['cycles','layout','pipewire','portal','portal-active','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
     parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')

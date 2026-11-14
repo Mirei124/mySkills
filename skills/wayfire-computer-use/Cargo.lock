@@ -1605,6 +1605,7 @@ dependencies = [
  "anyhow",
  "ashpd",
  "clap",
+ "futures-util",
  "libc",
  "pipewire",
  "png",
