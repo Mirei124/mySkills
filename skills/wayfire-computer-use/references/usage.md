@@ -1,6 +1,6 @@
 # Development CLI
 
-Use the repository `.venv/bin/python3` for all Python commands. Install requirements.txt into that environment and run `make -C native` from the skill directory. System dependencies include Wayland client headers, wayland-scanner, libxkbcommon, GTK 3 typelibs, GStreamer typelibs and appsink/videoconvert/PipeWire plugins, wayland-info, notify-send, and a working desktop portal.
+Use the repository `.venv/bin/python3` for all Python commands. Install requirements.txt into that environment and run `make -C native` from the skill directory. Runtime dependencies include Python, both packages in requirements.txt, libwayland-client, libxkbcommon, GStreamer typelibs and appsink/videoconvert/PipeWire plugins, wayland-info, notify-send, and a working desktop portal. The native/build/input-helper executable is required for input at runtime. A C compiler, pkg-config, Wayland/xkbcommon development files and wayland-scanner are build-time dependencies. GTK 3 typelibs are needed for the test fixture; PyYAML is only needed for skill-creator validation and is not a runtime requirement.
 
 Run `scripts/computer.py doctor`, then `scripts/computer.py start`. Select the display in the portal UI. With one output, mapping selection is automatic; the portal's authorization UI remains independent. Multiple outputs require an explicit `--output NAME`; native multi-output input is not yet verified and currently fails explicitly.
 
@@ -14,7 +14,7 @@ View each returned screenshot and use its new observation_id. Reusing a request_
 
 `status`, `release_all`, and `stop` are management commands. Stop bypasses the action queue, cancels the active request and returns after cleanup and the end-notification attempt. Inspect its errors array; the result is also stored in the private runtime stopped.json. Repeated stop returns the completed result. Screenshots are temporary and removed at cleanup. The session exits after five idle minutes or helper death. Notifications do not replace the exclusive per-display lock. SIGKILL of the owner can prevent the end notification; killing the entire process group or losing the session bus cannot guarantee cleanup notification delivery.
 
-This CLI is under development and has not passed the complete PLAN.md reliability matrix. Do not install it as a production skill yet.
+This CLI is under development and has not passed the complete ../archive/PLAN.md reliability matrix. Do not install it as a production skill yet.
 
 ## Authorized single-output selector click
 

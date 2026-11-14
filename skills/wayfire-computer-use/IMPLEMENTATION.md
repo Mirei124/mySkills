@@ -2,7 +2,7 @@
 
 # Implementation status
 
-This is a partial P0 milestone, not completion of PLAN.md.
+This is a partial P0 milestone, not completion of archive/PLAN.md.
 
 Implemented: read-only diagnostic CLI, strict draft action shape validation, skill instructions and metadata, and offline contract tests.
 
@@ -132,11 +132,11 @@ Added a test-only Session subclass gate and tests/probe_current_multi.py to exer
 
 Inspected the initial image, focused the known fixture, and used the process/focus guard for each action. Click (300,213) produced fixture-local press/release (168,18). Unicode text matched exactly. Drag from (134,213) to (300,213) produced held-button events and a visible text selection. Fresh screenshots were inspected between actions. Stop returned stopped with no cleanup errors, and the fixture was closed. Thirty-four offline tests still pass.
 
-Production multi-output input remains disabled by default: this result establishes the specific two-output, normal-orientation, scale-1 mapping, not every scaling/rotation configuration. Broader multi-output capability policy and remaining PLAN.md acceptance work are still pending.
+Production multi-output input remains disabled by default: this result establishes the specific two-output, normal-orientation, scale-1 mapping, not every scaling/rotation configuration. Broader multi-output capability policy and remaining archive/PLAN.md acceptance work are still pending.
 
 ## Initial-release consolidation and review
 
-Moved the skill to skills/wayfire-computer-use and merged PLAN.md, this record and tests into the same directory. Updated test imports, reproduction commands and skill references for the consolidated layout. Refreshed stale diagnostic-only troubleshooting text and UI metadata.
+Moved the skill to skills/wayfire-computer-use and merged archive/PLAN.md, this record and tests into the same directory. Updated test imports, reproduction commands and skill references for the consolidated layout. Refreshed stale diagnostic-only troubleshooting text and UI metadata.
 
 Review fixes: Portal D-Bus calls now have deadlines; output-discovery subprocesses are reaped on cancellation; cancelled/failed CLI startup terminates and reaps its preparing owner while a successfully ready owner remains running. Added targeted regressions.
 
