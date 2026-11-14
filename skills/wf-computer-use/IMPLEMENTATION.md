@@ -121,3 +121,13 @@ Added 288 offline pointer-contract cases across three origins, four scale factor
 Fixed an actual layout invalidation gap: parse_outputs now includes wl_output scale and transform metadata, so a 180-degree rotation or scale metadata change cannot leave an old observation valid solely because logical bounds stayed unchanged. Added targeted session regressions. Thirty-four tests pass.
 
 Added and ran tests/probe_headless.py in a private runtime directory using /usr/bin/wayfire (bypassing the user's launcher wrapper), WLR_BACKENDS=headless, two outputs and pixman. The real isolated compositor exposed HEADLESS-1 at (-960,0), scale 2, rotation 180 degrees, logical 960x540; HEADLESS-2 at (0,0), configured scale 1.25, rotation 90 degrees, logical 864x1536. The current desktop configuration was untouched. The isolated process was terminated and runtime removed. This verifies compositor output geometry, not Portal capture or actual multi-output pointer hit targets. See references/simulation-tests.md for reproduction and limits.
+
+## Current-session HEADLESS-8 integration
+
+Confirmed eDP-1 at (0,0) and HEADLESS-8 at (1920,0), each 1920x1080 at scale 1 and normal orientation. Created a uniquely identified fixture and moved only that view to HEADLESS-8 with Wayfire IPC; no display configuration was changed.
+
+Added a test-only Session subclass gate and tests/probe_current_multi.py to exercise the existing native output-bound helper and Portal stream verification on the explicitly authorized HEADLESS-8. The selector bootstrap moved the output-bound test pointer into HEADLESS-8 while a fresh slurp monitor selector was active, then sent one wlrctl click. The Portal returned frames whose metadata and visible fixture matched HEADLESS-8.
+
+Inspected the initial image, focused the known fixture, and used the process/focus guard for each action. Click (300,213) produced fixture-local press/release (168,18). Unicode text matched exactly. Drag from (134,213) to (300,213) produced held-button events and a visible text selection. Fresh screenshots were inspected between actions. Stop returned stopped with no cleanup errors, and the fixture was closed. Thirty-four offline tests still pass.
+
+Production multi-output input remains disabled by default: this result establishes the specific two-output, normal-orientation, scale-1 mapping, not every scaling/rotation configuration. Broader multi-output capability policy and remaining PLAN.md acceptance work are still pending.

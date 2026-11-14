@@ -32,6 +32,8 @@ async def notify(summary,body):
     if code: raise RuntimeError('NOTIFICATION_FAILED')
 
 class Session:
+    # Only integration-test subclasses bypass the production multi-output gate.
+    allow_unverified_multi=False
     def __init__(self,root):
         self.root=root
         self.id='s-'+secrets.token_hex(12)
@@ -75,13 +77,13 @@ class Session:
     async def prepare(self,output,auto_select=False):
         self.portal=await Portal().connect()
         async def bootstrap_notice():
-            await notify('Computer Use is preparing desktop control','Selecting the sole display with one authorized click. Please avoid desktop input.')
+            await notify('Computer Use is preparing desktop control','Selecting the authorized display with one authorized click. Please avoid desktop input.')
             self.started=True
             self.bootstrap_attempted=True
         streams=await self.portal.start_stream(output,auto_select=auto_select,before_click=bootstrap_notice)
         self.geometry=await self.outputs()
-        # The prototype native device currently maps to compositor-global space.
-        if len(self.geometry)!=1: raise RuntimeError('MULTI_OUTPUT_INPUT_UNVERIFIED')
+        # Keep production multi-output input gated until broader mapping coverage.
+        if len(self.geometry)!=1 and not self.allow_unverified_multi: raise RuntimeError('MULTI_OUTPUT_INPUT_UNVERIFIED')
         self.layout=hashlib.sha256(json.dumps(self.geometry,sort_keys=True).encode()).hexdigest()
         self.capture=Capture(self.portal,streams['streams'][0][0])
         first=await self.observe()
