@@ -21,9 +21,55 @@ def wait_for(check,processes,timeout=8):
         time.sleep(.05)
     raise RuntimeError('ISOLATED_SERVICE_READY_TIMEOUT')
 
+def reliability_case(root,env,processes,target):
+    case=env['WF_RELIABILITY_CASE']
+    binary=str(SKILL/'target/debug/wayfire-computer-use')
+    def cli(args,body=None,timeout=80):
+        result=subprocess.run([binary,*args],env=env,input=json.dumps(body) if body else None,capture_output=True,text=True,timeout=timeout)
+        return json.loads(result.stdout)
+    def start():
+        ready=cli(['start','--output',target,'--auto-select-output'])
+        if ready.get('status')!='ready':raise RuntimeError('RELIABILITY_START_FAILED: '+repr(ready))
+        return ready
+    def request(ready,action):
+        return {'request_id':'reliability-'+str(time.monotonic_ns()),'session_id':ready['session_id'],'observation_id':ready['observation_id'],'action':action}
+    ready=start();report={'case':case,'live_desktop_connected':False}
+    if case=='cycles':
+        rss=[];fds=[]
+        for index in range(10):
+            if index:ready=start()
+            pid=ready['owner_pid']
+            rss.append(next(line for line in Path(f'/proc/{pid}/status').read_text().splitlines() if line.startswith('VmRSS:')))
+            fds.append(len(list(Path(f'/proc/{pid}/fd').iterdir())))
+            response=cli(['act'],request(ready,{'type':'screenshot'}))
+            if response.get('status')!='ok':raise RuntimeError('RELIABILITY_CAPTURE_FAILED: '+repr(response))
+            stopped=cli(['stop'])
+            if stopped!={'status':'stopped','errors':[]}:raise RuntimeError('RELIABILITY_STOP_FAILED: '+repr(stopped))
+            if Path(ready['screenshot_path']).exists():raise RuntimeError('RELIABILITY_IMAGE_LEAK')
+        report.update(cycles=10,rss=rss,fd_counts=fds)
+    else:
+        if case=='layout':
+            subprocess.run(['wlr-randr','--output',target,'--pos','2200,0'],env=env,capture_output=True,text=True,timeout=5,check=True)
+            doctor=cli(['doctor'])
+            output=next(o for o in doctor['outputs'].values() if o['name']==target)
+            if output['position']!=[2200,0]:raise RuntimeError('RELIABILITY_LAYOUT_NOT_APPLIED')
+            response=cli(['act'],request(ready,{'type':'click','x':300,'y':213,'button':'left'}))
+            if response.get('code')!='LAYOUT_CHANGED' or response.get('action_executed') is not False:raise RuntimeError('RELIABILITY_LAYOUT_INPUT_NOT_BLOCKED: '+repr(response))
+        else:
+            service=next(p for name,p in processes if name==case)
+            service.terminate();service.wait(timeout=5)
+            response=cli(['act'],request(ready,{'type':'screenshot'}))
+            if response.get('status')!='error':raise RuntimeError('RELIABILITY_LOSS_NOT_REPORTED: '+repr(response))
+        before=time.monotonic();stopped=cli(['stop']);elapsed=time.monotonic()-before
+        if stopped.get('status')!='stopped':raise RuntimeError('RELIABILITY_LOSS_STOP_FAILED: '+repr(stopped))
+        if Path(ready['screenshot_path']).exists():raise RuntimeError('RELIABILITY_LOSS_IMAGE_LEAK')
+        report.update(response=response,stop=stopped,stop_seconds=elapsed)
+    return report
+
 def inside(root):
     root=Path(root)
     env=os.environ.copy()
+    binary=str(SKILL/'target/debug/wayfire-computer-use')
     target_output=env.get('WF_ISOLATED_TARGET_OUTPUT','HEADLESS-1')
     processes=[]
     logs=[]
@@ -104,6 +150,9 @@ def inside(root):
             worker.wait(timeout=5)
             if worker.returncode:raise RuntimeError('INPUT_WORKER_EXIT_FAILED')
             input_verified=True
+        reliability=None
+        if result.returncode==0 and env.get('WF_RELIABILITY_CASE'):
+            reliability=reliability_case(root,env,processes,target_output)
         session_verified=False
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
@@ -237,11 +286,16 @@ def inside(root):
             if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RUST_TEXT_CONTINUED_AFTER_STOP')
             if list(runtime.glob('o-*.png')):raise RuntimeError('RUST_TEXT_CANCEL_SCREENSHOT_LEAK')
             session_verified=True
-        report={'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
+        report={'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
         print(json.dumps(report))
         return result.returncode
     finally:
+        # Keep the private bus/services alive while requesting orderly cleanup,
+        # including when a reliability assertion intentionally finds a failure.
+        try:
+            subprocess.run([binary,'stop'],env=env,capture_output=True,text=True,timeout=12)
+        except (OSError,subprocess.TimeoutExpired):pass
         # Detached owners do not belong to the harness process group. Match the
         # executable and private runtime before terminating test-only children.
         for entry in Path('/proc').iterdir():
@@ -262,6 +316,7 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
+    parser.add_argument('--reliability-case',choices=['cycles','layout','pipewire','portal','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
     parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
@@ -292,6 +347,7 @@ context.modules = [
     for name in ['WAYLAND_DISPLAY','WAYLAND_SOCKET','DISPLAY','DBUS_SESSION_BUS_ADDRESS','WAYFIRE_SOCKET','PIPEWIRE_REMOTE','PIPEWIRE_RUNTIME_DIR','PIPEWIRE_CONFIG_DIR','PIPEWIRE_CONFIG_NAME']:
         env.pop(name,None)
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
+    if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'
     if args.launcher_boundary_test:env['WF_LAUNCHER_BOUNDARY_TEST']='1'
@@ -301,7 +357,7 @@ context.modules = [
         config.write_text(config.read_text().replace('plugins =\n','plugins = ipc ipc-rules\n')+'\n[output:HEADLESS-2]\nmode = 1920x1080\nposition = 1920,0\nscale = 1\ntransform = normal\n')
     command=['dbus-run-session','--config-file',str(root/'bus.conf'),'--',sys.executable,str(Path(__file__).resolve()),'--inside',str(root)]
     process=subprocess.Popen(command,env=env,start_new_session=True)
-    try:return process.wait(timeout=100)
+    try:return process.wait(timeout=180 if args.reliability_case else 100)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid,signal.SIGTERM)
         try:process.wait(timeout=5)
