@@ -21,14 +21,18 @@ def wait_for(check,processes,timeout=8):
         time.sleep(.05)
     raise RuntimeError('ISOLATED_SERVICE_READY_TIMEOUT')
 
-def reliability_case(root,env,processes,target):
+def reliability_case(root,env,processes,target,ipc=None):
     case=env['WF_RELIABILITY_CASE']
     binary=str(SKILL/'target/debug/wayfire-computer-use')
     def cli(args,body=None,timeout=80):
         result=subprocess.run([binary,*args],env=env,input=json.dumps(body) if body else None,capture_output=True,text=True,timeout=timeout)
         return json.loads(result.stdout)
+    def checkpoint(phase,detail=None):
+        record={'phase':phase,'time':time.time(),'services':{name:{'pid':p.pid,'exit_code':p.poll()} for name,p in processes},'detail':detail}
+        with (root/'recovery-trace.jsonl').open('a') as out:out.write(json.dumps(record)+'\n')
     def start():
         ready=cli(['start','--output',target,'--auto-select-output'])
+        checkpoint('start-result',ready)
         if ready.get('status')!='ready':raise RuntimeError('RELIABILITY_START_FAILED: '+repr(ready))
         return ready
     def request(ready,action):
@@ -67,7 +71,7 @@ def reliability_case(root,env,processes,target):
             if response.get('code')!='LAYOUT_CHANGED' or response.get('action_executed') is not False:raise RuntimeError('RELIABILITY_LAYOUT_INPUT_NOT_BLOCKED: '+repr(response))
         else:
             pending=None
-            if case=='portal-active':
+            if case in {'portal-active','session-active','pipewire-active'}:
                 response=cli(['act'],request(ready,{'type':'click','x':300,'y':213,'button':'left'}))
                 if response.get('status')!='ok':raise RuntimeError('RELIABILITY_FOCUS_FAILED')
                 ready=response
@@ -76,9 +80,24 @@ def reliability_case(root,env,processes,target):
                 deadline=time.monotonic()+5
                 while not json.loads((root/'fixture-state.json').read_text())['text'] and time.monotonic()<deadline:time.sleep(.02)
                 if not json.loads((root/'fixture-state.json').read_text())['text']:raise RuntimeError('RELIABILITY_TEXT_NOT_STARTED')
-            service=next(p for name,p in processes if name==('portal' if case=='portal-active' else case))
-            service.terminate();service.wait(timeout=5)
-            if case in {'portal','portal-active','portal-wlr'}:
+            if case in {'session','session-active'}:
+                if ipc is None:raise RuntimeError('RELIABILITY_SESSION_REQUIRES_MULTI_OUTPUT')
+                # A compositor-driven target loss exercises real session/stream
+                # invalidation. Backend Session.Close does not emit Closed.
+                subprocess.run(['wlr-randr','--output',target,'--off'],env=env,capture_output=True,text=True,timeout=5,check=True)
+                checkpoint('selected-output-disabled')
+            elif case=='backend-close':
+                destination='org.freedesktop.impl.portal.desktop.wlr'
+                tree=subprocess.run(['busctl','--user','--list','tree',destination],env=env,capture_output=True,text=True,timeout=5,check=True).stdout
+                paths=[line.strip() for line in tree.splitlines() if line.strip().startswith('/org/freedesktop/portal/desktop/session/') and '/ashpd_' in line]
+                if len(paths)!=1:raise RuntimeError('RELIABILITY_SESSION_PATH_AMBIGUOUS: '+repr(paths))
+                subprocess.run(['gdbus','call','--session','--dest',destination,'--object-path',paths[0],'--method','org.freedesktop.impl.portal.Session.Close'],env=env,capture_output=True,text=True,timeout=5,check=True)
+                checkpoint('after-backend-session-close',{'path':paths[0]})
+                if any(p.poll() is not None for name,p in processes if name in {'portal','portal-wlr'}):raise RuntimeError('RELIABILITY_SESSION_CLOSE_KILLED_SERVICE')
+            else:
+                service=next(p for name,p in processes if name==({'portal-active':'portal','pipewire-active':'pipewire'}.get(case,case)))
+                service.terminate();service.wait(timeout=5)
+            if case in {'portal','portal-active','portal-wlr','session','session-active','pipewire','pipewire-active'}:
                 deadline=time.monotonic()+8
                 while not (runtime/'stopped.json').exists() and time.monotonic()<deadline:time.sleep(.02)
                 if not (runtime/'stopped.json').exists():raise RuntimeError('RELIABILITY_PORTAL_DID_NOT_AUTOSTOP')
@@ -95,6 +114,22 @@ def reliability_case(root,env,processes,target):
         if stopped.get('status')!='stopped':raise RuntimeError('RELIABILITY_LOSS_STOP_FAILED: '+repr(stopped))
         if Path(ready['screenshot_path']).exists():raise RuntimeError('RELIABILITY_LOSS_IMAGE_LEAK')
         report.update(response=response,stop=stopped,stop_seconds=elapsed)
+        checkpoint('original-session-stopped',report)
+        if case in {'session','session-active','backend-close'}:
+            if any(p.poll() is not None for name,p in processes if name=='portal-wlr'):raise RuntimeError('RELIABILITY_BACKEND_EXITED_BEFORE_RECOVERY')
+            if case in {'session','session-active'}:
+                subprocess.run(['wlr-randr','--output',target,'--on','--pos','1920,0'],env=env,capture_output=True,text=True,timeout=5,check=True)
+                output=next(o for o in ipc('window-rules/list-outputs') if o['name']==target)
+                state=json.loads((root/'fixture-state.json').read_text())
+                view=next(v for v in ipc('window-rules/list-views') if v.get('title')==state['title'])
+                moved=ipc('window-rules/configure-view',{'id':view['id'],'output_id':output['id'],'geometry':{'x':100,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
+                if moved.get('result')!='ok':raise RuntimeError('RELIABILITY_RESTORED_FIXTURE_MOVE_FAILED')
+            replacement=start()
+            if replacement['session_id']==ready['session_id']:raise RuntimeError('RELIABILITY_SESSION_NOT_REPLACED')
+            observed=cli(['act'],request(replacement,{'type':'screenshot'}))
+            if observed.get('status')!='ok':raise RuntimeError('RELIABILITY_REPLACEMENT_CAPTURE_FAILED')
+            report['replacement_stop']=cli(['stop'])
+            if report['replacement_stop']!={'status':'stopped','errors':[]}:raise RuntimeError('RELIABILITY_REPLACEMENT_CLEANUP_FAILED')
     return report
 
 def inside(root):
@@ -122,7 +157,7 @@ def inside(root):
         launch('wireplumber',['/usr/bin/wireplumber','--profile','policy'])
         launch('notifications',[sys.executable,str(SKILL/'tests/isolated_notifications.py')])
         launch('permission-store',['/usr/lib/xdg-permission-store'])
-        launch('portal-wlr',['/usr/lib/xdg-desktop-portal-wlr','-l','DEBUG','-c',str(root/'portal-wlr.conf')])
+        launch('portal-wlr',[env.get('WF_TEST_PORTAL_WLR_BINARY','/usr/lib/xdg-desktop-portal-wlr'),'-l','DEBUG','-c',str(root/'portal-wlr.conf')])
         wait_for(lambda:bus_has('org.freedesktop.impl.portal.desktop.wlr') and bus_has('org.freedesktop.Notifications'),processes)
         launch('portal',['/usr/lib/xdg-desktop-portal'])
         wait_for(lambda:bus_has('org.freedesktop.portal.Desktop'),processes)
@@ -183,7 +218,7 @@ def inside(root):
             input_verified=True
         reliability=None
         if result.returncode==0 and env.get('WF_RELIABILITY_CASE'):
-            reliability=reliability_case(root,env,processes,target_output)
+            reliability=reliability_case(root,env,processes,target_output,ipc if target_output!='HEADLESS-1' else None)
         session_verified=False
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
@@ -322,6 +357,7 @@ def inside(root):
         print(json.dumps(report))
         return result.returncode
     finally:
+        (root/'pre-cleanup-processes.json').write_text(json.dumps({name:{'pid':p.pid,'exit_code':p.poll()} for name,p in processes},indent=2))
         # Keep the private bus/services alive while requesting orderly cleanup,
         # including when a reliability assertion intentionally finds a failure.
         try:
@@ -347,7 +383,8 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
-    parser.add_argument('--reliability-case',choices=['cleanup-gap','cycles','layout','pipewire','portal','portal-active','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
+    parser.add_argument('--portal-wlr-binary',type=Path,help='Use a specified backend executable only inside the private test environment')
+    parser.add_argument('--reliability-case',choices=['backend-close','session','session-active','pipewire-active','cleanup-gap','cycles','layout','pipewire','portal','portal-active','portal-wlr','wayfire'],help='Exercise one isolated lifecycle or service-loss case')
     parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
@@ -378,6 +415,7 @@ context.modules = [
     for name in ['WAYLAND_DISPLAY','WAYLAND_SOCKET','DISPLAY','DBUS_SESSION_BUS_ADDRESS','WAYFIRE_SOCKET','PIPEWIRE_REMOTE','PIPEWIRE_RUNTIME_DIR','PIPEWIRE_CONFIG_DIR','PIPEWIRE_CONFIG_NAME']:
         env.pop(name,None)
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
+    if args.portal_wlr_binary:env['WF_TEST_PORTAL_WLR_BINARY']=str(args.portal_wlr_binary.resolve(strict=True))
     if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'

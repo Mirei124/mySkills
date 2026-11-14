@@ -538,13 +538,18 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     let mut receiver = shared.stop.subscribe();
     let mut signals = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut capture_tick = tokio::time::interval(Duration::from_millis(100));
     let mut clients = tokio::task::JoinSet::new();
     let serving:Result<()>=async {
     loop{
         tokio::select!{
             biased;
-            _=portal_loss.changed()=>{shared.cancel_with_reason("portal service lost");break;},
+            _=portal_loss.changed()=>{shared.cancel_with_reason("portal session or service lost");break;},
             _=receiver.changed()=>break,
+            _=capture_tick.tick()=>{
+                let failed=shared.capture.lock().unwrap().as_ref().and_then(|capture|capture.upgrade()).is_some_and(|capture|capture.check().is_err());
+                if failed {shared.cancel_with_reason("capture ended");break;}
+            },
             _=signals.recv()=>{shared.cancel_with_reason("interrupted");break;},
             _=tokio::signal::ctrl_c()=>{shared.cancel_with_reason("interrupted");break;},
             result=&mut preparing,if !prepared=>{

@@ -5,10 +5,19 @@ use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType},
 };
 use futures_util::StreamExt;
-use std::{os::fd::OwnedFd, time::Duration};
+use std::{
+    os::fd::OwnedFd,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::sync::{oneshot, watch};
 pub struct Portal {
     _service_guard: Option<ServiceGuard>,
+    _session_guard: Option<ServiceGuard>,
+    session_closed: Arc<AtomicBool>,
     service_loss: Option<watch::Receiver<bool>>,
     proxy: Screencast<'static>,
     session: Session<'static, Screencast<'static>>,
@@ -27,16 +36,41 @@ impl Portal {
         // Subscribe before CreateSession so an owner change cannot be missed
         // between acquiring the session and installing its loss monitor.
         let service_loss = loss.as_ref().map(watch::Sender::subscribe);
-        let guard = if let Some(loss) = loss {
-            Some(ServiceGuard::new(proxy.connection().clone(), loss).await?)
+        let guard = if let Some(loss) = loss.as_ref() {
+            Some(ServiceGuard::new(proxy.connection().clone(), loss.clone()).await?)
         } else {
             None
         };
         let session = tokio::time::timeout(Duration::from_secs(10), proxy.create_session())
             .await
             .context("PORTAL_CREATE_TIMEOUT")??;
+        let session_closed = Arc::new(AtomicBool::new(false));
+        let session_guard = if let Some(loss) = loss {
+            let path: String = serde_json::from_value(serde_json::to_value(&session)?)?;
+            let session_proxy = zbus::Proxy::new_owned(
+                proxy.connection().clone(),
+                "org.freedesktop.portal.Desktop",
+                path,
+                "org.freedesktop.portal.Session",
+            )
+            .await?;
+            // Subscribe before source selection/Start; this stream owns its
+            // match rule and is independent of the action lock.
+            let mut closed = session_proxy.receive_signal("Closed").await?;
+            let confirmed = session_closed.clone();
+            Some(ServiceGuard(tokio::spawn(async move {
+                if closed.next().await.is_some() {
+                    confirmed.store(true, Ordering::Release);
+                }
+                loss.send_replace(true);
+            })))
+        } else {
+            None
+        };
         Ok(Self {
             _service_guard: guard,
+            _session_guard: session_guard,
+            session_closed,
             service_loss,
             proxy,
             session,
@@ -79,6 +113,9 @@ impl Portal {
         Ok((fd, stream.pipe_wire_node_id()))
     }
     pub async fn close(&self) -> Result<()> {
+        if self.session_closed.load(Ordering::Acquire) {
+            return Ok(());
+        }
         // Avoid D-Bus auto-activation or addressing a replacement service while
         // cleaning up a session whose service identity has already been lost.
         ensure!(
