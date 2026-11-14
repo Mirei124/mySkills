@@ -55,8 +55,24 @@ The harness owns a private runtime directory, D-Bus with activation disabled, he
 
 Verified: direct PipeWire packed-pixel capture with header timestamps and PNG inspection; Rust input-worker click, ASCII/chord/Chinese text; session CLI all nine actions, double-click/scroll event reception, deduplication, stale-observation rejection, wait cancellation, repeated stop and screenshot cleanup; start-notification denial, end-notification failure reporting, and input-worker crash cleanup/interruption notice. Scope is a single unrotated 1920x1080 headless output at scale 1. The two-output geometry-only probe now reads the Rust doctor's output; it still does not establish Portal/input mapping for those transforms.
 
-No current desktop service is restarted or used by this test. The Rust production multi-output/transform gates remain in place.
+No current desktop service is restarted or used by this test. The Rust selected-output scale/transform gates remain in place.
 
 ## Rust explicit secondary-output selection
 
-The Rust runtime now accepts --output NAME when multiple outputs exist, while requiring normal orientation/scale 1 on the selected output, virtual-pointer v2 binding and unique geometry. Add --multi-output to the isolated session probe to create HEADLESS-1 at (0,0) and HEADLESS-2 at (1920,0), move only the private fixture to HEADLESS-2 and exercise explicit selection there. This integration passed capture, input and session lifecycle checks. The current eDP-1/HEADLESS-8 attempt stopped at PORTAL_CREATE_TIMEOUT before any selection click or ordinary input. It has not established current shared-desktop acceptance.
+The Rust runtime now accepts --output NAME when multiple outputs exist, while requiring normal orientation/scale 1 on the selected output, virtual-pointer v2 binding and unique geometry. Add --multi-output to the isolated session probe to create HEADLESS-1 at (0,0) and HEADLESS-2 at (1920,0), move only the private fixture to HEADLESS-2 and exercise explicit selection there. This integration passed capture, input and session lifecycle checks. An initial current-desktop attempt stopped at PORTAL_CREATE_TIMEOUT. After the authorized Portal restart and subsequent lifetime/text fixes, current-desktop acceptance for the tested configuration passed as described below.
+
+## Rust launcher lifetime and current-desktop validation
+
+Run the dual-output regression with:
+
+```bash
+.venv/bin/python3 skills/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --session-test --launcher-boundary-test
+```
+
+The launcher-boundary case destroys the launching command process group after readiness and verifies that the detached owner remains active. The session suite also types mixed-case ASCII, symbols and Chinese as its first keyboard action, without a Ctrl+A warm-up. All existing nine-action, deduplication, cancellation, notification-failure and worker-crash checks passed. Detached-process cleanup matches both the executable and the private runtime directory.
+
+On the current eDP-1/HEADLESS-8 desktop (both 1920x1080, scale 1, normal orientation), the release runtime explicitly selected HEADLESS-8 at (1920,0) using one authorized Rust pointer-only selector click. The owner survived separate launching commands. Only the unique animated GTK fixture was targeted. Every returned screenshot was viewed before further input.
+
+Verified all nine action types, exact first-input text `Rust FIRST AbZ !@_ 中文 aA`, Ctrl+A replacement with exact `aA zZ 1! 中文 bB Rust`, visible click/double-click/drag selection and fixture motion/double-click/scroll events. Normal and repeated stop returned empty error arrays, removed screenshots and the control socket, and the fixture was closed. Ready metadata is retained until the next start; it is not an active-session indicator. No output configuration was changed.
+
+These results cover this GTK configuration and the private harness. Settling delays are experimental; arbitrary input methods, other toolkits, emoji and scaled/rotated input remain unverified.

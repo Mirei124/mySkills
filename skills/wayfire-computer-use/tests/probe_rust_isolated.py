@@ -122,7 +122,17 @@ def inside(root):
             denied=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             failure.unlink()
             if denied.get('status')!='error':raise RuntimeError('RUST_START_NOTIFICATION_FAILURE_NOT_ENFORCED')
-            first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
+            if env.get('WF_LAUNCHER_BOUNDARY_TEST')=='1':
+                launcher=subprocess.Popen([binary,'start','--output',target_output,'--auto-select-output'],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+                stdout,stderr=launcher.communicate(timeout=75)
+                first=json.loads(stdout)
+                try:os.killpg(launcher.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                time.sleep(.1)
+                survived=cli(['status'])
+                if survived.get('status')!='active':raise RuntimeError('RUST_OWNER_DID_NOT_SURVIVE_LAUNCHER_EXIT: '+repr(survived))
+            else:
+                first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if first.get('status')!='ready':raise RuntimeError('RUST_SESSION_START_FAILED: '+repr(first))
             latest=first
             def envelope(action,identifier):
@@ -135,6 +145,11 @@ def inside(root):
                 latest=response
                 return request,response
             act({'type':'click','x':300,'y':213,'button':'left'},'session-click')
+            # The first keyboard event must preserve case, without a prior
+            # shortcut activating the virtual keyboard for this client.
+            first_text='Rust FIRST AbZ !@_ 中文 aA'
+            act({'type':'type','text':first_text},'session-first-type')
+            if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_FIRST_TEXT_CASE_MISMATCH')
             act({'type':'keypress','keys':['CTRL','A']},'session-select')
             expected='Rust session 中文 ✓'
             request,typed=act({'type':'type','text':expected},'session-type')
@@ -202,6 +217,16 @@ def inside(root):
         print(json.dumps(report))
         return result.returncode
     finally:
+        # Detached owners do not belong to the harness process group. Match the
+        # executable and private runtime before terminating test-only children.
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdecimal():continue
+            try:
+                argv=(entry/'cmdline').read_bytes().split(b'\0')
+                private_env=(entry/'environ').read_bytes().split(b'\0')
+                if argv[:2] in ([binary.encode(),b'serve'],[binary.encode(),b'worker']) and ('XDG_RUNTIME_DIR='+str(root)).encode() in private_env:
+                    os.kill(int(entry.name),signal.SIGTERM)
+            except (FileNotFoundError,PermissionError,ProcessLookupError):pass
         for _,p in reversed(processes):
             if p.poll() is None:p.terminate()
         for _,p in reversed(processes):
@@ -212,6 +237,7 @@ def inside(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',type=Path)
+    parser.add_argument('--launcher-boundary-test',action='store_true',help='Destroy the launching command process group after readiness and check owner survival')
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
@@ -243,6 +269,7 @@ context.modules = [
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'
+    if args.launcher_boundary_test:env['WF_LAUNCHER_BOUNDARY_TEST']='1'
     if args.multi_output:
         env['WF_ISOLATED_TARGET_OUTPUT']='HEADLESS-2';env['WLR_HEADLESS_OUTPUTS']='2'
         config=root/'wayfire.ini'

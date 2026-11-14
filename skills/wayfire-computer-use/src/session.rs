@@ -127,7 +127,9 @@ struct Worker {
 }
 impl Worker {
     async fn open(output: &str) -> Result<(Self, Value)> {
-        let mut child = Command::new(std::env::current_exe()?)
+        let mut command = Command::new(std::env::current_exe()?);
+        configure_child_lifetime(&mut command, false);
+        let mut child = command
             .args(["worker", "--output", output])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -287,7 +289,11 @@ impl Engine {
             self.bootstrap = true;
             tokio::try_join!(
                 self.portal.as_ref().unwrap().stream(&selected),
-                probe::choose_once(selected.name.clone(), baseline)
+                probe::choose_once(
+                    selected.name.clone(),
+                    baseline,
+                    Some(shared.cancel_requested.clone())
+                )
             )?
             .0
         } else {
@@ -349,6 +355,7 @@ struct Shared {
     reason: StdMutex<&'static str>,
     worker_pid: AtomicU32,
     capture: StdMutex<Option<std::sync::Weak<Capture>>>,
+    cancel_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Shared {
     fn cancel(&self) {
@@ -360,6 +367,7 @@ impl Shared {
         }
         *self.reason.lock().unwrap() = reason;
         self.snapshot.lock().unwrap()["status"] = json!("stopping");
+        self.cancel_requested.store(true, Ordering::Release);
         self.stop.send_replace(true);
         let pid = self.worker_pid.load(Ordering::Acquire);
         if pid != 0 {
@@ -472,7 +480,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine) -> Value {
-    json!({"status":"active","session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"GTK-tested with experimental settling delays"}})
+    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"GTK-tested with experimental settling delays"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();
@@ -515,6 +523,7 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
         reason: StdMutex::new("normal"),
         worker_pid: AtomicU32::new(0),
         capture: StdMutex::new(None),
+        cancel_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     });
     let preparing_shared = shared.clone();
     let mut preparing = tokio::spawn(async move {
@@ -535,7 +544,7 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
             result=&mut preparing,if !prepared=>{
                 prepared=true;
                 match result{
-                    Ok(Ok(first))=>{let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine);publish(&root.join("ready.json"),&first)?;},
+                    Ok(Ok(mut first))=>{clear_parent_death_guard()?;first["owner_pid"]=json!(std::process::id());let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine);publish(&root.join("ready.json"),&first)?;},
                     error=>{let engine=shared.engine.lock().await;let code=match error{Ok(Err(error))=>format!("{error:#}"),Err(error)=>format!("PREPARE_TASK_FAILED: {error}"),_=>unreachable!()};publish(&root.join("ready.json"),&json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":engine.bootstrap}))?;drop(engine);shared.cancel();break;}
                 }
             },
@@ -659,6 +668,7 @@ pub async fn start(output: Option<String>, auto_select: bool) -> Result<Value> {
     if auto_select {
         command.arg("--auto-select-output");
     }
+    configure_child_lifetime(&mut command, true);
     let child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -746,6 +756,7 @@ mod tests {
             reason: StdMutex::new("normal"),
             worker_pid: AtomicU32::new(0),
             capture: StdMutex::new(None),
+            cancel_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
         assert!(
             shared
@@ -848,4 +859,49 @@ mod mapping_tests {
         rotated.transform = 1;
         assert!(validate_mapping(&only, &only[&1], 2).is_err());
     }
+}
+
+/// Isolate the owner from launcher process-group cleanup. Both owner (until
+/// ready) and worker are terminated by the kernel if their creating parent dies.
+fn configure_child_lifetime(command: &mut Command, detach: bool) {
+    let parent = std::process::id() as libc::pid_t;
+    // SAFETY: this post-fork closure performs only async-signal-safe system
+    // calls and constructs OS errors without allocating. No locks are used.
+    unsafe {
+        command.pre_exec(move || {
+            if detach && libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGTERM as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            ) < 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from_raw_os_error(libc::ECANCELED));
+            }
+            Ok(())
+        });
+    }
+}
+fn clear_parent_death_guard() -> Result<()> {
+    // serve runs on the main block_on thread which inherited the guard at exec.
+    ensure!(
+        unsafe {
+            libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            )
+        } == 0,
+        "START_HANDOFF_FAILED"
+    );
+    Ok(())
 }

@@ -335,7 +335,10 @@ impl Input {
         self.key(30, true)?;
         self.key(30, false)?;
         std::thread::sleep(Duration::from_millis(50));
-        self.upload(&self.base.clone())
+        self.upload(&self.base.clone())?;
+        self.modifiers(0)?;
+        std::thread::sleep(Duration::from_millis(50));
+        Ok(())
     }
     pub fn release(&mut self) -> Result<()> {
         for code in self.keys.clone() {

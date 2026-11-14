@@ -81,9 +81,19 @@ pub(crate) fn selectors() -> BTreeSet<u32> {
     }
     found
 }
-pub async fn choose_once(output: String, baseline: BTreeSet<u32>) -> Result<()> {
+pub async fn choose_once(
+    output: String,
+    baseline: BTreeSet<u32>,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<()> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
+        ensure!(
+            !cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)),
+            "ACTION_CANCELLED"
+        );
         let candidates: BTreeSet<_> = selectors().difference(&baseline).copied().collect();
         ensure!(candidates.len() <= 1, "AMBIGUOUS_PORTAL_SELECTOR");
         if !candidates.is_empty() {
@@ -92,6 +102,12 @@ pub async fn choose_once(output: String, baseline: BTreeSet<u32>) -> Result<()> 
                 let desktop = Desktop::connect()?;
                 let (id, geometry) = desktop.select(Some(&output))?;
                 let mut input = PointerOnly::new(desktop, id)?;
+                ensure!(
+                    !cancel
+                        .as_ref()
+                        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)),
+                    "ACTION_CANCELLED"
+                );
                 ensure!(
                     selectors()
                         .difference(&baseline)
@@ -114,6 +130,12 @@ pub async fn choose_once(output: String, baseline: BTreeSet<u32>) -> Result<()> 
                         .collect::<BTreeSet<_>>()
                         == candidates,
                     "PORTAL_SELECTOR_DISAPPEARED"
+                );
+                ensure!(
+                    !cancel
+                        .as_ref()
+                        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)),
+                    "ACTION_CANCELLED"
                 );
                 input.button(272, true)?;
                 input.button(272, false)?;
@@ -145,7 +167,7 @@ pub async fn capture(
             let stream = if auto_select {
                 tokio::try_join!(
                     portal.stream(&selected),
-                    choose_once(selected.name.clone(), baseline)
+                    choose_once(selected.name.clone(), baseline, None)
                 )
                 .map(|(stream, ())| stream)
             } else {

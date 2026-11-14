@@ -157,9 +157,24 @@ pub fn execute(
                     match c {
                         Character::Unicode(c) => input.unicode(c)?,
                         Character::Key(code, mask) => {
+                            // Activate this keyboard before setting Shift. A
+                            // compositor can switch keyboards on the first key
+                            // event and replace modifiers sent before that event.
+                            if mask != 0 {
+                                input.key(42, true)?;
+                            }
                             input.modifiers(mask)?;
+                            sleep(Duration::from_millis(50), cancel, deadline)?;
                             input.key(code, true)?;
                             input.key(code, false)?;
+                            // A Wayland roundtrip acknowledges the compositor,
+                            // not an input-method relay or the focused client.
+                            // Keep this character's modifiers stable while it
+                            // is delivered before beginning the next character.
+                            sleep(Duration::from_millis(50), cancel, deadline)?;
+                            if mask != 0 {
+                                input.key(42, false)?;
+                            }
                             input.modifiers(0)?;
                         }
                     }
