@@ -65,6 +65,10 @@ impl Action {
     pub fn validate(&self) -> Result<()> {
         if let Self::Type { text } = self {
             ensure!(text.chars().count() <= 10_000, "INVALID_TEXT");
+            ensure!(
+                text.chars().all(|c| u32::from(c) <= 0xffff),
+                "UNSUPPORTED_NON_BMP_TEXT"
+            );
         }
         if let Self::Drag { path, .. } = self {
             ensure!((2..=1000).contains(&path.len()), "INVALID_PATH");
@@ -114,6 +118,25 @@ mod tests {
             }
             .validate()
             .is_err()
+        );
+    }
+    #[test]
+    fn rejects_non_bmp_text_before_any_prefix_can_execute() {
+        for text in ["safe prefix 😀 suffix", "𠀀", "𝄞"] {
+            assert_eq!(
+                Action::Type { text: text.into() }
+                    .validate()
+                    .unwrap_err()
+                    .to_string(),
+                "UNSUPPORTED_NON_BMP_TEXT"
+            );
+        }
+        assert!(
+            Action::Type {
+                text: "中文 éÉ Ωω ✓ ☺".into()
+            }
+            .validate()
+            .is_ok()
         );
     }
     #[test]

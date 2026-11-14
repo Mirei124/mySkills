@@ -480,7 +480,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine) -> Value {
-    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"GTK-tested with experimental settling delays"}})
+    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();

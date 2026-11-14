@@ -150,6 +150,10 @@ def inside(root):
             first_text='Rust FIRST AbZ !@_ 中文 aA'
             act({'type':'type','text':first_text},'session-first-type')
             if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_FIRST_TEXT_CASE_MISMATCH')
+            rejected=cli(['act'],json.dumps(envelope({'type':'type','text':'must not type 😀 suffix'},'unsupported-non-bmp')))
+            if rejected.get('code')!='UNSUPPORTED_NON_BMP_TEXT' or rejected.get('action_executed') is not False:raise RuntimeError('RUST_NON_BMP_NOT_REJECTED_BEFORE_INPUT')
+            if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_NON_BMP_TYPED_PREFIX')
+            if cli(['status'])['observation_id']!=latest['observation_id']:raise RuntimeError('RUST_NON_BMP_CHANGED_OBSERVATION')
             act({'type':'keypress','keys':['CTRL','A']},'session-select')
             expected='Rust session 中文 ✓'
             request,typed=act({'type':'type','text':expected},'session-type')
