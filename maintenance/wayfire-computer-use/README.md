@@ -12,7 +12,7 @@ cargo build --locked --manifest-path skills/wayfire-computer-use/Cargo.toml
 ./.venv/bin/python -m pip install -r maintenance/wayfire-computer-use/requirements-dev.txt
 ```
 
-Python packages are development-only. The clipboard case requires wl-copy from wl-clipboard. The isolated harness additionally needs Wayfire, D-Bus, PipeWire, WirePlumber, Portal services and the fixture toolkit described in its source; paths match the tested Arch installation. Run desktop probes serially:
+Python packages are development-only. The isolated harness additionally needs Wayfire, D-Bus, PipeWire, WirePlumber, Portal services and the fixture toolkit described in its source; paths match the tested Arch installation. Run desktop probes serially:
 
 ```bash
 ./.venv/bin/python maintenance/wayfire-computer-use/tests/probe_rust_isolated.py --input-test --session-test

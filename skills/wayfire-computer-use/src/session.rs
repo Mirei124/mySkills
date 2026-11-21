@@ -33,7 +33,7 @@ use tokio::{
 };
 
 const LIMIT: u64 = 131_072;
-fn token(prefix: &str) -> Result<String> {
+pub(crate) fn token(prefix: &str) -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(format!(
@@ -226,6 +226,7 @@ struct Engine {
     cache: HashMap<String, (Value, Value)>,
     started: bool,
     bootstrap: bool,
+    clipboard_supported: bool,
 }
 impl Engine {
     fn new(root: PathBuf) -> Result<Self> {
@@ -244,6 +245,7 @@ impl Engine {
             cache: HashMap::new(),
             started: false,
             bootstrap: false,
+            clipboard_supported: false,
         })
     }
     async fn observe(&mut self, frames: u8) -> Result<Value> {
@@ -277,7 +279,7 @@ impl Engine {
         name: Option<String>,
         auto_select: bool,
     ) -> Result<Value> {
-        let (selected, layout) = tokio::task::spawn_blocking(move || {
+        let (selected, layout, clipboard_supported) = tokio::task::spawn_blocking(move || {
             let desktop = Desktop::connect()?;
             let (_, output) = desktop.select(name.as_deref())?;
             validate_mapping(
@@ -290,7 +292,14 @@ impl Engine {
                     .copied()
                     .unwrap_or(0),
             )?;
-            Ok::<_, anyhow::Error>((output, serde_json::to_value(desktop.state.outputs)?))
+            Ok::<_, anyhow::Error>((
+                output,
+                serde_json::to_value(desktop.state.outputs)?,
+                desktop
+                    .state
+                    .globals
+                    .contains_key("zwlr_data_control_manager_v1"),
+            ))
         })
         .await??;
         ensure!(
@@ -299,6 +308,7 @@ impl Engine {
         );
         self.output = Some(selected.clone());
         self.layout = layout;
+        self.clipboard_supported = clipboard_supported;
         self.portal = Some(Portal::open_with_loss(shared.portal_loss.clone()).await?);
         let stream = if auto_select {
             let baseline = probe::selectors();
@@ -555,7 +565,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine, idle_timeout: u64) -> Value {
-    json!({"status":"active","owner_pid":std::process::id(),"idle_timeout_secs":idle_timeout,"output":engine.output.as_ref().map(|o|&o.name),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
+    json!({"status":"active","owner_pid":std::process::id(),"idle_timeout_secs":idle_timeout,"output":engine.output.as_ref().map(|o|&o.name),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":engine.clipboard_supported,"clipboard_requirements":["zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();

@@ -103,6 +103,39 @@ fn sleep(duration: Duration, cancel: &AtomicBool, deadline: Instant) -> Result<(
     }
     Ok(())
 }
+fn set_clipboard(text: &str, cancel: &AtomicBool, deadline: Instant) -> Result<()> {
+    use wl_clipboard_rs::{
+        copy::{MimeSource, MimeType, Options, Source},
+        paste,
+    };
+    // Selection ownership and key input travel on separate Wayland connections.
+    // Wait for this offer to become visible before delivering the paste chord.
+    let marker = crate::session::token("application/x-wayfire-clipboard-")?;
+    Options::new()
+        .copy_multi(vec![
+            MimeSource {
+                source: Source::Bytes(text.as_bytes().into()),
+                mime_type: MimeType::Text,
+            },
+            MimeSource {
+                source: Source::Bytes(Box::default()),
+                mime_type: MimeType::Specific(marker.clone()),
+            },
+        ])
+        .map_err(|e| anyhow::anyhow!("CLIPBOARD_SET_FAILED: {e}"))?;
+    let until = deadline.min(Instant::now() + Duration::from_secs(2));
+    loop {
+        active(cancel, deadline)?;
+        match paste::get_mime_types(paste::ClipboardType::Regular, paste::Seat::Unspecified) {
+            Ok(types) if types.contains(&marker) => return Ok(()),
+            Ok(_) | Err(paste::Error::ClipboardEmpty) => {}
+            Err(error) => bail!("CLIPBOARD_VERIFY_FAILED: {error}"),
+        }
+        ensure!(Instant::now() < until, "CLIPBOARD_OWNERSHIP_UNCONFIRMED");
+        sleep(Duration::from_millis(10), cancel, deadline)?;
+    }
+}
+
 pub fn execute(
     input: &mut Input,
     action: &Action,
@@ -163,10 +196,6 @@ pub fn execute(
                 via_clipboard: true,
                 shift_paste,
             } => {
-                use std::{
-                    io::Write,
-                    process::{Command, Stdio},
-                };
                 ensure!(
                     input
                         .desktop
@@ -175,15 +204,7 @@ pub fn execute(
                         .contains_key("zwlr_data_control_manager_v1"),
                     "CLIPBOARD_UNAVAILABLE"
                 );
-                let mut child = Command::new("wl-copy")
-                    .args(["--type", "text/plain;charset=utf-8"])
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .spawn()?;
-                let written = child.stdin.take().unwrap().write_all(text.as_bytes());
-                let status = child.wait()?;
-                written?;
-                ensure!(status.success(), "CLIPBOARD_SET_FAILED");
+                set_clipboard(text, cancel, deadline)?;
                 active(cancel, deadline)?;
                 input.key(29, true)?;
                 if *shift_paste {
