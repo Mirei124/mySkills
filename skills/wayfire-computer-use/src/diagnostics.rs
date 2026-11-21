@@ -2,6 +2,24 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
+pub async fn locked_hint() -> Option<bool> {
+    tokio::time::timeout(Duration::from_millis(500), async {
+        let connection = zbus::Connection::system().await.ok()?;
+        let proxy = zbus::Proxy::new(
+            &connection,
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1/session/self",
+            "org.freedesktop.login1.Session",
+        )
+        .await
+        .ok()?;
+        proxy.get_property("LockedHint").await.ok()
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Read-only discovery; does not create input devices or Portal sessions.
 pub async fn doctor() -> Result<Value> {
     let mut report=tokio::task::spawn_blocking(||{
@@ -45,5 +63,6 @@ pub async fn doctor() -> Result<Value> {
     } else {
         json!({"reachable":false,"error":"RUNTIME_UNAVAILABLE"})
     };
+    report["locked_hint"] = json!(locked_hint().await);
     Ok(report)
 }

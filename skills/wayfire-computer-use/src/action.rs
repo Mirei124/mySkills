@@ -21,7 +21,13 @@ pub enum Button {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     Screenshot {},
-    Wait {},
+    WaitStable {
+        frames: u8,
+    },
+    Wait {
+        #[serde(default = "default_wait_ms")]
+        duration_ms: u64,
+    },
     Move {
         x: i64,
         y: i64,
@@ -59,14 +65,34 @@ pub enum Action {
     },
     Type {
         text: String,
+        #[serde(default)]
+        via_clipboard: bool,
+        #[serde(default)]
+        shift_paste: bool,
     },
 }
+fn default_wait_ms() -> u64 {
+    250
+}
+
 impl Action {
     pub fn validate(&self) -> Result<()> {
-        if let Self::Type { text } = self {
+        if let Self::WaitStable { frames } = self {
+            ensure!((2..=60).contains(frames), "INVALID_STABLE_FRAME_COUNT");
+        }
+        if let Self::Wait { duration_ms } = self {
+            ensure!(*duration_ms <= 30_000, "INVALID_WAIT_DURATION");
+        }
+        if let Self::Type {
+            text,
+            via_clipboard,
+            shift_paste,
+        } = self
+        {
+            ensure!(!shift_paste || *via_clipboard, "INVALID_PASTE_SHORTCUT");
             ensure!(text.chars().count() <= 10_000, "INVALID_TEXT");
             ensure!(
-                text.chars().all(|c| u32::from(c) <= 0xffff),
+                *via_clipboard || text.chars().all(|c| u32::from(c) <= 0xffff),
                 "UNSUPPORTED_NON_BMP_TEXT"
             );
         }
@@ -107,6 +133,8 @@ mod tests {
     fn unicode_limit_counts_codepoints() {
         assert!(
             Action::Type {
+                via_clipboard: false,
+                shift_paste: false,
                 text: "你".repeat(10_000)
             }
             .validate()
@@ -114,6 +142,8 @@ mod tests {
         );
         assert!(
             Action::Type {
+                via_clipboard: false,
+                shift_paste: false,
                 text: "你".repeat(10_001)
             }
             .validate()
@@ -124,15 +154,21 @@ mod tests {
     fn rejects_non_bmp_text_before_any_prefix_can_execute() {
         for text in ["safe prefix 😀 suffix", "𠀀", "𝄞"] {
             assert_eq!(
-                Action::Type { text: text.into() }
-                    .validate()
-                    .unwrap_err()
-                    .to_string(),
+                Action::Type {
+                    via_clipboard: false,
+                    shift_paste: false,
+                    text: text.into()
+                }
+                .validate()
+                .unwrap_err()
+                .to_string(),
                 "UNSUPPORTED_NON_BMP_TEXT"
             );
         }
         assert!(
             Action::Type {
+                via_clipboard: false,
+                shift_paste: false,
                 text: "中文 éÉ Ωω ✓ ☺".into()
             }
             .validate()

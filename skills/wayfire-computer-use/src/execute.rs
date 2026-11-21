@@ -135,7 +135,11 @@ pub fn execute(
         .map(|k| key(k))
         .collect::<Result<_>>()?;
     let chars = match action {
-        Action::Type { text } => text.chars().map(character).collect::<Result<Vec<_>>>()?,
+        Action::Type {
+            text,
+            via_clipboard: false,
+            ..
+        } => text.chars().map(character).collect::<Result<Vec<_>>>()?,
         _ => vec![],
     };
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -149,8 +153,47 @@ pub fn execute(
             input.modifiers(mask)?;
         }
         match action {
+            Action::WaitStable { .. } => bail!("CAPTURE_ACTION_REQUIRES_OWNER"),
             Action::Screenshot {} | Action::Keypress { .. } => {}
-            Action::Wait {} => sleep(Duration::from_millis(250), cancel, deadline)?,
+            Action::Wait { duration_ms } => {
+                sleep(Duration::from_millis(*duration_ms), cancel, deadline)?
+            }
+            Action::Type {
+                text,
+                via_clipboard: true,
+                shift_paste,
+            } => {
+                use std::{
+                    io::Write,
+                    process::{Command, Stdio},
+                };
+                ensure!(
+                    input
+                        .desktop
+                        .state
+                        .globals
+                        .contains_key("zwlr_data_control_manager_v1"),
+                    "CLIPBOARD_UNAVAILABLE"
+                );
+                let mut child = Command::new("wl-copy")
+                    .args(["--type", "text/plain;charset=utf-8"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .spawn()?;
+                let written = child.stdin.take().unwrap().write_all(text.as_bytes());
+                let status = child.wait()?;
+                written?;
+                ensure!(status.success(), "CLIPBOARD_SET_FAILED");
+                active(cancel, deadline)?;
+                input.key(29, true)?;
+                if *shift_paste {
+                    input.key(42, true)?;
+                }
+                input.modifiers(if *shift_paste { 5 } else { 4 })?;
+                input.key(47, true)?;
+                input.key(47, false)?;
+                sleep(Duration::from_millis(50), cancel, deadline)?;
+            }
             Action::Type { .. } => {
                 for c in chars {
                     active(cancel, deadline)?;

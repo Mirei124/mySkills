@@ -152,6 +152,25 @@ impl Ipc {
     }
 }
 
+pub async fn wait(app_id: &str, focused: bool, seconds: u64) -> Result<Value> {
+    tokio::time::timeout(Duration::from_secs(seconds), async {
+        let mut ipc = Ipc::connect(None).await?;
+        loop {
+            if let Some(view) = ipc
+                .views()
+                .await?
+                .into_iter()
+                .find(|v| v.app_id == app_id && (!focused || v.activated))
+            {
+                return Ok(json!({"status":"ok","toplevel":view,"sends_input":false}));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("TOPLEVEL_WAIT_TIMEOUT")?
+}
+
 pub async fn list() -> Result<Value> {
     tokio::time::timeout(TIMEOUT, async {
         let views = Ipc::connect(None).await?.views().await?;

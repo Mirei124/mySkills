@@ -141,9 +141,12 @@ def toplevel_case(root,env,processes,cli,ipc,ready,latest):
         secondary=subprocess.Popen([sys.executable,str(MAINTENANCE/'tests/desktop_fixture.py'),'--state',str(secondary_path),'--animate'],env=env,stdout=log,stderr=log)
     processes.append(('secondary-fixture',secondary))
     wait_for(secondary_path.exists,processes)
+    wait_for(lambda: any(v['pid']==secondary.pid for v in cli(['toplevel','list'])['toplevels']),processes)
     views=cli(['toplevel','list'])
     if views.get('status')!='ok':raise RuntimeError('TOPLEVEL_LIST_FAILED: '+repr(views))
     first=next(v for v in views['toplevels'] if v['pid']==primary['pid'] and v['title']==primary['title'])
+    matched=cli(['toplevel','wait','--app-id',first['app_id'],'--timeout','2'])
+    if matched.get('toplevel',{}).get('app_id')!=first['app_id']:raise RuntimeError('TOPLEVEL_WAIT_FAILED')
     second=next(v for v in views['toplevels'] if v['pid']==secondary.pid)
     output=next(o for o in ipc('window-rules/list-outputs') if o['name']=='HEADLESS-2')
     moved=ipc('window-rules/configure-view',{'id':second['id'],'output_id':output['id'],'geometry':{'x':850,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
@@ -291,6 +294,7 @@ def inside(root):
             worker.stdin.write('{"command":"stop"}\n');worker.stdin.flush();response()
             worker.wait(timeout=5)
             if worker.returncode:raise RuntimeError('INPUT_WORKER_EXIT_FAILED')
+            processes.remove(('input-worker',worker))
             input_verified=True
         reliability=None
         if result.returncode==0 and env.get('WF_RELIABILITY_CASE'):
@@ -324,9 +328,12 @@ def inside(root):
                 survived=cli(['status'])
                 if survived.get('status')!='active':raise RuntimeError('RUST_OWNER_DID_NOT_SURVIVE_LAUNCHER_EXIT: '+repr(survived))
             else:
-                first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
+                first=cli(['start','--output',target_output,'--auto-select-output','--idle-timeout','90'],timeout=75)
             if first.get('status')!='ready':raise RuntimeError('RUST_SESSION_START_FAILED: '+repr(first))
-            latest=first
+            began=time.monotonic()
+            latest=cli(['act','--latest'], json.dumps({'type':'wait','duration_ms':600}))
+            if latest.get('status')!='ok' or not latest.get('request_id') or latest['observation_id']==first['observation_id'] or time.monotonic()-began<.6:
+                raise RuntimeError('LATEST_WAIT_FAILED: '+repr(latest))
             def envelope(action,identifier):
                 return {'request_id':identifier,'session_id':first['session_id'],'observation_id':latest['observation_id'],'action':action}
             def act(action,identifier):
@@ -336,9 +343,15 @@ def inside(root):
                 if response.get('status')!='ok':raise RuntimeError('RUST_SESSION_ACTION_FAILED: '+repr(response))
                 latest=response
                 return request,response
+            stable_flag=root/'fixture-state.stable'
+            stable_flag.touch()
+            act({'type':'wait_stable','frames':3},'stable')
+            stable_flag.unlink()
             act({'type':'click','x':300,'y':213,'button':'left'},'session-click')
             # The first keyboard event must preserve case, without a prior
             # shortcut activating the virtual keyboard for this client.
+            if input_verified:
+                act({'type':'keypress','keys':['CTRL','A']},'select-previous-worker-text')
             first_text='Rust FIRST AbZ !@_ 中文 aA'
             act({'type':'type','text':first_text},'session-first-type')
             if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_FIRST_TEXT_CASE_MISMATCH')
@@ -347,6 +360,10 @@ def inside(root):
             if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_NON_BMP_TYPED_PREFIX')
             if cli(['status'])['observation_id']!=latest['observation_id']:raise RuntimeError('RUST_NON_BMP_CHANGED_OBSERVATION')
             act({'type':'keypress','keys':['CTRL','A']},'session-select')
+            pasted='Test 😀𠀀' * 100
+            act({'type':'type','text':pasted,'via_clipboard':True},'session-paste')
+            if json.loads((root/'fixture-state.json').read_text())['text']!=pasted:raise RuntimeError('CLIPBOARD_TEXT_MISMATCH')
+            act({'type':'keypress','keys':['CTRL','A']},'session-select-paste')
             expected='Rust session 中文 ✓'
             request,typed=act({'type':'type','text':expected},'session-type')
             duplicate=cli(['act'],json.dumps(request))
@@ -418,9 +435,12 @@ def inside(root):
             if 'Task interrupted; desktop control has stopped.' not in (root/'notifications.log').read_text():raise RuntimeError('RUST_INTERRUPTION_NOTICE_MISSING')
             # Exercise cancellation inside the new cancellable text-settling
             # waits, after observing actual partial delivery to the fixture.
-            first=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
+            first=cli(['start','--output',target_output,'--auto-select-output','--idle-timeout','90'],timeout=75)
             if first.get('status')!='ready':raise RuntimeError('RUST_TEXT_CANCEL_START_FAILED')
-            latest=first
+            began=time.monotonic()
+            latest=cli(['act','--latest'], json.dumps({'type':'wait','duration_ms':600}))
+            if latest.get('status')!='ok' or not latest.get('request_id') or latest['observation_id']==first['observation_id'] or time.monotonic()-began<.6:
+                raise RuntimeError('LATEST_WAIT_FAILED: '+repr(latest))
             act({'type':'click','x':300,'y':213,'button':'left'},'cancel-text-click')
             act({'type':'keypress','keys':['CTRL','A']},'cancel-text-select')
             act({'type':'keypress','keys':['BACKSPACE']},'cancel-text-clear')
@@ -437,6 +457,18 @@ def inside(root):
             time.sleep(.3)
             if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RUST_TEXT_CONTINUED_AFTER_STOP')
             if list(runtime.glob('o-*.png')):raise RuntimeError('RUST_TEXT_CANCEL_SCREENSHOT_LEAK')
+            env['DBUS_SYSTEM_BUS_ADDRESS']=env['DBUS_SESSION_BUS_ADDRESS']
+            if cli(['doctor']).get('locked_hint') is not False:raise RuntimeError('LOCK_HINT_UNAVAILABLE')
+            unlocked=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
+            if unlocked.get('status')!='ready':raise RuntimeError('LOCK_TEST_START_FAILED')
+            (root/'locked').touch()
+            wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
+            if cli(['doctor']).get('locked_hint') is not True:raise RuntimeError('LOCK_HINT_MISSED')
+            (root/'locked').unlink()
+            idle=cli(['start','--output',target_output,'--auto-select-output','--idle-timeout','2'],timeout=75)
+            if idle.get('status')!='ready':raise RuntimeError('IDLE_START_FAILED: '+repr(idle))
+            wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
+            if Path(idle['screenshot_path']).exists():raise RuntimeError('IDLE_CLEANUP_FAILED')
             session_verified=True
         report={'toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))

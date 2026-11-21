@@ -25,6 +25,9 @@ enum Command {
         output: Option<String>,
         #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
+        /// Seconds of inactivity before the owner stops.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        idle_timeout: u64,
     },
     #[command(hide = true)]
     Serve {
@@ -32,8 +35,14 @@ enum Command {
         output: Option<String>,
         #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
+        /// Seconds of inactivity before the owner stops.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        idle_timeout: u64,
     },
-    Act,
+    Act {
+        #[arg(long)]
+        latest: bool,
+    },
     Stop,
     Status,
     Capabilities,
@@ -64,6 +73,15 @@ enum Command {
 enum ToplevelCommand {
     /// List mapped application toplevels without changing focus.
     List,
+    /// Wait for a mapped application window, optionally requiring focus.
+    Wait {
+        #[arg(long)]
+        app_id: String,
+        #[arg(long)]
+        focused: bool,
+        #[arg(long, default_value_t=10,value_parser=clap::value_parser!(u64).range(1..=120))]
+        timeout: u64,
+    },
     /// Request focus for one listed window and verify the resulting focus.
     Focus {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
@@ -90,18 +108,26 @@ async fn main() {
         Command::Start {
             output,
             auto_select_single_output,
-        } => session::start(output, auto_select_single_output).await,
+            idle_timeout,
+        } => session::start(output, auto_select_single_output, idle_timeout).await,
         Command::Serve {
             output,
             auto_select_single_output,
+            idle_timeout,
         } => {
-            if let Err(error) = session::serve(output, auto_select_single_output).await {
+            if let Err(error) =
+                session::serve(output, auto_select_single_output, idle_timeout).await
+            {
                 eprintln!("{error:#}");
                 std::process::exit(1);
             }
             return;
         }
-        Command::Act => {
+        Command::Act { latest: true } => match stdin_json() {
+            Ok(action) => session::act_latest(action).await,
+            Err(error) => Err(error),
+        },
+        Command::Act { latest: false } => {
             let mut input = String::new();
             match std::io::stdin().read_to_string(&mut input) {
                 Ok(_) => match serde_json::from_str(&input) {
@@ -129,6 +155,11 @@ async fn main() {
         } => probe::capture(output, path, auto_select).await,
         Command::Doctor => diagnostics::doctor().await,
         Command::Toplevel { command } => match command {
+            ToplevelCommand::Wait {
+                app_id,
+                focused,
+                timeout,
+            } => toplevel::wait(&app_id, focused, timeout).await,
             ToplevelCommand::List => toplevel::list().await,
             ToplevelCommand::Focus { id, pid } => {
                 session::focus_toplevel(toplevel::FocusTarget { id, pid }).await
@@ -142,17 +173,33 @@ async fn main() {
             }),
     };
     match result {
-        Ok(value) => {
+        Ok(mut value) => {
+            if value["status"] == "error"
+                && value["code"].as_str().is_some_and(|code| {
+                    matches!(
+                        code,
+                        "CAPTURE_TIMEOUT" | "INPUT_RESPONSE_TIMEOUT" | "ACTION_TIMEOUT"
+                    )
+                })
+            {
+                value["recovery"] = json!(
+                    "Run stop, start --output OUTPUT, list and focus the intended toplevel, then inspect a fresh screenshot before input."
+                );
+            }
             println!("{value}");
             if value["status"] == "error" {
                 std::process::exit(1);
             }
         }
         Err(error) => {
-            println!(
-                "{}",
-                json!({"status":"error","code":error.to_string(),"action_executed":false,"selector_click_may_have_executed":selector_click_may_have_executed,"retryable":false})
-            );
+            let code = error.to_string();
+            let mut response = json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":selector_click_may_have_executed,"retryable":false});
+            if code == "SESSION_UNAVAILABLE" || code == "SESSION_RESPONSE_TIMEOUT" {
+                response["recovery"] = json!(
+                    "Run stop, start --output OUTPUT, list and focus the intended toplevel, then inspect a fresh screenshot before input."
+                );
+            }
+            println!("{response}");
             std::process::exit(1);
         }
     }

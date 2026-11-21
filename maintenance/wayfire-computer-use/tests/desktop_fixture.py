@@ -50,6 +50,9 @@ window.show_all()
 if args.animate:
     ticks=[0]
     def tick():
+        if args.state.with_suffix('.stable').exists():
+            window.queue_draw()
+            return True
         ticks[0]+=1
         status.set_text('Capture test frame '+str(ticks[0]))
         return True

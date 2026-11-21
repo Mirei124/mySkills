@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 from dbus_next.errors import DBusError
 from dbus_next.aio import MessageBus
-from dbus_next.service import ServiceInterface,method
+from dbus_next.service import ServiceInterface,method,dbus_property
+from dbus_next.constants import PropertyAccess
 
 class Notifications(ServiceInterface):
     def __init__(self): super().__init__('org.freedesktop.Notifications')
@@ -20,8 +21,17 @@ class Notifications(ServiceInterface):
             await asyncio.sleep(.5)
         return 1
 
+class LockSession(ServiceInterface):
+    def __init__(self): super().__init__('org.freedesktop.login1.Session')
+
+    @dbus_property(access=PropertyAccess.READ)
+    def LockedHint(self)->'b':
+        return Path(os.environ['XDG_RUNTIME_DIR'],'locked').exists()
+
 async def main():
     bus=await MessageBus().connect()
+    bus.export('/org/freedesktop/login1/session/self',LockSession())
+    await bus.request_name('org.freedesktop.login1')
     bus.export('/org/freedesktop/Notifications',Notifications())
     await bus.request_name('org.freedesktop.Notifications')
     await asyncio.Event().wait()

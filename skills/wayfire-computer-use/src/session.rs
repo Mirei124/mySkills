@@ -246,7 +246,7 @@ impl Engine {
             bootstrap: false,
         })
     }
-    async fn observe(&mut self) -> Result<Value> {
+    async fn observe(&mut self, frames: u8) -> Result<Value> {
         let id = token("o-")?;
         let path = self.root.join(format!("{id}.png"));
         let saved = path.clone();
@@ -258,7 +258,8 @@ impl Engine {
         let after = monotonic_ns();
         self.paths.push(path.clone());
         let (width, height) =
-            tokio::task::spawn_blocking(move || capture.observe(&saved, after)).await??;
+            tokio::task::spawn_blocking(move || capture.observe_stable(&saved, after, frames))
+                .await??;
         if self.width != 0 && (width, height) != (self.width, self.height) {
             self.observation = None;
             bail!("LAYOUT_CHANGED");
@@ -334,7 +335,7 @@ impl Engine {
         let capture = Arc::new(Capture::new(stream.0, stream.1));
         *shared.capture.lock().unwrap() = Some(Arc::downgrade(&capture));
         self.capture = Some(capture);
-        let mut first = self.observe().await?;
+        let mut first = self.observe(1).await?;
         first["status"] = json!("ready");
         first["selector_click_may_have_executed"] = json!(self.bootstrap);
         Ok(first)
@@ -438,6 +439,12 @@ impl Shared {
         );
         *self.last.lock().unwrap() = Instant::now();
         let mut engine = self.engine.lock().await;
+        if request["command"] == "focus_toplevel" {
+            ensure!(
+                crate::diagnostics::locked_hint().await != Some(true),
+                "SESSION_LOCKED"
+            );
+        }
         if request.get("command").and_then(Value::as_str) == Some("focus_toplevel") {
             ensure!(request.as_object().unwrap().len() == 2, "INVALID_FIELDS");
             let target: crate::toplevel::FocusTarget =
@@ -495,6 +502,10 @@ impl Shared {
         ensure!(engine.cache.len() < 1000, "SESSION_REQUEST_LIMIT");
         ensure!(envelope.session_id == engine.id, "UNKNOWN_SESSION");
         envelope.action.validate()?;
+        ensure!(
+            crate::diagnostics::locked_hint().await != Some(true),
+            "SESSION_LOCKED"
+        );
         let executed = std::sync::atomic::AtomicBool::new(false);
         let mut stop = self.stop.subscribe();
         let result = tokio::select! {
@@ -507,12 +518,12 @@ impl Shared {
                 engine.capture.as_ref().context("CAPTURE_UNAVAILABLE")?.check()?;
                 let layout=engine.worker.as_mut().context("INPUT_UNAVAILABLE")?.call(json!({"command":"layout"})).await?;
                 if layout["layout"]!=engine.layout{engine.observation=None;bail!("LAYOUT_CHANGED");}
-                if !matches!(&envelope.action,Action::Screenshot{}){
+                if !matches!(&envelope.action,Action::Screenshot{} | Action::WaitStable{..}){
                     executed.store(true,Ordering::Release);
                     let (width,height)=(engine.width,engine.height);
                     engine.worker.as_mut().unwrap().call(json!({"command":"execute","action":envelope.action,"width":width,"height":height})).await?;
                 }
-                engine.observe().await
+                engine.observe(match envelope.action {Action::WaitStable{frames}=>frames,_=>1}).await
             }=>value,
         };
         let executed = executed.load(Ordering::Acquire);
@@ -535,7 +546,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine) -> Value {
-    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":false,"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
+    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();
@@ -557,7 +568,7 @@ fn spawn_client(clients: &mut tokio::task::JoinSet<()>, shared: Arc<Shared>, soc
         client(shared, socket).await;
     });
 }
-pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
+pub async fn serve(output: Option<String>, auto_select: bool, idle_timeout: u64) -> Result<()> {
     let root = runtime()?;
     let lock = Lock::acquire(&root)?;
     let compositor = Compositor::connect()?;
@@ -593,9 +604,24 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
         portal_loss: watch::channel(false).0,
     });
     let mut portal_loss = shared.portal_loss.subscribe();
+    let monitor = async {
+        loop {
+            let hint = crate::diagnostics::locked_hint().await;
+            shared.snapshot.lock().unwrap()["locked_hint"] = json!(hint);
+            if hint == Some(true) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+    tokio::pin!(monitor);
     let preparing_shared = shared.clone();
     let mut preparing = tokio::spawn(async move {
         let mut engine = preparing_shared.engine.lock().await;
+        ensure!(
+            crate::diagnostics::locked_hint().await != Some(true),
+            "SESSION_LOCKED"
+        );
         engine.prepare(&preparing_shared, output, auto_select).await
     });
     let mut prepared = false;
@@ -608,6 +634,7 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
     loop{
         tokio::select!{
             biased;
+            _=&mut monitor,if prepared=>{shared.cancel_with_reason("session locked");break;},
             _=portal_loss.changed()=>{shared.cancel_with_reason("portal session or service lost");break;},
             _=receiver.changed()=>break,
             _=capture_tick.tick()=>{
@@ -619,14 +646,15 @@ pub async fn serve(output: Option<String>, auto_select: bool) -> Result<()> {
             result=&mut preparing,if !prepared=>{
                 prepared=true;
                 match result{
-                    Ok(Ok(mut first))=>{clear_parent_death_guard()?;first["owner_pid"]=json!(std::process::id());let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine);publish(&root.join("ready.json"),&first)?;},
+                    Ok(Ok(mut first))=>{clear_parent_death_guard()?;*shared.last.lock().unwrap()=Instant::now();first["owner_pid"]=json!(std::process::id());let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine);publish(&root.join("ready.json"),&first)?;},
                     error=>{let engine=shared.engine.lock().await;let code=match error{Ok(Err(error))=>format!("{error:#}"),Err(error)=>format!("PREPARE_TASK_FAILED: {error}"),_=>unreachable!()};publish(&root.join("ready.json"),&json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":engine.bootstrap}))?;drop(engine);shared.cancel();break;}
                 }
             },
             _=clients.join_next(),if !clients.is_empty()=>{},
             socket=listener.accept()=>{let (socket,_)=socket?;spawn_client(&mut clients,shared.clone(),socket);},
             _=tick.tick()=>{
-                if shared.last.lock().unwrap().elapsed()>Duration::from_secs(300){shared.cancel_with_reason("idle timeout");break;}
+                if !prepared || shared.serial.try_lock().is_err(){*shared.last.lock().unwrap()=Instant::now();}
+                if prepared && shared.last.lock().unwrap().elapsed()>Duration::from_secs(idle_timeout){shared.cancel_with_reason("idle timeout");break;}
                 if let Ok(mut engine)=shared.engine.try_lock()&& let Some(worker)=engine.worker.as_mut()&& worker.child.try_wait()?.is_some(){shared.worker_pid.store(0,Ordering::Release);shared.cancel_with_reason("helper interrupted");break;}
             },
         }
@@ -724,6 +752,10 @@ pub async fn send(request: Value) -> Result<Value> {
     .context("SESSION_RESPONSE_TIMEOUT")?
 }
 pub async fn focus_toplevel(target: crate::toplevel::FocusTarget) -> Result<Value> {
+    ensure!(
+        crate::diagnostics::locked_hint().await != Some(true),
+        "SESSION_LOCKED"
+    );
     let compositor = Compositor::connect()?;
     crate::toplevel::verify_compositor(compositor.pid).await?;
     let root = runtime()?;
@@ -760,7 +792,15 @@ impl Drop for Owner {
         }
     }
 }
-pub async fn start(output: Option<String>, auto_select: bool) -> Result<Value> {
+pub async fn act_latest(action: Value) -> Result<Value> {
+    let action: Action = serde_json::from_value(action)?;
+    action.validate()?;
+    let status = send(json!({"command":"status"})).await?;
+    ensure!(status["status"] == "active", "SESSION_NOT_ACTIVE");
+    send(json!({"action": action, "request_id":token("req")?, "session_id":status["session_id"], "observation_id":status["observation_id"]})).await
+}
+
+pub async fn start(output: Option<String>, auto_select: bool, idle_timeout: u64) -> Result<Value> {
     let root = runtime()?;
     if root.join("socket").exists()
         && let Ok(status) = send(json!({"command":"status"})).await
@@ -769,7 +809,7 @@ pub async fn start(output: Option<String>, auto_select: bool) -> Result<Value> {
     }
     let _ = std::fs::remove_file(root.join("ready.json"));
     let mut command = Command::new(std::env::current_exe()?);
-    command.arg("serve");
+    command.args(["serve", "--idle-timeout", &idle_timeout.to_string()]);
     if let Some(output) = output {
         command.args(["--output", &output]);
     }

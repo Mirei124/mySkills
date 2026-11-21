@@ -15,6 +15,7 @@ use std::{
 
 #[derive(Clone)]
 struct Frame {
+    sequence: u64,
     width: u32,
     height: u32,
     pixels: Vec<u8>,
@@ -82,10 +83,19 @@ impl Capture {
         drop(self.output_gate.lock().unwrap());
     }
     pub fn observe(&self, path: &Path, after: i64) -> Result<(u32, u32)> {
+        self.observe_stable(path, after, 1)
+    }
+    pub fn observe_stable(&self, path: &Path, after: i64, required: u8) -> Result<(u32, u32)> {
+        let mut previous: Option<Arc<Frame>> = None;
+        let mut count = 0;
         ensure!(after >= 0, "CLOCK_UNAVAILABLE");
         let started = Instant::now();
         loop {
             ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
+            ensure!(
+                started.elapsed() < Duration::from_secs(8),
+                "CAPTURE_TIMEOUT"
+            );
             let frame = {
                 let state = self.shared.lock().unwrap();
                 if let Some(error) = &state.error {
@@ -97,17 +107,27 @@ impl Capture {
                 && frame.received >= started
             {
                 let pts = frame.pts.context("FRAME_TIMESTAMP_UNAVAILABLE")?;
-                if pts >= after {
+                if pts >= after && previous.as_ref().is_none_or(|p| p.pts != frame.pts) {
+                    count = if previous.as_ref().is_some_and(|p| {
+                        p.sequence.wrapping_add(1) == frame.sequence
+                            && p.width == frame.width
+                            && p.height == frame.height
+                            && p.pixels == frame.pixels
+                    }) {
+                        count + 1
+                    } else {
+                        1
+                    };
+                    if count < required {
+                        previous = Some(frame);
+                        continue;
+                    }
                     let _gate = self.output_gate.lock().unwrap();
                     ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
                     write_png(path, frame.width, frame.height, &frame.pixels)?;
                     return Ok((frame.width, frame.height));
                 }
             }
-            ensure!(
-                started.elapsed() < Duration::from_secs(8),
-                "CAPTURE_TIMEOUT"
-            );
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -191,7 +211,14 @@ fn run(fd: OwnedFd, node: u32, shared: Arc<Mutex<Shared>>, stop: Arc<AtomicBool>
             let result = unsafe { copy_frame(raw, &data.format) };
             unsafe { stream.queue_raw_buffer(raw) };
             match result {
-                Ok(frame) => data.shared.lock().unwrap().frame = Some(Arc::new(frame)),
+                Ok(mut frame) => {
+                    let mut state = data.shared.lock().unwrap();
+                    frame.sequence = state
+                        .frame
+                        .as_ref()
+                        .map_or(1, |prev| prev.sequence.wrapping_add(1));
+                    state.frame = Some(Arc::new(frame));
+                }
                 Err(error) => data.shared.lock().unwrap().error = Some(error.to_string()),
             }
         })
@@ -347,6 +374,7 @@ unsafe fn copy_frame(
         }
     }
     Ok(Frame {
+        sequence: 0,
         width,
         height,
         pixels,

@@ -4,6 +4,6 @@ The Rust runtime has passed private Wayfire dual-output capture/input, explicit 
 
 Selected input outputs with scaling or rotation remain unsupported. Simulated transformed-output geometry checks do not establish correct input mapping. Topology changes invalidate coordinates and require a fresh session. External Portal/slurp fixes were needed in the tested environment; a different installation may still exhibit those upstream failures.
 
-ASCII, Chinese and BMP symbols were tested with experimental keymap settling delays. Non-BMP text is rejected before input. Do not infer universal IME, toolkit or game support. No clipboard fallback is provided.
+ASCII, Chinese and BMP symbols were tested with experimental keymap settling delays. Native key mode rejects non-BMP text before input. Do not infer universal IME, toolkit or game support. Explicit clipboard paste supports supplementary Unicode in the isolated GTK fixture.
 
 Recovery checks included Portal replacement, PipeWire loss, output removal, lock-screen capture and suspend/resume in the tested environment. There is no dedicated lock-screen detection or lock-specific feedback. A fresh session after recovery still requires a new screenshot before input. See [diagnostics](troubleshooting.md).
