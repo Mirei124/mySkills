@@ -40,7 +40,7 @@ A selector disappearance alone does not establish this diagnosis; inspect eviden
 
 ## Lock-screen feedback
 
-Doctor and active status expose logind LockedHint as true, false or null. A reported lock cancels control. Lockers can omit or delay the hint; inspect the screen before input. A simulated lock transition is covered by the private session test.
+Doctor and active status expose logind LockedHint as true, false or null. The owner subscribes to LockedHint changes on its canonical logind session and periodically rechecks the hint. A reported lock cancels control, including active input. Lockers can omit or delay the hint; inspect the screen before input. A simulated lock transition is covered by the private session test.
 
 
 ## Recovery

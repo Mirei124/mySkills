@@ -624,6 +624,9 @@ pub async fn serve(output: Option<String>, auto_select: bool, idle_timeout: u64)
         }
     };
     tokio::pin!(monitor);
+    let lock_signal = crate::diagnostics::lock_notification();
+    tokio::pin!(lock_signal);
+    let mut watching_lock = true;
     let preparing_shared = shared.clone();
     let mut preparing = tokio::spawn(async move {
         let mut engine = preparing_shared.engine.lock().await;
@@ -643,6 +646,10 @@ pub async fn serve(output: Option<String>, auto_select: bool, idle_timeout: u64)
     loop{
         tokio::select!{
             biased;
+            result=&mut lock_signal,if prepared && watching_lock=>{
+                if result.is_ok(){shared.cancel_with_reason("session locked");break;}
+                watching_lock=false;
+            },
             _=&mut monitor,if prepared=>{shared.cancel_with_reason("session locked");break;},
             _=portal_loss.changed()=>{shared.cancel_with_reason("portal session or service lost");break;},
             _=receiver.changed()=>break,

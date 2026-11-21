@@ -66,3 +66,33 @@ pub async fn doctor() -> Result<Value> {
     report["locked_hint"] = json!(locked_hint().await);
     Ok(report)
 }
+
+/// Listen on the canonical session path; logind emits changes there, not on its self alias.
+pub async fn lock_notification() -> Result<()> {
+    use futures_util::StreamExt;
+    let connection = zbus::Connection::system().await?;
+    let manager = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let path: zbus::zvariant::OwnedObjectPath = manager
+        .call("GetSessionByPID", &(std::process::id(),))
+        .await?;
+    let session = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.login1",
+        path,
+        "org.freedesktop.login1.Session",
+    )
+    .await?;
+    let mut changes = session.receive_property_changed::<bool>("LockedHint").await;
+    while let Some(change) = changes.next().await {
+        if change.get().await? {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("LOCK_MONITOR_ENDED")
+}

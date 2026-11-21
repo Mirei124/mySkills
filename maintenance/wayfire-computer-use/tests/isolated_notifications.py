@@ -28,12 +28,28 @@ class LockSession(ServiceInterface):
     def LockedHint(self)->'b':
         return Path(os.environ['XDG_RUNTIME_DIR'],'locked').exists()
 
+class LoginManager(ServiceInterface):
+    def __init__(self): super().__init__('org.freedesktop.login1.Manager')
+
+    @method()
+    def GetSessionByPID(self,pid:'u')->'o':
+        return '/org/freedesktop/login1/session/test'
+
 async def main():
     bus=await MessageBus().connect()
-    bus.export('/org/freedesktop/login1/session/self',LockSession())
+    session=LockSession()
+    bus.export('/org/freedesktop/login1/session/self',session)
+    bus.export('/org/freedesktop/login1/session/test',session)
+    bus.export('/org/freedesktop/login1',LoginManager())
     await bus.request_name('org.freedesktop.login1')
     bus.export('/org/freedesktop/Notifications',Notifications())
     await bus.request_name('org.freedesktop.Notifications')
-    await asyncio.Event().wait()
+    previous=False
+    while True:
+        current=session.LockedHint
+        if current != previous:
+            session.emit_properties_changed({'LockedHint':current})
+            previous=current
+        await asyncio.sleep(.05)
 
 if __name__=='__main__':asyncio.run(main())

@@ -137,9 +137,13 @@ def toplevel_case(root,env,processes,cli,ipc,ready,latest):
     """Exercise real window identity, focus serialization and stale observations."""
     primary=json.loads((root/'fixture-state.json').read_text())
     secondary_path=root/'secondary-fixture.json'
+    watcher=subprocess.Popen([str(SKILL/'target/debug/wayfire-computer-use'),'toplevel','wait','--title-regex','^Delayed fixture$','--state','mapped','--timeout-secs','5'],env=env,stdout=subprocess.PIPE,text=True)
+    time.sleep(.15)
+    assert watcher.poll() is None
     with (root/'secondary-fixture.log').open('w') as log:
-        secondary=subprocess.Popen([sys.executable,str(MAINTENANCE/'tests/desktop_fixture.py'),'--state',str(secondary_path),'--animate'],env=env,stdout=log,stderr=log)
+        secondary=subprocess.Popen([sys.executable,str(MAINTENANCE/'tests/desktop_fixture.py'),'--state',str(secondary_path),'--animate'],env={**env,'WF_FIXTURE_TITLE':'Delayed fixture'},stdout=log,stderr=log)
     processes.append(('secondary-fixture',secondary))
+    assert json.loads(watcher.communicate(timeout=6)[0])['toplevel']['pid']==secondary.pid
     wait_for(secondary_path.exists,processes)
     wait_for(lambda: any(v['pid']==secondary.pid for v in cli(['toplevel','list'])['toplevels']),processes)
     views=cli(['toplevel','list'])
@@ -264,6 +268,7 @@ def inside(root):
                     return json.loads(exact(int.from_bytes(exact(4),'little')))
             target=next(o for o in ipc('window-rules/list-outputs') if o['name']==target_output)
             state=json.loads((root/'fixture-state.json').read_text())
+            wait_for(lambda:any(v.get('title')==state['title'] for v in ipc('window-rules/list-views')),processes)
             view=next(v for v in ipc('window-rules/list-views') if v.get('title')==state['title'])
             moved=ipc('window-rules/configure-view',{'id':view['id'],'output_id':target['id'],'geometry':{'x':100,'y':100,'width':700,'height':400},'tiled-edges':0,'fullscreen':False})
             if moved.get('result')!='ok':raise RuntimeError('ISOLATED_FIXTURE_MOVE_FAILED')
@@ -496,7 +501,17 @@ def inside(root):
             if cli(['doctor']).get('locked_hint') is not False:raise RuntimeError('LOCK_HINT_UNAVAILABLE')
             unlocked=cli(['start','--output',target_output,'--auto-select-output'],timeout=75)
             if unlocked.get('status')!='ready':raise RuntimeError('LOCK_TEST_START_FAILED')
+            first=latest=unlocked
+            act({'type':'click','button':'left','x':300,'y':213},'lock-focus')
+            pending=subprocess.Popen([binary,'act'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+            before=json.loads((root/'fixture-state.json').read_text())['text']
+            pending.stdin.write(json.dumps(envelope({'type':'type','text':'aA'*100},'lock-text')))
+            pending.stdin.close()
+            wait_for(lambda:json.loads((root/'fixture-state.json').read_text())['text']!=before,processes)
             (root/'locked').touch()
+            cancelled=json.loads(pending.stdout.readline())
+            pending.wait(timeout=5)
+            assert cancelled['code']=='ACTION_CANCELLED' and cancelled['action_executed'],cancelled
             wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
             if cli(['doctor']).get('locked_hint') is not True:raise RuntimeError('LOCK_HINT_MISSED')
             (root/'locked').unlink()
