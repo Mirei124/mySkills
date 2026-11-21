@@ -19,6 +19,8 @@ The adapter declares its Python MCP SDK dependency in the script. The first uv r
 |---|---|
 | `wayfire_start` | Start a session or attach to the active session. Supply `output` when several outputs exist. Pass `auto_select_output: true` only when the user authorized the Portal selector click. Returns an image. |
 | `wayfire_observe` | Capture a fresh image in the attached session. Use after another client acts or focuses a window. |
+| `wayfire_ui_find` | Read matching controls by role and exact name in the focused or specified window. Compare the returned output and center with the current screenshot. |
+| `wayfire_ui_tree` | Read the accessible tree by window ID. Both discovery tools leave the last observation intact. |
 | `wayfire_act` | Pass one bare action under `action`, using [the CLI action fields](actions.md). Inspect the last returned PNG first. The adapter pins its observation ID and generates a new request ID per call. |
 | `wayfire_stop` | Stop the attached owner and inspect its cleanup result. Can interrupt an action. |
 

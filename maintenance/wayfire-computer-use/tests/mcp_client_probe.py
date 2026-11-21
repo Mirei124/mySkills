@@ -19,7 +19,7 @@ async def main():
         await client.initialize()
         listing = await client.list_tools()
         assert {tool.name for tool in listing.tools} == {
-            "wayfire_start", "wayfire_act", "wayfire_stop", "wayfire_observe",
+            "wayfire_start", "wayfire_act", "wayfire_stop", "wayfire_observe", "wayfire_ui_find", "wayfire_ui_tree",
         }
 
         async def image_call(name, arguments):
@@ -34,6 +34,16 @@ async def main():
             return frame
 
         first = await image_call("wayfire_start", {"output": output, "auto_select_output": True})
+        if os.environ.get("WF_UI_TEST"):
+            found = await client.call_tool("wayfire_ui_find", {"role":"button", "name":"Verify location"})
+            assert not found.isError, found.content
+            match = found.structuredContent
+            tree = await client.call_tool("wayfire_ui_tree", {"window_id":match["window_id"]})
+            assert match["nodes"][0] in tree.structuredContent["nodes"]
+            center = match["nodes"][0]["center"]
+            await image_call("wayfire_act", {"action":{"type":"click","button":"left",**center}})
+            events=json.loads((Path(os.environ["XDG_RUNTIME_DIR"])/"fixture-state.json").read_text())["events"]
+            assert any(event["type"]=="located-button-clicked" for event in events)
         second = await image_call("wayfire_act", {"action": {"type": "wait", "duration_ms": 5}})
         assert second["session_id"] == first["session_id"]
         assert second["observation_id"] != first["observation_id"]

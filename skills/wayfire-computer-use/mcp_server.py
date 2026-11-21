@@ -120,6 +120,24 @@ def create_server(binary: Path) -> FastMCP:
             observation_id = None
             return image_result(result) if result["status"] == "ready" else await capture()
 
+    async def ui_result(*args):
+        result = await cli("ui", *args)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(result))],
+                              structuredContent=result)
+
+    @server.tool()
+    async def wayfire_ui_tree(window_id: int = Field(gt=0)) -> CallToolResult:
+        """Read accessible roles, names, states and bounds in one mapped Wayfire window."""
+        return await ui_result("tree", "--window-id", str(window_id))
+
+    @server.tool()
+    async def wayfire_ui_find(role: str, name: str, window_id: int | None = Field(default=None, gt=0)) -> CallToolResult:
+        """Find exact accessible names in the specified or focused window. Verify the output and center against the last PNG before input."""
+        args = ["find", "--role", role, "--name", name]
+        if window_id is not None:
+            args.extend(["--window-id", str(window_id)])
+        return await ui_result(*args)
+
     @server.tool()
     async def wayfire_observe() -> CallToolResult:
         """Get a fresh PNG of the attached session, including after external focus changes."""
