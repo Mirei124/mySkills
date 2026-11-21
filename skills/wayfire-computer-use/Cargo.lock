@@ -1816,6 +1816,7 @@ dependencies = [
  "libc",
  "pipewire",
  "png",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

@@ -24,7 +24,7 @@ pub struct FocusTarget {
     pub pid: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Geometry {
     pub x: f64,
     pub y: f64,
@@ -158,16 +158,20 @@ impl Ipc {
     }
 }
 
-pub async fn wait(app_id: &str, focused: bool, seconds: u64) -> Result<Value> {
+pub async fn wait(
+    app_id: Option<&str>,
+    title: Option<&regex::Regex>,
+    focused: bool,
+    seconds: u64,
+) -> Result<Value> {
     tokio::time::timeout(Duration::from_secs(seconds), async {
         let mut ipc = Ipc::connect(None).await?;
         loop {
-            if let Some(view) = ipc
-                .views()
-                .await?
-                .into_iter()
-                .find(|v| v.app_id == app_id && (!focused || v.activated))
-            {
+            if let Some(view) = ipc.views().await?.into_iter().find(|v| {
+                app_id.is_none_or(|id| v.app_id == id)
+                    && title.is_none_or(|regex| regex.is_match(&v.title))
+                    && (!focused || v.activated)
+            }) {
                 return Ok(json!({"status":"ok","toplevel":view,"sends_input":false}));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -177,13 +181,13 @@ pub async fn wait(app_id: &str, focused: bool, seconds: u64) -> Result<Value> {
     .context("TOPLEVEL_WAIT_TIMEOUT")?
 }
 
-pub async fn mapped_views() -> Result<Vec<Toplevel>> {
-    Ipc::connect(None).await?.views().await
+pub async fn mapped_views(pid: Option<libc::pid_t>) -> Result<Vec<Toplevel>> {
+    Ipc::connect(pid).await?.views().await
 }
 
 pub async fn list() -> Result<Value> {
     tokio::time::timeout(TIMEOUT, async {
-        let views = mapped_views().await?;
+        let views = mapped_views(None).await?;
         Ok(json!({"status":"ok","backend":"wayfire-ipc","sends_input":false,"toplevels":views}))
     })
     .await

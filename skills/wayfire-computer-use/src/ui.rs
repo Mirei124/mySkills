@@ -19,7 +19,8 @@ pub async fn inspect(id: Option<u64>, filter: Option<(String, String)>) -> Resul
 }
 
 async fn query(id: Option<u64>, filter: Option<(String, String)>) -> Result<Value> {
-    let views = toplevel::mapped_views().await?;
+    let compositor = crate::desktop::Compositor::connect()?;
+    let views = toplevel::mapped_views(Some(compositor.pid)).await?;
     let candidates: Vec<_> = views
         .iter()
         .filter(|v| id.map_or(v.activated, |id| v.id == id))
@@ -162,6 +163,20 @@ async fn query(id: Option<u64>, filter: Option<(String, String)>) -> Result<Valu
                 .map(|child| (child, depth + 1)),
         );
     }
+    let current = toplevel::mapped_views(Some(compositor.pid)).await?;
+    let same: Vec<_> = current
+        .iter()
+        .filter(|v| v.pid == Some(pid) && v.title == view.title)
+        .collect();
+    ensure!(
+        same.len() == 1
+            && same[0].id == view.id
+            && same[0].output_name == view.output_name
+            && same[0].geometry == view.geometry
+            && same[0].base_geometry == view.base_geometry
+            && (id.is_some() || same[0].activated),
+        "UI_WINDOW_CHANGED"
+    );
     Ok(
         json!({"status":"ok","window_id":view.id,"output":output_name,"nodes":nodes,"sends_input":false}),
     )

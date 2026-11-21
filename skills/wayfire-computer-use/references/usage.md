@@ -65,6 +65,8 @@ Build: a compatible Rust/Cargo toolchain, a C compiler for native binding build 
 
 `probe-capture --output NAME --path FILE [--auto-select]` is a diagnostic capture-only command. Its explicit selector automation can target a confirmed named output, including a headless test output; ordinary sessions use the same explicit-selection and geometry checks, with the selected transform/scale limits above. It acquires the per-display lock and closes its Portal session on exit.
 
+Use `toplevel wait --app-id ID` or `toplevel wait --title-regex REGEX` to wait for a mapped window. Add `--state focused` for activation or `--state mapped` for the default. The timeout is in seconds (`--timeout-secs`, 1–120). Polling is read-only.
+
 ## Locate accessible controls
 
 Use `ui tree --window-id ID` to inspect a mapped window, or `ui find --window-id ID --role button --name "Save"` for exact accessible-name matches. Omitting the ID in `ui find` selects the uniquely activated mapped window. Results include the output name, a depth-first list with role, name, states and depth, output-local bounds and a center when available. Use `center` for the selected output's screenshot; `desktop_center` includes the output's logical layout offset. Multiple matches require disambiguation. Missing geometry or an off-output center yields null coordinates.

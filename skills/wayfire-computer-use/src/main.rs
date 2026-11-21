@@ -81,11 +81,19 @@ enum ToplevelCommand {
     List,
     /// Wait for a mapped application window, optionally requiring focus.
     Wait {
+        #[arg(
+            long,
+            required_unless_present = "title_regex",
+            conflicts_with = "title_regex"
+        )]
+        app_id: Option<String>,
         #[arg(long)]
-        app_id: String,
+        title_regex: Option<regex::Regex>,
+        #[arg(long,value_parser=["focused","mapped"],conflicts_with="focused")]
+        state: Option<String>,
         #[arg(long)]
         focused: bool,
-        #[arg(long, default_value_t=10,value_parser=clap::value_parser!(u64).range(1..=120))]
+        #[arg(long, visible_alias="timeout-secs", default_value_t=10,value_parser=clap::value_parser!(u64).range(1..=120))]
         timeout: u64,
     },
     /// Request focus for one listed window and verify the resulting focus.
@@ -187,9 +195,19 @@ async fn main() {
         Command::Toplevel { command } => match command {
             ToplevelCommand::Wait {
                 app_id,
+                title_regex,
+                state,
                 focused,
                 timeout,
-            } => toplevel::wait(&app_id, focused, timeout).await,
+            } => {
+                toplevel::wait(
+                    app_id.as_deref(),
+                    title_regex.as_ref(),
+                    focused || state.as_deref() == Some("focused"),
+                    timeout,
+                )
+                .await
+            }
             ToplevelCommand::List => toplevel::list().await,
             ToplevelCommand::Focus { id, pid } => {
                 session::focus_toplevel(toplevel::FocusTarget { id, pid }).await
