@@ -21,6 +21,12 @@
       "properties": {
         "type": {
           "const": "wait"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000,
+          "default": 250
         }
       },
       "additionalProperties": false

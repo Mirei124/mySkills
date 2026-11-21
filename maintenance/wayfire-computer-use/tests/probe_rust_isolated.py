@@ -367,6 +367,8 @@ def inside(root):
             latest=cli(['act','--latest'], json.dumps({'type':'wait','duration_ms':600}))
             if latest.get('status')!='ok' or not latest.get('request_id') or latest['observation_id']==first['observation_id'] or time.monotonic()-began<.6:
                 raise RuntimeError('LATEST_WAIT_FAILED: '+repr(latest))
+            assert latest['resolved_envelope']['observation_id']==first['observation_id']
+            assert latest['resolved_envelope']['request_id']==latest['request_id']
             def envelope(action,identifier):
                 return {'request_id':identifier,'session_id':first['session_id'],'observation_id':latest['observation_id'],'action':action}
             def act(action,identifier):

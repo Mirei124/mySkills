@@ -27,7 +27,7 @@ enum Command {
         #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
         /// Seconds of inactivity before the owner stops.
-        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        #[arg(long, visible_alias = "idle-timeout-secs", default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
         idle_timeout: u64,
     },
     #[command(hide = true)]
@@ -37,7 +37,7 @@ enum Command {
         #[arg(long = "auto-select-output", alias = "auto-select-single-output")]
         auto_select_single_output: bool,
         /// Seconds of inactivity before the owner stops.
-        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        #[arg(long, visible_alias = "idle-timeout-secs", default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=3600))]
         idle_timeout: u64,
     },
     Act {
@@ -204,18 +204,7 @@ async fn main() {
     };
     match result {
         Ok(mut value) => {
-            if value["status"] == "error"
-                && value["code"].as_str().is_some_and(|code| {
-                    matches!(
-                        code,
-                        "CAPTURE_TIMEOUT" | "INPUT_RESPONSE_TIMEOUT" | "ACTION_TIMEOUT"
-                    )
-                })
-            {
-                value["recovery"] = json!(
-                    "Run stop, start --output OUTPUT, list and focus the intended toplevel, then inspect a fresh screenshot before input."
-                );
-            }
+            add_recovery(&mut value);
             println!("{value}");
             if value["status"] == "error" {
                 std::process::exit(1);
@@ -224,14 +213,39 @@ async fn main() {
         Err(error) => {
             let code = error.to_string();
             let mut response = json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":selector_click_may_have_executed,"retryable":false});
-            if code == "SESSION_UNAVAILABLE" || code == "SESSION_RESPONSE_TIMEOUT" {
-                response["recovery"] = json!(
-                    "Run stop, start --output OUTPUT, list and focus the intended toplevel, then inspect a fresh screenshot before input."
-                );
-            }
+            add_recovery(&mut response);
             println!("{response}");
             std::process::exit(1);
         }
+    }
+}
+
+fn add_recovery(result: &mut serde_json::Value) {
+    let Some(code) = result["code"].as_str() else {
+        return;
+    };
+    if matches!(
+        code,
+        "STALE_OBSERVATION"
+            | "LAYOUT_CHANGED"
+            | "SESSION_UNAVAILABLE"
+            | "SESSION_RESPONSE_TIMEOUT"
+            | "ACTION_TIMEOUT"
+            | "INPUT_RESPONSE_TIMEOUT"
+            | "CAPTURE_TIMEOUT"
+            | "CAPTURE_ENDED"
+            | "CAPTURE_UNAVAILABLE"
+            | "PORTAL_SERVICE_LOST"
+    ) || code.starts_with("PIPEWIRE_STREAM_ERROR")
+    {
+        result["recovery"] = json!([
+            ["stop"],
+            ["start", "--output", "<output>"],
+            ["toplevel", "list"],
+            ["toplevel", "focus", "--id", "<window-id>"],
+            ["act", "--latest"]
+        ]);
+        result["recovery_screenshot_action"] = json!({"type":"screenshot"});
     }
 }
 

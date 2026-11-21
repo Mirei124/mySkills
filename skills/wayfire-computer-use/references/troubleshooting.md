@@ -40,4 +40,9 @@ A selector disappearance alone does not establish this diagnosis; inspect eviden
 
 ## Lock-screen feedback
 
-The runtime currently exposes no dedicated locked status/error and does not subscribe to logind's LockedHint. A session may remain active while a screenshot shows the lock screen. If capture is invalidated, the ordinary session/stream-loss handling stops control and attempts an end notification, without identifying a lock as the cause. Do not interpret active as unlocked or an end notification as a lock-specific notice. Stop input when the observed screen is locked; any test-driver LockedHint guard is separate from runtime behavior. The completed-lock screenshot test verified lock-screen content in the tested configuration, not automatic lock detection.
+Doctor and active status expose logind LockedHint as true, false or null. A reported lock cancels control. Lockers can omit or delay the hint; inspect the screen before input. A simulated lock transition is covered by the private session test.
+
+
+## Recovery
+
+For stale observations, invalidated layout, capture loss or an expired owner, the CLI error may contain an ordered `recovery` array of argument lists. Substitute the selected output and verified window ID. Pass `recovery_screenshot_action` on stdin for the final observation and inspect the returned image before further input. Never automatically replay the preceding action.

@@ -554,8 +554,8 @@ impl Shared {
         Ok(response)
     }
 }
-fn status(engine: &Engine) -> Value {
-    json!({"status":"active","owner_pid":std::process::id(),"output":engine.output.as_ref().map(|o|&o.name),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
+fn status(engine: &Engine, idle_timeout: u64) -> Value {
+    json!({"status":"active","owner_pid":std::process::id(),"idle_timeout_secs":idle_timeout,"output":engine.output.as_ref().map(|o|&o.name),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();
@@ -655,7 +655,7 @@ pub async fn serve(output: Option<String>, auto_select: bool, idle_timeout: u64)
             result=&mut preparing,if !prepared=>{
                 prepared=true;
                 match result{
-                    Ok(Ok(mut first))=>{clear_parent_death_guard()?;*shared.last.lock().unwrap()=Instant::now();first["owner_pid"]=json!(std::process::id());let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine);publish(&root.join("ready.json"),&first)?;},
+                    Ok(Ok(mut first))=>{clear_parent_death_guard()?;*shared.last.lock().unwrap()=Instant::now();first["owner_pid"]=json!(std::process::id());let engine=shared.engine.lock().await;*shared.snapshot.lock().unwrap()=status(&engine,idle_timeout);publish(&root.join("ready.json"),&first)?;},
                     error=>{let engine=shared.engine.lock().await;let code=match error{Ok(Err(error))=>format!("{error:#}"),Err(error)=>format!("PREPARE_TASK_FAILED: {error}"),_=>unreachable!()};publish(&root.join("ready.json"),&json!({"status":"error","code":code,"action_executed":false,"selector_click_may_have_executed":engine.bootstrap}))?;drop(engine);shared.cancel();break;}
                 }
             },
@@ -806,7 +806,10 @@ pub async fn act_latest(action: Value) -> Result<Value> {
     action.validate()?;
     let status = send(json!({"command":"status"})).await?;
     ensure!(status["status"] == "active", "SESSION_NOT_ACTIVE");
-    send(json!({"action": action, "request_id":token("req")?, "session_id":status["session_id"], "observation_id":status["observation_id"]})).await
+    let envelope = json!({"action": action, "request_id":token("req")?, "session_id":status["session_id"], "observation_id":status["observation_id"]});
+    let mut result = send(envelope.clone()).await?;
+    result["resolved_envelope"] = envelope;
+    Ok(result)
 }
 
 pub async fn start(output: Option<String>, auto_select: bool, idle_timeout: u64) -> Result<Value> {
