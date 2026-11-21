@@ -23,7 +23,7 @@ def run_toolkits(root, env, binary, output, ipc):
     display = displays.read_text().strip()
     assert display.startswith(':') and display[1:].isdigit(), display
     report = {}
-    for name in ('terminal','qt','xwayland','qt-entry','xwayland-entry','chromium','electron'):
+    for name in ('terminal','qt','xwayland','qt-entry','xwayland-entry','xwayland-file','chromium','electron'):
         title = 'Wayfire probe ' + name
         label = 'Confirm probe'
         case_env = {**env,'LANGUAGE':'C','LC_ALL':'C.UTF-8'}
@@ -40,6 +40,14 @@ def run_toolkits(root, env, binary, output, ipc):
         elif name == 'xwayland-entry':
             case_env.update(DISPLAY=display,GDK_BACKEND='x11')
             command=['zenity','--entry','--title',title,'--text','Paste the test text']
+        elif name == 'xwayland-file':
+            directory=root/'chooser-fixture'
+            directory.mkdir()
+            chosen=directory/'probe-document.txt'
+            chosen.write_text('Isolated file chooser test')
+            label='OK'
+            case_env.update(DISPLAY=display,GDK_BACKEND='x11')
+            command=['zenity','--file-selection','--title',title,'--filename',str(chosen)]
         elif name == 'terminal':
             received=root/'terminal-input.txt'
             reader="import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_bytes(sys.stdin.buffer.readline()); time.sleep(30)"
@@ -111,6 +119,12 @@ def run_toolkits(root, env, binary, output, ipc):
                 assert received.read_bytes()==(sample+'\n').encode(),received
                 result['paste_verified']=True
                 continue
+            if name=='xwayland-file':
+                tree=cli('ui','tree','--window-id',str(view['id']))
+                buttons=[n['name'] for n in tree['nodes'] if n['role'] in ('button','push button')]
+                result['button_names']=buttons
+                missing=cli('ui','find','--window-id',str(view['id']),'--role','button','--name','Open')
+                assert missing.get('nodes')==[] and label in buttons,(missing,buttons)
             found=cli('ui','find','--window-id',str(view['id']),'--role','button','--name',label)
             result['find']=found
             if found.get('status')=='error':
@@ -135,8 +149,12 @@ print(json.dumps(describe(root,3)))
                         'request_id':'toolkit-'+name})
             assert clicked['status']=='ok',clicked
             shutil.copyfile(clicked['screenshot_path'],root/(name+'-after.png'))
-            if name in ('qt','xwayland'):
+            if name in ('qt','xwayland','xwayland-file'):
                 assert child.wait(timeout=3)==0
+                if name=='xwayland-file':
+                    returned=(root/(name+'-stdout')).read_text().rstrip('\n')
+                    assert returned==str(chosen),returned
+                    result['selected_file']=returned
             else:
                 confirmed=cli('toplevel','wait','--title-regex','Confirmed probe','--timeout','3')
                 assert confirmed.get('toplevel',{}).get('id')==view['id'],confirmed
