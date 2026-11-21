@@ -12,3 +12,11 @@ The private dual-output test places one disposable window on HEADLESS-2 at scale
 The first browser runs had mapped windows but no browser application on the private AT-SPI registry. Lookup failed explicitly. Successful runs enabled IsEnabled on the isolated accessibility service, exported the private accessibility bus address, and requested complete renderer accessibility. Electron also called setAccessibilitySupportEnabled(true). The probe uses disposable profiles and memory-backed accessibility settings.
 
 The earlier one-off report of an unresponsive Xwayland native dialog lacks the original application, window and dialog identity. The Zenity case did not reproduce it. These measurements establish one working Xwayland dialog and do not identify the cause of the historical failure. No Xwayland-specific coordinate correction was justified.
+
+## Text delivery, drag selection and scroll distance
+
+The same secondary-output harness checks the literal string `Test 😀𠀀 é 中文`, including the decomposed accent. KDialog and Xwayland Zenity entry dialogs return the accepted text on stdout. A Kitty Wayland window runs a Python line reader and uses Ctrl+Shift+V. Each returned UTF-8 line must match byte for byte. Chromium and Electron expose the input value in their window title, which must match exactly.
+
+The browser drag test queries the accessible selection region, drags across a fixed monospace string and checks the browser's selected text. The scroll test sends both axes over scrollable content, waits for movement, then reads the settled CSS offsets. On Chromium 158 and Electron 44 the accumulated offsets after requests of 80, 160 and −80 per axis were (96,96), (288,288) and (192,192). These measurements apply to the fixture at scale 1.
+
+A separate exploratory Xwayland Zenity file chooser returned no accessible button matching the exact name Open. No click was sent; this run does not establish the historical unresponsive-click behavior. The original Xwayland investigation is deferred at the user's request.

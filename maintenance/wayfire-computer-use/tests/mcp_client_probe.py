@@ -65,8 +65,75 @@ async def main():
         await image_call("wayfire_act", {"action": {"type":"type","text":"MCP input"}})
         fixture = Path(os.environ["XDG_RUNTIME_DIR"]) / "fixture-state.json"
         assert json.loads(fixture.read_text())["text"].endswith("MCP input")
+        before=json.loads(fixture.read_text())["text"]
+        pending=asyncio.create_task(client.call_tool("wayfire_act", {"action":{"type":"type","text":"aA"*100}}))
+        for _ in range(80):
+            if json.loads(fixture.read_text())["text"] != before:
+                break
+            await asyncio.sleep(.05)
+        else:
+            raise AssertionError("MCP input did not begin")
         stopped = await client.call_tool("wayfire_stop", {})
+        interrupted=await asyncio.wait_for(pending,5)
+        assert interrupted.isError and "ACTION_CANCELLED" in interrupted.content[0].text,interrupted.content
+        partial=json.loads(fixture.read_text())["text"]
+        await asyncio.sleep(.25)
+        assert len(before)<len(partial)<len(before)+200 and json.loads(fixture.read_text())["text"]==partial
+
         assert not stopped.isError and not Path(first["screenshot_path"]).exists()
+
+
+    async with stdio_client(params) as (reader, writer), ClientSession(reader, writer) as client:
+        await client.initialize()
+        created=await client.call_tool("wayfire_start", {"output":output,"auto_select_output":True})
+        assert not created.isError,created.content[0]
+        image_path=Path(json.loads(created.content[0].text)["screenshot_path"])
+        assert image_path.exists()
+    for _ in range(100):
+        if not image_path.exists() and not (image_path.parent/"socket").exists():
+            break
+        await asyncio.sleep(.05)
+    else:
+        raise AssertionError("Graceful MCP disconnect did not clean up the created owner")
+
+
+    # Kill only the dedicated adapter, then observe the independent owner's idle cleanup.
+    server = await asyncio.create_subprocess_exec(
+        sys.executable, str(adapter), "--binary", binary, stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, limit=32*1024*1024)
+    async def request(method, args, number=None):
+        message={"jsonrpc":"2.0","method":method,"params":args}
+        if number is not None:
+            message["id"]=number
+        server.stdin.write(json.dumps(message).encode()+b"\n")
+        await server.stdin.drain()
+        if number is not None:
+            reply=json.loads(await asyncio.wait_for(server.stdout.readline(),75))
+            assert reply["id"]==number and "error" not in reply,reply.get("error")
+            return reply["result"]
+    try:
+        await request("initialize",{"protocolVersion":"2025-06-18","capabilities":{},
+                      "clientInfo":{"name":"abrupt-disconnect-probe","version":"1"}},1)
+        await request("notifications/initialized",{})
+        started=await request("tools/call",{"name":"wayfire_start","arguments":{
+            "output":output,"auto_select_output":True,"idle_timeout":3}},2)
+        assert not started.get("isError"),started["content"][0]
+        metadata=json.loads(started["content"][0]["text"])
+        image_path=Path(metadata["screenshot_path"])
+        assert image_path.exists()
+    finally:
+        if server.returncode is None:
+            server.kill()
+        await server.wait()
+    status=await asyncio.create_subprocess_exec(binary,"status",stdout=asyncio.subprocess.PIPE)
+    active=json.loads((await status.communicate())[0])
+    assert active.get("session_id")==metadata["session_id"] and active["status"]=="active",active
+    for _ in range(120):
+        if not image_path.exists() and not (image_path.parent/"socket").exists():
+            break
+        await asyncio.sleep(.05)
+    else:
+        raise AssertionError("Owner did not expire after abrupt MCP disconnect")
 
 
 if __name__ == "__main__":
