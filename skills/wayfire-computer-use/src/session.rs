@@ -552,7 +552,19 @@ impl Shared {
                 if executed {
                     engine.observation = None;
                 }
-                json!({"status":"error","code":format!("{error:#}"),"retryable":false})
+                let mut response =
+                    json!({"status":"error","code":format!("{error:#}"),"retryable":false});
+                if *stop.borrow() {
+                    response["stop_reason"] = json!(*self.reason.lock().unwrap());
+                }
+                if let Some(cause) = engine
+                    .capture
+                    .as_ref()
+                    .and_then(|capture| capture.permanent_error())
+                {
+                    response["capture_error"] = json!(cause);
+                }
+                response
             }
         };
         response["request_id"] = json!(envelope.request_id);

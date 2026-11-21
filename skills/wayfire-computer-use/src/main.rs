@@ -255,6 +255,11 @@ fn add_recovery(result: &mut serde_json::Value) {
             | "CAPTURE_UNAVAILABLE"
             | "PORTAL_SERVICE_LOST"
     ) || code.starts_with("PIPEWIRE_STREAM_ERROR")
+        || result["capture_error"].is_string()
+        || matches!(
+            result["stop_reason"].as_str(),
+            Some("capture ended" | "portal session or service lost" | "idle timeout")
+        )
     {
         result["recovery"] = json!([
             ["stop"],
@@ -272,4 +277,40 @@ fn stdin_json() -> anyhow::Result<serde_json::Value> {
     std::io::stdin().take(131_073).read_to_string(&mut text)?;
     anyhow::ensure!(text.len() <= 131_072, "REQUEST_TOO_LARGE");
     Ok(serde_json::from_str(&text)?)
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn permanent_capture_errors_preserve_the_cause_and_order_the_recovery_steps() {
+        for mut result in [
+            json!({"code":"CAPTURE_ENDED"}),
+            json!({"code":"PIPEWIRE_STREAM_ERROR: disconnected"}),
+            json!({"code":"INVALID_FRAME_RANGE","capture_error":"INVALID_FRAME_RANGE"}),
+            json!({"code":"ACTION_CANCELLED","capture_error":"UNSUPPORTED_FRAME_FORMAT"}),
+        ] {
+            let original = result.clone();
+            add_recovery(&mut result);
+            assert_eq!(result["code"], original["code"]);
+            assert_eq!(result["capture_error"], original["capture_error"]);
+            assert_eq!(
+                result["recovery"],
+                json!([
+                    ["stop"],
+                    ["start", "--output", "<output>"],
+                    ["toplevel", "list"],
+                    ["toplevel", "focus", "--id", "<window-id>"],
+                    ["act", "--latest"]
+                ])
+            );
+            assert_eq!(
+                result["recovery_screenshot_action"],
+                json!({"type":"screenshot"})
+            );
+        }
+        let mut user_cancel = json!({"code":"ACTION_CANCELLED"});
+        add_recovery(&mut user_cancel);
+        assert!(user_cancel.get("recovery").is_none());
+    }
 }

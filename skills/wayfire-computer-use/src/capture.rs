@@ -15,7 +15,6 @@ use std::{
 
 #[derive(Clone)]
 struct Frame {
-    sequence: u64,
     width: u32,
     height: u32,
     pixels: Vec<u8>,
@@ -26,6 +25,45 @@ struct Frame {
 struct Shared {
     frame: Option<Arc<Frame>>,
     error: Option<String>,
+    stability: Option<Stability>,
+}
+
+struct Stability {
+    started: Instant,
+    after: i64,
+    required: u8,
+    count: u8,
+    matched: Option<Arc<Frame>>,
+    missing_timestamp: bool,
+}
+
+impl Stability {
+    fn record(&mut self, frame: &Arc<Frame>, previous: Option<&Frame>) {
+        if self.matched.is_some() || frame.received < self.started {
+            return;
+        }
+        let Some(pts) = frame.pts else {
+            self.missing_timestamp = true;
+            return;
+        };
+        if pts < self.after {
+            self.count = 0;
+            return;
+        }
+        let identical = previous.is_some_and(|p| {
+            p.width == frame.width && p.height == frame.height && p.pixels == frame.pixels
+        });
+        if !identical {
+            self.count = 0;
+        }
+        if previous.is_some_and(|p| p.pts == Some(pts)) {
+            return;
+        }
+        self.count += 1;
+        if self.count == self.required {
+            self.matched = Some(frame.clone());
+        }
+    }
 }
 pub struct Capture {
     shared: Arc<Mutex<Shared>>,
@@ -69,9 +107,13 @@ impl Capture {
             output_gate: Mutex::new(()),
         }
     }
+    pub fn permanent_error(&self) -> Option<String> {
+        self.shared.lock().unwrap().error.clone()
+    }
+
     pub fn check(&self) -> Result<()> {
         ensure!(!self.stop.load(Ordering::Acquire), "CAPTURE_ENDED");
-        if let Some(error) = &self.shared.lock().unwrap().error {
+        if let Some(error) = self.permanent_error() {
             bail!("{error}");
         }
         Ok(())
@@ -86,46 +128,54 @@ impl Capture {
         self.observe_stable(path, after, 1)
     }
     pub fn observe_stable(&self, path: &Path, after: i64, required: u8) -> Result<(u32, u32)> {
-        let mut previous: Option<Arc<Frame>> = None;
-        let mut count = 0;
         ensure!(after >= 0, "CLOCK_UNAVAILABLE");
         let started = Instant::now();
+        if required > 1 {
+            let mut shared = self.shared.lock().unwrap();
+            ensure!(shared.stability.is_none(), "STABILITY_WAIT_IN_PROGRESS");
+            shared.stability = Some(Stability {
+                started,
+                after,
+                required,
+                count: 0,
+                matched: None,
+                missing_timestamp: false,
+            });
+        }
+        let frame = self.wait_frame(started, after, required > 1);
+        if required > 1 {
+            self.shared.lock().unwrap().stability = None;
+        }
+        let frame = frame?;
+        let _gate = self.output_gate.lock().unwrap();
+        ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
+        write_png(path, frame.width, frame.height, &frame.pixels)?;
+        Ok((frame.width, frame.height))
+    }
+
+    fn wait_frame(&self, started: Instant, after: i64, stable: bool) -> Result<Arc<Frame>> {
         loop {
             ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
             ensure!(
                 started.elapsed() < Duration::from_secs(8),
                 "CAPTURE_TIMEOUT"
             );
-            let frame = {
+            {
                 let state = self.shared.lock().unwrap();
                 if let Some(error) = &state.error {
                     bail!("{error}");
                 }
-                state.frame.clone()
-            };
-            if let Some(frame) = frame
-                && frame.received >= started
-            {
-                let pts = frame.pts.context("FRAME_TIMESTAMP_UNAVAILABLE")?;
-                if pts >= after && previous.as_ref().is_none_or(|p| p.pts != frame.pts) {
-                    count = if previous.as_ref().is_some_and(|p| {
-                        p.sequence.wrapping_add(1) == frame.sequence
-                            && p.width == frame.width
-                            && p.height == frame.height
-                            && p.pixels == frame.pixels
-                    }) {
-                        count + 1
-                    } else {
-                        1
-                    };
-                    if count < required {
-                        previous = Some(frame);
-                        continue;
+                if stable {
+                    let run = state.stability.as_ref().context("STABILITY_WAIT_ENDED")?;
+                    ensure!(!run.missing_timestamp, "FRAME_TIMESTAMP_UNAVAILABLE");
+                    if let Some(frame) = &run.matched {
+                        return Ok(frame.clone());
                     }
-                    let _gate = self.output_gate.lock().unwrap();
-                    ensure!(!self.stop.load(Ordering::Acquire), "ACTION_CANCELLED");
-                    write_png(path, frame.width, frame.height, &frame.pixels)?;
-                    return Ok((frame.width, frame.height));
+                } else if let Some(frame) = &state.frame
+                    && frame.received >= started
+                    && frame.pts.context("FRAME_TIMESTAMP_UNAVAILABLE")? >= after
+                {
+                    return Ok(frame.clone());
                 }
             }
             thread::sleep(Duration::from_millis(10));
@@ -211,13 +261,13 @@ fn run(fd: OwnedFd, node: u32, shared: Arc<Mutex<Shared>>, stop: Arc<AtomicBool>
             let result = unsafe { copy_frame(raw, &data.format) };
             unsafe { stream.queue_raw_buffer(raw) };
             match result {
-                Ok(mut frame) => {
+                Ok(frame) => {
+                    let frame = Arc::new(frame);
                     let mut state = data.shared.lock().unwrap();
-                    frame.sequence = state
-                        .frame
-                        .as_ref()
-                        .map_or(1, |prev| prev.sequence.wrapping_add(1));
-                    state.frame = Some(Arc::new(frame));
+                    let previous = state.frame.replace(frame.clone());
+                    if let Some(run) = &mut state.stability {
+                        run.record(&frame, previous.as_deref());
+                    }
                 }
                 Err(error) => data.shared.lock().unwrap().error = Some(error.to_string()),
             }
@@ -374,7 +424,6 @@ unsafe fn copy_frame(
         }
     }
     Ok(Frame {
-        sequence: 0,
         width,
         height,
         pixels,
@@ -413,6 +462,41 @@ fn request_header(stream: &pw::stream::Stream) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stability_observes_intermediate_changes_and_ignores_duplicate_timestamps() {
+        let started = Instant::now();
+        let mut run = Stability {
+            started,
+            after: 10,
+            required: 3,
+            count: 0,
+            matched: None,
+            missing_timestamp: false,
+        };
+        let mut last = None;
+        for (pts, pixel, expected) in [
+            (9, 0, 0),
+            (10, 0, 1),
+            (11, 0, 2),
+            (12, 1, 1),
+            (13, 0, 1),
+            (13, 0, 1),
+            (14, 0, 2),
+            (15, 0, 3),
+        ] {
+            let frame = Arc::new(Frame {
+                received: started,
+                pts: Some(pts),
+                pixels: vec![pixel; 3],
+                width: 1,
+                height: 1,
+            });
+            run.record(&frame, last.as_deref());
+            assert_eq!(run.count, expected);
+            assert_eq!(run.matched.is_some(), expected == 3);
+            last = Some(frame);
+        }
+    }
     #[test]
     fn png_round_trip_preserves_rgb() {
         let path = std::env::temp_dir().join(format!(

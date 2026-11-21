@@ -55,6 +55,8 @@ window.add(box)
 window.connect('destroy',Gtk.main_quit)
 window.show_all()
 if args.animate:
+    if os.environ.get('WF_ISOLATED_SESSION_TEST')=='1':
+        Gtk.Settings.get_default().set_property('gtk-cursor-blink',False)
     ticks=[0]
     twins=[]
     def tick():

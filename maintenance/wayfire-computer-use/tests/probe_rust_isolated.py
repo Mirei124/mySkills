@@ -1,4 +1,5 @@
 """Run Rust capture against private Wayfire, D-Bus, PipeWire and Portal services."""
+import re
 import argparse
 import json
 import os
@@ -21,6 +22,14 @@ def wait_for(check,processes,timeout=8):
         if check(): return
         time.sleep(.05)
     raise RuntimeError('ISOLATED_SERVICE_READY_TIMEOUT')
+
+def assert_recovery(response, code):
+    assert response['status']=='error' and response['code']==code,response
+    assert response['recovery']==[
+        ['stop'], ['start','--output','<output>'], ['toplevel','list'],
+        ['toplevel','focus','--id','<window-id>'], ['act','--latest'],
+    ],response
+    assert response['recovery_screenshot_action']=={'type':'screenshot'},response
 
 def reliability_case(root,env,processes,target,ipc=None):
     case=env['WF_RELIABILITY_CASE']
@@ -107,10 +116,14 @@ def reliability_case(root,env,processes,target,ipc=None):
                     if cancelled.get('code')!='ACTION_CANCELLED' or cancelled.get('action_executed') is not True:raise RuntimeError('RELIABILITY_PORTAL_ACTION_NOT_CANCELLED: '+repr(cancelled))
                     delivered=json.loads((root/'fixture-state.json').read_text())['text'];time.sleep(.3)
                     if not 0<len(delivered)<400 or json.loads((root/'fixture-state.json').read_text())['text']!=delivered:raise RuntimeError('RELIABILITY_PORTAL_INPUT_CONTINUED')
+                    if case=='pipewire-active':
+                        assert_recovery(cancelled,'ACTION_CANCELLED')
                     report['cancelled']=cancelled
                 if (runtime/'socket').exists():raise RuntimeError('RELIABILITY_PORTAL_SOCKET_REMAINED')
             response=cli(['act'],request(ready,{'type':'screenshot'}))
             if response.get('status')!='error':raise RuntimeError('RELIABILITY_LOSS_NOT_REPORTED: '+repr(response))
+            if case in {'pipewire','pipewire-active'}:
+                assert_recovery(response,'SESSION_UNAVAILABLE')
         before=time.monotonic();stopped=cli(['stop']);elapsed=time.monotonic()-before
         if stopped.get('status')!='stopped':raise RuntimeError('RELIABILITY_LOSS_STOP_FAILED: '+repr(stopped))
         if Path(ready['screenshot_path']).exists():raise RuntimeError('RELIABILITY_LOSS_IMAGE_LEAK')
@@ -188,7 +201,16 @@ def toplevel_case(root,env,processes,cli,ipc,ready,latest):
     confirmed(second)
     stale=cli(['act'],json.dumps({'request_id':'focus-stale','session_id':ready['session_id'],'observation_id':latest['observation_id'],'action':{'type':'click','x':300,'y':213,'button':'left'}}))
     if stale.get('code')!='STALE_OBSERVATION' or stale.get('action_executed') is not False:raise RuntimeError('TOPLEVEL_FOCUS_REUSED_OLD_OBSERVATION')
-    confirmed(first)
+    assert_recovery(stale,'STALE_OBSERVATION')
+    assert not next(v for v in cli(['toplevel','list'])['toplevels'] if v['id']==first['id'])['activated']
+    with subprocess.Popen([str(SKILL/'target/debug/wayfire-computer-use'),'toplevel','wait',
+                           '--title-regex','^'+re.escape(first['title'])+'$','--state','focused','--timeout-secs','5'],
+                          env=env,stdout=subprocess.PIPE,text=True) as waiter:
+        time.sleep(.35)
+        assert waiter.poll() is None,'Focused wait returned while the mapped target was inactive'
+        confirmed(first)
+        matched=json.loads(waiter.communicate(timeout=5)[0])
+        assert matched['toplevel']['activated'] and matched['toplevel']['id']==first['id'],matched
     latest=fresh()
     # Focus queued after text starts must not redirect its remaining characters.
     before=json.loads((root/'fixture-state.json').read_text())['text']
@@ -391,9 +413,19 @@ def inside(root):
                 latest=response
                 return request,response
             stable_flag=root/'fixture-state.stable'
-            stable_flag.touch()
-            act({'type':'wait_stable','frames':3},'stable')
-            stable_flag.unlink()
+            # The animated label changes every 100 ms. Submit the wait while it is still moving.
+            with subprocess.Popen([binary,'act'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True) as pending:
+                pending.stdin.write(json.dumps(envelope({'type':'wait_stable','frames':12},'stable-transition')))
+                pending.stdin.close()
+                time.sleep(.7)
+                assert pending.poll() is None,'Stable wait completed during animation'
+                stable_flag.touch()
+                try:
+                    latest=json.loads(pending.stdout.readline())
+                    assert pending.wait(timeout=10)==0 and latest['status']=='ok',latest
+                    assert latest['request_id']=='stable-transition' and Path(latest['screenshot_path']).is_file()
+                finally:
+                    stable_flag.unlink()
             act({'type':'click','x':300,'y':213,'button':'left'},'session-click')
             # The first keyboard event must preserve case, without a prior
             # shortcut activating the virtual keyboard for this client.
@@ -526,6 +558,7 @@ def inside(root):
             if idle.get('status')!='ready':raise RuntimeError('IDLE_START_FAILED: '+repr(idle))
             wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
             if Path(idle['screenshot_path']).exists():raise RuntimeError('IDLE_CLEANUP_FAILED')
+            assert_recovery(cli(['act','--latest'],json.dumps({'type':'screenshot'})),'SESSION_UNAVAILABLE')
             session_verified=True
         report={'toolkits':toolkit_results,'ui_verified':env.get('WF_UI_TEST')=='1','mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
