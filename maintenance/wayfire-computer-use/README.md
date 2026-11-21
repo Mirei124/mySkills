@@ -30,3 +30,11 @@ The isolated harness starts private services and retains logs/screenshots in its
 - [Archived plan](archive/PLAN.md) and [historical Python/C implementation](archive/legacy/)
 
 Historical paths and temporary evidence locations record their original context; use the commands above for the current layout.
+
+The optional MCP probe needs the Python SDK version declared in the adapter's script metadata. Build the debug Rust executable, expose that SDK to the repository Python environment, then run:
+
+```bash
+./.venv/bin/python maintenance/wayfire-computer-use/tests/probe_rust_isolated.py --multi-output --mcp-test
+```
+
+The probe starts two independent stdio clients on the private desktop. It checks inline PNG bytes, session attachment, observation invalidation, and cleanup.

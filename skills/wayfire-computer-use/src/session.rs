@@ -413,7 +413,16 @@ impl Shared {
             request.get("command").and_then(Value::as_str),
             Some("stop" | "status" | "capabilities" | "release_all")
         ) {
-            ensure!(request.as_object().unwrap().len() == 1, "INVALID_FIELDS");
+            if request["command"] == "stop" && request.get("session_id").is_some() {
+                ensure!(request.as_object().unwrap().len() == 2, "INVALID_FIELDS");
+                ensure!(
+                    request["session_id"].is_string()
+                        && request["session_id"] == self.snapshot.lock().unwrap()["session_id"],
+                    "UNKNOWN_SESSION"
+                );
+            } else {
+                ensure!(request.as_object().unwrap().len() == 1, "INVALID_FIELDS");
+            }
         }
         match request.get("command").and_then(Value::as_str) {
             Some("stop") => {
@@ -546,7 +555,7 @@ impl Shared {
     }
 }
 fn status(engine: &Engine) -> Value {
-    json!({"status":"active","owner_pid":std::process::id(),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
+    json!({"status":"active","owner_pid":std::process::id(),"output":engine.output.as_ref().map(|o|&o.name),"session_id":engine.id,"observation_id":engine.observation,"capabilities":{"actions":["screenshot","wait","wait_stable","move","click","double_click","drag","scroll","keypress","type"],"multi_output_selection":true,"clipboard":true,"clipboard_requirements":["wl-copy","zwlr_data_control_manager_v1"],"runtime":"Rust","unicode":"BMP text with experimental settling delays; non-BMP rejected before input"}})
 }
 async fn client(shared: Arc<Shared>, socket: UnixStream) {
     let (reader, mut writer) = socket.into_split();

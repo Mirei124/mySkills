@@ -21,7 +21,7 @@ Native key input is restricted to BMP code points (U+0000 through U+FFFF, with u
 
 Keys include CTRL, SHIFT, ALT, SUPER, ENTER, TAB, ESC, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, arrows, SPACE, F1-F12 and ASCII alphanumeric keys. CONTROL, ESCAPE, RETURN, ARROWLEFT/RIGHT/UP/DOWN and META have explicit aliases. CMD is unsupported and is never silently translated to CTRL. Shortcut keycodes follow the helper's controlled US keymap. ASCII text holds each modifier state through experimental 50 ms waits before and after key delivery. Unicode uses a temporary keymap with experimental 50 ms client-settling delays, explicitly resets modifiers and waits after restoring the base map; Chinese and a checkmark passed in GTK 3. IME, emoji and other toolkit compatibility remain unverified. Clipboard paste was verified separately in GTK.
 
-The request envelope and session metadata are local extensions, not OpenAI native fields. The skill does not register a computer tool. The optional MCP adapter has not been implemented.
+The request envelope and session metadata are local extensions, not OpenAI native fields. The skill does not register a computer tool. The optional [MCP adapter](mcp.md) returns inline PNGs.
 
 ## Rust implementation
 

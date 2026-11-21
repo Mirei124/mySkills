@@ -5,7 +5,9 @@ description: Operate existing Wayfire desktop applications through a Rust CLI us
 
 # Wayfire computer use
 
-Use `target/release/wayfire-computer-use` relative to this skill directory. Build once with `./build.sh` if the executable is absent. Runtime uses no Python, GStreamer, external C helper, model API or API key. Read [usage](references/usage.md) for system libraries, build instructions and capability limits.
+Use `target/release/wayfire-computer-use` relative to this skill directory. Build once with `./build.sh` if the executable is absent. The CLI uses no Python, GStreamer, external C helper, model API or API key. Read [usage](references/usage.md) for system libraries, build instructions and capability limits.
+
+For an MCP host, use the optional [stdio adapter](references/mcp.md). It returns a PNG in each observation or action result and manages the action envelope. The same output-selection, observation and stop rules apply.
 
 1. Run `doctor`. Inspect outputs, protocol versions, D-Bus service ownership and PipeWire socket access. This command does not create input devices or capture sessions. Do not change permissions or switch backends to evade access restrictions.
 2. Run `start`, optionally with `--output NAME`. A sole output is selected automatically. With multiple outputs, ask which output to use and require `--output NAME`; never guess. The selected output must have scale 1 and normal orientation. Multiple-output binding requires virtual-pointer v2 and unambiguous stream geometry; unsupported or ambiguous configurations fail explicitly.

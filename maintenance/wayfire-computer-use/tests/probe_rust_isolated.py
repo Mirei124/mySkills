@@ -301,6 +301,8 @@ def inside(root):
             reliability=reliability_case(root,env,processes,target_output,ipc if target_output!='HEADLESS-1' else None)
         session_verified=False
         toplevel_verified=False
+        if env.get('WF_MCP_TEST')=='1':
+            subprocess.run([sys.executable,str(MAINTENANCE/'tests/mcp_client_probe.py'),binary,target_output],env=env,check=True,timeout=85)
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
             binary=str(SKILL/'target/debug/wayfire-computer-use')
@@ -470,7 +472,7 @@ def inside(root):
             wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
             if Path(idle['screenshot_path']).exists():raise RuntimeError('IDLE_CLEANUP_FAILED')
             session_verified=True
-        report={'toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
+        report={'mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
         print(json.dumps(report))
         return result.returncode
@@ -507,6 +509,7 @@ def main():
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
     parser.add_argument('--toplevel-test',action='store_true',help='Also exercise IPC window listing, focus and action serialization (requires --multi-output --session-test)')
+    parser.add_argument('--mcp-test',action='store_true',help='Verify inline PNGs and stale observations with the MCP SDK client')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
     args=parser.parse_args()
     if args.inside:return inside(args.inside)
@@ -537,6 +540,7 @@ context.modules = [
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
     if args.portal_wlr_binary:env['WF_TEST_PORTAL_WLR_BINARY']=str(args.portal_wlr_binary.resolve(strict=True))
     if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
+    if args.mcp_test:env['WF_MCP_TEST']='1'
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'
     if args.toplevel_test:env['WF_ISOLATED_TOPLEVEL_TEST']='1'
