@@ -243,9 +243,10 @@ def inside(root):
         wait_for(lambda:bus_has('org.freedesktop.impl.portal.desktop.wlr') and bus_has('org.freedesktop.Notifications'),processes)
         launch('portal',['/usr/lib/xdg-desktop-portal'])
         wait_for(lambda:bus_has('org.freedesktop.portal.Desktop'),processes)
-        if env.get('WF_UI_TEST'):
+        if env.get('WF_UI_TEST') or env.get('WF_TOOLKIT_TEST'):
             env.pop('AT_SPI_BUS_ADDRESS',None)
             env['NO_AT_BRIDGE']='0'
+            env['GSETTINGS_BACKEND']='memory'
             launch('accessibility',['/usr/lib/at-spi-bus-launcher','--launch-immediately'])
             wait_for(lambda:bus_has('org.a11y.Bus'),processes)
             launch('accessibility-registry',['/usr/lib/at-spi2-registryd'])
@@ -339,6 +340,10 @@ def inside(root):
             ambiguous=ui_cli(*query)
             assert ambiguous['code']=='UI_WINDOW_AMBIGUOUS',ambiguous
             assert not ui_cli('stop')['errors']
+        toolkit_results=None
+        if env.get('WF_TOOLKIT_TEST'):
+            from toolkit_probe import run_toolkits
+            toolkit_results=run_toolkits(root,env,binary,target_output,ipc)
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
             binary=str(SKILL/'target/debug/wayfire-computer-use')
@@ -374,6 +379,8 @@ def inside(root):
                 raise RuntimeError('LATEST_WAIT_FAILED: '+repr(latest))
             assert latest['resolved_envelope']['observation_id']==first['observation_id']
             assert latest['resolved_envelope']['request_id']==latest['request_id']
+            from latest_race import verify_latest_race
+            latest=verify_latest_race(binary,env,root,latest)
             def envelope(action,identifier):
                 return {'request_id':identifier,'session_id':first['session_id'],'observation_id':latest['observation_id'],'action':action}
             def act(action,identifier):
@@ -400,7 +407,7 @@ def inside(root):
             if json.loads((root/'fixture-state.json').read_text())['text']!=first_text:raise RuntimeError('RUST_NON_BMP_TYPED_PREFIX')
             if cli(['status'])['observation_id']!=latest['observation_id']:raise RuntimeError('RUST_NON_BMP_CHANGED_OBSERVATION')
             act({'type':'keypress','keys':['CTRL','A']},'session-select')
-            pasted='Test 😀𠀀' * 100
+            pasted='Test 😀𠀀' * 1000
             act({'type':'type','text':pasted,'via_clipboard':True},'session-paste')
             if json.loads((root/'fixture-state.json').read_text())['text']!=pasted:raise RuntimeError('CLIPBOARD_TEXT_MISMATCH')
             act({'type':'keypress','keys':['CTRL','A']},'session-select-paste')
@@ -520,7 +527,7 @@ def inside(root):
             wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
             if Path(idle['screenshot_path']).exists():raise RuntimeError('IDLE_CLEANUP_FAILED')
             session_verified=True
-        report={'ui_verified':env.get('WF_UI_TEST')=='1','mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
+        report={'toolkits':toolkit_results,'ui_verified':env.get('WF_UI_TEST')=='1','mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
         print(json.dumps(report))
         return result.returncode
@@ -557,6 +564,7 @@ def main():
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
     parser.add_argument('--toplevel-test',action='store_true',help='Also exercise IPC window listing, focus and action serialization (requires --multi-output --session-test)')
+    parser.add_argument('--toolkit-test',action='store_true',help='Investigate Qt, Chromium, Electron and Xwayland controls on the private desktop')
     parser.add_argument('--ui-test',action='store_true',help='Locate and click a GTK button through the private accessibility bus')
     parser.add_argument('--mcp-test',action='store_true',help='Verify inline PNGs and stale observations with the MCP SDK client')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
@@ -589,6 +597,8 @@ context.modules = [
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
     if args.portal_wlr_binary:env['WF_TEST_PORTAL_WLR_BINARY']=str(args.portal_wlr_binary.resolve(strict=True))
     if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
+    if args.toolkit_test and not args.multi_output:parser.error('--toolkit-test requires --multi-output')
+    if args.toolkit_test:env['WF_TOOLKIT_TEST']='1'
     if args.ui_test and not args.multi_output:parser.error('--ui-test requires --multi-output')
     if args.ui_test:env['WF_UI_TEST']='1'
     if args.mcp_test:env['WF_MCP_TEST']='1'
@@ -600,6 +610,10 @@ context.modules = [
         env['WF_ISOLATED_TARGET_OUTPUT']='HEADLESS-2';env['WLR_HEADLESS_OUTPUTS']='2'
         config=root/'wayfire.ini'
         config.write_text(config.read_text().replace('plugins =\n','plugins = ipc ipc-rules\n')+'\n[output:HEADLESS-2]\nmode = 1920x1080\nposition = 1920,0\nscale = 1\ntransform = normal\n')
+    if args.toolkit_test:
+        config=root/'wayfire.ini'
+        config.write_text(config.read_text().replace('xwayland = false','xwayland = true').replace('plugins = ipc ipc-rules','plugins = ipc ipc-rules autostart')+
+            '\n[autostart]\nautostart_wf_shell = false\nprobe_display = printenv DISPLAY > '+str(root/'private-display')+'\n')
     command=['dbus-run-session','--config-file',str(root/'bus.conf'),'--',sys.executable,str(Path(__file__).resolve()),'--inside',str(root)]
     process=subprocess.Popen(command,env=env,start_new_session=True)
     try:return process.wait(timeout=180 if args.reliability_case else 100)
