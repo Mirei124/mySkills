@@ -10,6 +10,7 @@ mod portal;
 mod probe;
 mod session;
 mod toplevel;
+mod ui;
 mod worker;
 
 #[derive(Parser)]
@@ -60,6 +61,11 @@ enum Command {
         #[command(subcommand)]
         command: ToplevelCommand,
     },
+    /// Inspect a mapped window through AT-SPI without sending input.
+    Ui {
+        #[command(subcommand)]
+        command: UiCommand,
+    },
     ProbeCapture {
         #[arg(long)]
         output: Option<String>,
@@ -89,6 +95,22 @@ enum ToplevelCommand {
         /// Require the window to still belong to this PID.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
         pid: Option<u32>,
+    },
+}
+#[derive(Subcommand)]
+enum UiCommand {
+    Tree {
+        #[arg(long)]
+        window_id: u64,
+    },
+    /// Find exact accessible names in the specified or focused window.
+    Find {
+        #[arg(long)]
+        role: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        window_id: Option<u64>,
     },
 }
 #[tokio::main]
@@ -153,6 +175,14 @@ async fn main() {
             path,
             auto_select,
         } => probe::capture(output, path, auto_select).await,
+        Command::Ui { command } => match command {
+            UiCommand::Tree { window_id } => ui::inspect(Some(window_id), None).await,
+            UiCommand::Find {
+                role,
+                name,
+                window_id,
+            } => ui::inspect(window_id, Some((role, name))).await,
+        },
         Command::Doctor => diagnostics::doctor().await,
         Command::Toplevel { command } => match command {
             ToplevelCommand::Wait {

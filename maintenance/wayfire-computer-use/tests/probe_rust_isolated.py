@@ -239,6 +239,12 @@ def inside(root):
         wait_for(lambda:bus_has('org.freedesktop.impl.portal.desktop.wlr') and bus_has('org.freedesktop.Notifications'),processes)
         launch('portal',['/usr/lib/xdg-desktop-portal'])
         wait_for(lambda:bus_has('org.freedesktop.portal.Desktop'),processes)
+        if env.get('WF_UI_TEST'):
+            env.pop('AT_SPI_BUS_ADDRESS',None)
+            env['NO_AT_BRIDGE']='0'
+            launch('accessibility',['/usr/lib/at-spi-bus-launcher','--launch-immediately'])
+            wait_for(lambda:bus_has('org.a11y.Bus'),processes)
+            launch('accessibility-registry',['/usr/lib/at-spi2-registryd'])
         launch('fixture',[sys.executable,str(MAINTENANCE/'tests/desktop_fixture.py'),'--state',str(root/'fixture-state.json'),'--animate'])
         if target_output!='HEADLESS-1':
             wait_for(lambda:(root/'fixture-state.json').exists() and bool(list(root.glob('wayfire-*.socket'))),processes)
@@ -303,6 +309,31 @@ def inside(root):
         toplevel_verified=False
         if env.get('WF_MCP_TEST')=='1':
             subprocess.run([sys.executable,str(MAINTENANCE/'tests/mcp_client_probe.py'),binary,target_output],env=env,check=True,timeout=85)
+        if env.get('WF_UI_TEST'):
+            def ui_cli(*args,body=None,environment=env):
+                response=subprocess.run([binary,*args],env=environment,input=json.dumps(body) if body else None,capture_output=True,text=True,timeout=75)
+                return json.loads(response.stdout)
+            ready=ui_cli('start','--output',target_output,'--auto-select-output')
+            assert ready['status']=='ready',ready
+            query=['ui','find','--window-id',str(view['id']),'--role','button','--name','Verify location']
+            missing=ui_cli(*query,environment={**env,'DBUS_SESSION_BUS_ADDRESS':'unix:path='+str(root/'absent')})
+            assert missing['code']=='ATSPI_BUS_UNAVAILABLE',missing
+            found=ui_cli(*query)
+            assert len(found.get('nodes',[]))==1,found
+            center=found['nodes'][0]['center']
+            tree=ui_cli('ui','tree','--window-id',str(view['id']))
+            assert found['nodes'][0] in tree['nodes']
+            frame=ui_cli('act',body={'session_id':ready['session_id'],'observation_id':ready['observation_id'],'request_id':'ui-click','action':{'type':'click','button':'left',**center}})
+            assert frame['status']=='ok',frame
+            assert any(e['type']=='located-button-clicked' for e in json.loads((root/'fixture-state.json').read_text())['events']),found
+            import shutil
+            shutil.copyfile(frame['screenshot_path'],root/'ui-click.png')
+            (root/'ui-find.json').write_text(json.dumps(found))
+            (root/'fixture-state.twin').touch()
+            wait_for(lambda:len([v for v in ipc('window-rules/list-views') if v.get('pid')==state['pid'] and v.get('title')==state['title']])==2,processes)
+            ambiguous=ui_cli(*query)
+            assert ambiguous['code']=='UI_WINDOW_AMBIGUOUS',ambiguous
+            assert not ui_cli('stop')['errors']
         session_frame=None
         if result.returncode==0 and env.get('WF_ISOLATED_SESSION_TEST')=='1':
             binary=str(SKILL/'target/debug/wayfire-computer-use')
@@ -472,7 +503,7 @@ def inside(root):
             wait_for(lambda:not (runtime/'socket').exists(),processes,timeout=8)
             if Path(idle['screenshot_path']).exists():raise RuntimeError('IDLE_CLEANUP_FAILED')
             session_verified=True
-        report={'mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
+        report={'ui_verified':env.get('WF_UI_TEST')=='1','mcp_verified':env.get('WF_MCP_TEST')=='1','toplevel_verified':toplevel_verified,'reliability':reliability,'session_verified':session_verified,'session_frame':str(session_frame) if session_frame else None,'input_verified':input_verified,'after_input_capture':after.stdout if after else None,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'directory':str(root),'live_desktop_connected':False}
         (root/'result.json').write_text(json.dumps(report,indent=2))
         print(json.dumps(report))
         return result.returncode
@@ -509,6 +540,7 @@ def main():
     parser.add_argument('--multi-output',action='store_true',help='Create two outputs and test explicit selection of the second')
     parser.add_argument('--session-test',action='store_true',help='Exercise the Rust session CLI, deduplication and cancellation')
     parser.add_argument('--toplevel-test',action='store_true',help='Also exercise IPC window listing, focus and action serialization (requires --multi-output --session-test)')
+    parser.add_argument('--ui-test',action='store_true',help='Locate and click a GTK button through the private accessibility bus')
     parser.add_argument('--mcp-test',action='store_true',help='Verify inline PNGs and stale observations with the MCP SDK client')
     parser.add_argument('--input-test',action='store_true',help='Also exercise the Rust input worker against the isolated GTK fixture')
     args=parser.parse_args()
@@ -540,6 +572,8 @@ context.modules = [
     env.update(XDG_DESKTOP_PORTAL_DIR=str(portals),XDG_RUNTIME_DIR=str(root),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(root/'data'),XDG_CACHE_HOME=str(root/'cache'),XDG_CURRENT_DESKTOP='Wayfire',XDG_SESSION_TYPE='wayland',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='pixman',WLR_LIBINPUT_NO_DEVICES='1')
     if args.portal_wlr_binary:env['WF_TEST_PORTAL_WLR_BINARY']=str(args.portal_wlr_binary.resolve(strict=True))
     if args.reliability_case:env['WF_RELIABILITY_CASE']=args.reliability_case
+    if args.ui_test and not args.multi_output:parser.error('--ui-test requires --multi-output')
+    if args.ui_test:env['WF_UI_TEST']='1'
     if args.mcp_test:env['WF_MCP_TEST']='1'
     if args.input_test:env['WF_ISOLATED_INPUT_TEST']='1'
     if args.session_test:env['WF_ISOLATED_SESSION_TEST']='1'

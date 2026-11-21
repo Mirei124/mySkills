@@ -26,10 +26,10 @@ pub struct FocusTarget {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Geometry {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,6 +41,7 @@ pub struct Toplevel {
     pub output_name: Option<String>,
     pub output_id: Option<u64>,
     pub geometry: Option<Geometry>,
+    pub base_geometry: Option<Geometry>,
     pub activated: bool,
     pub minimized: bool,
     pub fullscreen: bool,
@@ -72,6 +73,11 @@ fn parse_view(value: &Value) -> Result<Option<Toplevel>> {
             .filter(|name| !name.is_empty() && *name != "null")
             .map(str::to_owned),
         output_id: value["output-id"].as_u64(),
+        base_geometry: value
+            .get("base-geometry")
+            .filter(|v| !v.is_null())
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()?,
         geometry: value
             .get("geometry")
             .filter(|v| !v.is_null())
@@ -171,9 +177,13 @@ pub async fn wait(app_id: &str, focused: bool, seconds: u64) -> Result<Value> {
     .context("TOPLEVEL_WAIT_TIMEOUT")?
 }
 
+pub async fn mapped_views() -> Result<Vec<Toplevel>> {
+    Ipc::connect(None).await?.views().await
+}
+
 pub async fn list() -> Result<Value> {
     tokio::time::timeout(TIMEOUT, async {
-        let views = Ipc::connect(None).await?.views().await?;
+        let views = mapped_views().await?;
         Ok(json!({"status":"ok","backend":"wayfire-ipc","sends_input":false,"toplevels":views}))
     })
     .await

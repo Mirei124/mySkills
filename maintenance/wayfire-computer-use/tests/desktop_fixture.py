@@ -44,12 +44,24 @@ for name in ('button-press-event','button-release-event','motion-notify-event','
 entry.connect('changed',changed)
 entry.connect('notify::has-focus',save_state)
 window.connect('notify::is-active',save_state)
+if os.environ.get('WF_UI_TEST'):
+    button=Gtk.Button(label='Verify location')
+    def clicked(*unused):
+        events.append({'type':'located-button-clicked'})
+        save_state()
+    button.connect('clicked',clicked)
+    box.pack_start(button,False,False,0)
 window.add(box)
 window.connect('destroy',Gtk.main_quit)
 window.show_all()
 if args.animate:
     ticks=[0]
+    twins=[]
     def tick():
+        if os.environ.get('WF_UI_TEST') and args.state.with_suffix('.twin').exists() and not twins:
+            twin=Gtk.Window(title=window.get_title())
+            twins.append(twin)
+            twin.show_all()
         if args.state.with_suffix('.stable').exists():
             window.queue_draw()
             return True

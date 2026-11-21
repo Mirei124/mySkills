@@ -6,6 +6,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+atspi = { version = "=0.29.0", default-features = false, features = ["proxies", "tokio"] }
 anyhow = "1.0.102"
 ashpd = { version = "=0.11.1", default-features = false, features = ["tokio"] }
 clap = { version = "4.6.1", features = ["derive"] }
